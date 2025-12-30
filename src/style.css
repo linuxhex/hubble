@@ -1,0 +1,66 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  line-height: 1.5;
+  font-weight: 400;
+  color: #000000;
+  background-color: #ffffff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #f0f2f5;
+}
+
+body {
+  min-width: 1280px;
+}
+
+/* Element Plus 样式覆盖 */
+.el-menu {
+  border-right: none !important;
+}
+
+.el-menu-item {
+  height: 50px !important;
+  line-height: 50px !important;
+}
+
+.el-menu-item.is-active {
+  background-color: #1890ff !important;
+}
+
+.el-menu-item:hover {
+  background-color: rgba(24, 144, 255, 0.8) !important;
+  color: #ffffff !important;
+}
+
+.el-table {
+  --el-table-border-color: #f0f0f0;
+  --el-table-header-bg-color: #fafafa;
+}
+
+.el-table th.el-table__cell {
+  background-color: #fafafa;
+  font-weight: 600;
+  color: #333;
+}
+
+.el-table .el-table__cell {
+  padding: 8px 0;
+}
