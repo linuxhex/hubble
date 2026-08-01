@@ -1,0 +1,92 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: cloud-eyes-api
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/yunkc_agent?zeroDateTimeBehavior=convertToNull&useOldAliasMetadataBehavior=true}
+    username: ${DB_USERNAME:db_user}
+    password: ${DB_PASSWORD:db_password}
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath:mapper/*.xml
+
+# 阿里云SLS配置
+aliyun:
+  sls:
+    access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:your-access-key-id}
+    access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:your-access-key-secret}
+    endpoint: ${ALIYUN_SLS_ENDPOINT:cn-hangzhou.log.aliyuncs.com}
+    project: ${ALIYUN_SLS_PROJECT:your-sls-project}
+    query:
+      max-results: 100
+      timeout-seconds: 30
+      global-timeout-seconds: 15
+      retry-times: 3
+    thread-pool:
+      core-size: 4
+      max-size: 8
+      queue-capacity: 100
+
+# 父系统集成配置
+parent-system:
+  api-url: ${PARENT_SYSTEM_API_URL:http://parent-system.example.com/api}
+  jwt:
+    public-key: ${JWT_PUBLIC_KEY:CloudEyesJwtSecretKeyForHMACSHA256AlgorithmMustBeAtLeast32Bytes}
+    expiration: ${JWT_EXPIRATION:3600000}
+
+# 钉钉配置
+dingtalk:
+  app-key: ${DINGTALK_APP_KEY:your-dingtalk-app-key}
+  app-secret: ${DINGTALK_APP_SECRET:your-dingtalk-app-secret}
+  redirect-url: ${DINGTALK_REDIRECT_URL:http://localhost:8778/query}
+  access-token-url: https://api.dingtalk.com/v1.0/oauth2/userAccessToken
+  user-info-url: https://api.dingtalk.com/v1.0/contact/users/me
+
+# Milvus配置
+milvus:
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  username: ${MILVUS_USERNAME:root}
+  password: ${MILVUS_PASSWORD:milvus_password}
+  database: ${MILVUS_DATABASE:devops}
+  vector-dimension: ${MILVUS_VECTOR_DIMENSION:1024}
+
+# 阿里云DashScope配置
+dashscope:
+  apiKey: ${DASHSCOPE_API_KEY:your-dashscope-api-key}
+  embeddingModel: text-embedding-v3
+
+# SpringDoc OpenAPI配置
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+logging:
+  level:
+    com.ykc.cloudeyes: DEBUG
+    org.springframework.web: INFO
+  file:
+    name: logs/cloud-eyes.log
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled, Monitor, Connection, Grid, TrendCharts, Timer, List, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Grid, TrendCharts, Timer, List, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Plus, Edit, Delete, VideoPlay, VideoPause, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const isCollapse = ref(false)
@@ -13,6 +13,21 @@ const toggleCollapse = () => {
 const activeIndex = computed(() => {
   if (route.path === '/monitor') return '/monitor'
   if (route.path === '/abnormal') return '/abnormal'
+  if (route.path === '/gateway') return '/gateway'
+  if (route.path === '/gateway/trace') return '/gateway/trace'
+  if (route.path === '/gateway/logs') return '/gateway/logs'
+  if (route.path === '/trace-query') return '/trace-query'
+  if (route.path === '/user-behavior-trace') return '/user-behavior-trace'
+  if (route.path === '/keyword-log-query') return '/keyword-log-query'
+  if (route.path === '/trace-management') return '/trace-management'
+  if (route.path === '/sls-keyword-management') return '/sls-keyword-management'
+  if (route.path === '/alert-config') return '/alert-config'
+  if (route.path === '/alert-overview') return '/alert-overview'
+  if (route.path === '/alert-dashboard') return '/alert-dashboard'
+  if (route.path === '/unauthorized') return '/unauthorized'
+  if (route.path === '/widget-dashboard') return '/widget-dashboard'
+  if (route.path === '/trend-dashboard') return '/trend-dashboard'
+  if (route.path === '/second-chart') return '/second-chart'
   return '1'
 })
 </script>
@@ -71,19 +86,69 @@ const activeIndex = computed(() => {
             <span>日志搜索</span>
           </el-menu-item>
         </el-sub-menu>
-        <el-menu-item index="4">
+        <el-sub-menu index="4">
+          <template #title>
+            <el-icon><Connection /></el-icon>
+            <span>链路查询</span>
+          </template>
+          <el-menu-item index="/trace-query">
+            <el-icon><Connection /></el-icon>
+            <span>业务链路查询</span>
+          </el-menu-item>
+          <el-menu-item index="/user-behavior-trace">
+            <el-icon><Timer /></el-icon>
+            <span>用户行为轨迹</span>
+          </el-menu-item>
+          <el-menu-item index="/keyword-log-query">
+            <el-icon><Document /></el-icon>
+            <span>关键字日志查询</span>
+          </el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="5">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>配置管理</span>
+          </template>
+          <el-menu-item index="/trace-management">
+            <el-icon><Connection /></el-icon>
+            <span>链路配置</span>
+          </el-menu-item>
+          <el-menu-item index="/sls-keyword-management">
+            <el-icon><Document /></el-icon>
+            <span>SLS模版管理</span>
+          </el-menu-item>
+          <el-menu-item index="/alert-config">
+            <el-icon><Bell /></el-icon>
+            <span>日志监控配置</span>
+          </el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="6">
+          <template #title>
+            <el-icon><Bell /></el-icon>
+            <span>日志监控</span>
+          </template>
+          <el-menu-item index="/alert-overview">
+            <el-icon><DataLine /></el-icon>
+            <span>日志监控大盘</span>
+          </el-menu-item>
+          <el-menu-item index="/alert-dashboard">
+            <el-icon><Document /></el-icon>
+            <span>日志监控详情</span>
+          </el-menu-item>
+        </el-sub-menu>
+        <el-menu-item index="/widget-dashboard">
           <el-icon><Grid /></el-icon>
           <span>微控件大盘</span>
         </el-menu-item>
-        <el-menu-item index="5">
+        <el-menu-item index="/trend-dashboard">
           <el-icon><TrendCharts /></el-icon>
           <span>趋势大盘</span>
         </el-menu-item>
-        <el-menu-item index="6">
+        <el-menu-item index="/second-chart">
           <el-icon><Timer /></el-icon>
-          <span>为秒图</span>
+          <span>秒级监控图</span>
         </el-menu-item>
-        <el-menu-item index="7">
+        <el-menu-item index="8">
           <el-icon><List /></el-icon>
           <span>自定义</span>
         </el-menu-item>

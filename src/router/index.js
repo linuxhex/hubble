@@ -4,6 +4,18 @@ import AbnormalDashboard from '../components/AbnormalDashboard.vue'
 import GatewayDashboard from '../components/GatewayDashboard.vue'
 import GatewayTrace from '../components/GatewayTrace.vue'
 import GatewayLogs from '../components/GatewayLogs.vue'
+import UserBehaviorTraceQuery from '../components/UserBehaviorTraceQuery.vue'
+import TraceQuery from '../components/TraceQuery.vue'
+import KeywordLogQuery from '../components/KeywordLogQuery.vue'
+import TraceManagement from '../components/TraceManagement.vue'
+import SlsKeywordManagement from '../components/SlsKeywordManagement.vue'
+import AlertConfigManagement from '../components/AlertConfigManagement.vue'
+import AlertOverview from '../components/AlertOverview.vue'
+import AlertDashboard from '../components/AlertDashboard.vue'
+import Unauthorized from '../components/Unauthorized.vue'
+import WidgetDashboard from '../components/WidgetDashboard.vue'
+import TrendDashboard from '../components/TrendDashboard.vue'
+import SecondChart from '../components/SecondChart.vue'
 
 const routes = [
   {
@@ -34,6 +46,66 @@ const routes = [
     path: '/gateway/logs',
     name: 'GatewayLogs',
     component: GatewayLogs
+  },
+  {
+    path: '/trace-query',
+    name: 'TraceQuery',
+    component: TraceQuery
+  },
+  {
+    path: '/user-behavior-trace',
+    name: 'UserBehaviorTraceQuery',
+    component: UserBehaviorTraceQuery
+  },
+  {
+    path: '/keyword-log-query',
+    name: 'KeywordLogQuery',
+    component: KeywordLogQuery
+  },
+  {
+    path: '/trace-management',
+    name: 'TraceManagement',
+    component: TraceManagement
+  },
+  {
+    path: '/sls-keyword-management',
+    name: 'SlsKeywordManagement',
+    component: SlsKeywordManagement
+  },
+  {
+    path: '/alert-config',
+    name: 'AlertConfigManagement',
+    component: AlertConfigManagement
+  },
+  {
+    path: '/alert-overview',
+    name: 'AlertOverview',
+    component: AlertOverview
+  },
+  {
+    path: '/alert-dashboard',
+    name: 'AlertDashboard',
+    component: AlertDashboard
+  },
+  {
+    path: '/unauthorized',
+    name: 'Unauthorized',
+    component: Unauthorized
+  },
+  {
+    path: '/widget-dashboard',
+    name: 'WidgetDashboard',
+    component: WidgetDashboard
+  },
+  {
+    path: '/trend-dashboard',
+    name: 'TrendDashboard',
+    component: TrendDashboard
+  },
+  {
+    path: '/second-chart',
+    name: 'SecondChart',
+    component: SecondChart
   }
 ]
 
