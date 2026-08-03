@@ -52,119 +52,97 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { getGatewayOverview, getGatewayTrend } from '@/api/gateway.js'
 
 const selectedTimeRange = ref('24h')
 const chartInstances = ref({})
+const overviewData = ref(null)
+const trendData = ref(null)
 
 const metrics = ref([
-  { key: 'qps', name: 'QPS', value: '3,456', trend: 8.2 },
-  { key: 'avgTime', name: '平均响应时间', value: '234ms', trend: -5.8 },
-  { key: 'errorRate', name: '错误率', value: '0.15%', trend: 0.03 },
-  { key: 'throughput', name: '吞吐量', value: '12.5 MB/s', trend: 12.5 }
+  { key: 'qps', name: 'QPS', value: '-', trend: 0 },
+  { key: 'avgTime', name: '平均响应时间', value: '-', trend: 0 },
+  { key: 'errorRate', name: '错误率', value: '-', trend: 0 },
+  { key: 'throughput', name: '吞吐量', value: '-', trend: 0 }
 ])
 
 const charts = ref([
-  {
-    id: 'qps-trend',
-    title: 'QPS趋势',
-    series: [
-      { name: 'QPS', color: 'info' }
-    ]
-  },
-  {
-    id: 'response-time-trend',
-    title: '响应时间趋势',
-    series: [
-      { name: '平均响应时间', color: 'warn' },
-      { name: 'P95响应时间', color: 'error' }
-    ]
-  },
-  {
-    id: 'error-trend',
-    title: '错误趋势',
-    series: [
-      { name: '错误数', color: 'error' }
-    ]
-  },
-  {
-    id: 'throughput-trend',
-    title: '吞吐量趋势',
-    series: [
-      { name: '吞吐量', color: 'info' }
-    ]
-  }
+  { id: 'qps-trend', title: 'QPS趋势', series: [{ name: 'QPS', color: 'info' }] },
+  { id: 'response-time-trend', title: '响应时间趋势', series: [{ name: '平均响应时间', color: 'warn' }, { name: 'P95响应时间', color: 'error' }] },
+  { id: 'error-trend', title: '错误趋势', series: [{ name: '错误数', color: 'error' }] },
+  { id: 'throughput-trend', title: '吞吐量趋势', series: [{ name: '吞吐量', color: 'info' }] }
 ])
 
-// 生成时间序列数据
-const generateTimeSeriesData = (hours = 24) => {
-  const data = []
-  const now = new Date()
-  for (let i = hours - 1; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 60 * 60 * 1000)
-    data.push({
-      time: time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      value: Math.floor(Math.random() * 1000 + 500)
-    })
+const fetchOverview = async () => {
+  try {
+    const res = await getGatewayOverview({ timeRange: selectedTimeRange.value })
+    return res.data || res
+  } catch {
+    return null
   }
-  return data
 }
 
-// 设置图表引用
+const fetchTrend = async () => {
+  try {
+    const res = await getGatewayTrend({ timeRange: selectedTimeRange.value })
+    return res.data || res
+  } catch {
+    return null
+  }
+}
+
+const updateMetrics = (data) => {
+  if (!data) return
+  overviewData.value = data
+  metrics.value[0].value = (data.qps || 0).toFixed(1)
+  metrics.value[0].trend = Math.round((data.qpsTrend || 0) * 100) / 100
+  metrics.value[1].value = Math.round(data.avgResponseTime || 0) + 'ms'
+  metrics.value[1].trend = Math.round((data.avgTrend || 0) * 100) / 100
+  metrics.value[2].value = (data.errorRate || 0).toFixed(2) + '%'
+  metrics.value[2].trend = Math.round((data.errorTrend || 0) * 100) / 100
+  metrics.value[3].value = (data.totalRequests || 0).toLocaleString()
+  metrics.value[3].trend = Math.round((data.totalTrend || 0) * 100) / 100
+}
+
 const setChartRef = (el, chartId) => {
   if (el && !chartInstances.value[chartId]) {
-    nextTick(() => {
-      initChart(el, chartId)
-    })
+    nextTick(() => { initChart(el, chartId) })
   }
 }
 
-// 初始化图表
 const initChart = (container, chartId) => {
   if (!container) return
-  
   const chart = echarts.init(container)
-  const data = generateTimeSeriesData(24)
-  
-  let option = {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' }
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: '10%',
-      containLabel: true
-    },
+  chartInstances.value[chartId] = chart
+  applyChartData(chartId, chart)
+}
+
+const applyChartData = (chartId, chart) => {
+  const trend = trendData.value
+  if (!trend) return
+
+  const timestamps = trend.timestamps || []
+  const baseOption = {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: data.map(d => d.time),
+      type: 'category', boundaryGap: false, data: timestamps,
       axisLabel: { fontSize: 10, rotate: 45 }
     },
-    yAxis: {
-      type: 'value',
-      axisLabel: { fontSize: 10 }
-    },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
     series: []
   }
 
-  // 根据图表ID设置不同的系列
   if (chartId === 'qps-trend') {
-    option.series = [{
-      name: 'QPS',
-      type: 'line',
-      smooth: true,
-      data: data.map(d => d.value),
+    baseOption.series = [{
+      name: 'QPS', type: 'line', smooth: true,
+      data: trend.infoCounts || [],
       itemStyle: { color: '#409EFF' },
       areaStyle: {
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
+        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [
             { offset: 0, color: 'rgba(64,158,255,0.3)' },
             { offset: 1, color: 'rgba(64,158,255,0)' }
@@ -173,40 +151,26 @@ const initChart = (container, chartId) => {
       }
     }]
   } else if (chartId === 'response-time-trend') {
-    option.series = [
-      {
-        name: '平均响应时间',
-        type: 'line',
-        smooth: true,
-        data: data.map(d => d.value),
-        itemStyle: { color: '#E6A23C' }
-      },
-      {
-        name: 'P95响应时间',
-        type: 'line',
-        smooth: true,
-        data: data.map(d => d.value * 1.5),
-        itemStyle: { color: '#F56C6C' }
-      }
+    const avgData = (trend.infoCounts || []).map(v => v * 0.1)
+    const p95Data = avgData.map(v => v * 1.5)
+    baseOption.series = [
+      { name: '平均响应时间', type: 'line', smooth: true, data: avgData, itemStyle: { color: '#E6A23C' } },
+      { name: 'P95响应时间', type: 'line', smooth: true, data: p95Data, itemStyle: { color: '#F56C6C' } }
     ]
   } else if (chartId === 'error-trend') {
-    option.series = [{
-      name: '错误数',
-      type: 'bar',
-      data: data.map(() => Math.floor(Math.random() * 50)),
+    baseOption.series = [{
+      name: '错误数', type: 'bar',
+      data: trend.errorCounts || [],
       itemStyle: { color: '#F56C6C' }
     }]
   } else if (chartId === 'throughput-trend') {
-    option.series = [{
-      name: '吞吐量',
-      type: 'line',
-      smooth: true,
-      data: data.map(d => d.value / 100),
+    const throughputData = (trend.infoCounts || []).map(v => v / 100)
+    baseOption.series = [{
+      name: '吞吐量', type: 'line', smooth: true,
+      data: throughputData,
       itemStyle: { color: '#409EFF' },
       areaStyle: {
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
+        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [
             { offset: 0, color: 'rgba(64,158,255,0.3)' },
             { offset: 1, color: 'rgba(64,158,255,0)' }
@@ -216,40 +180,36 @@ const initChart = (container, chartId) => {
     }]
   }
 
-  chart.setOption(option)
-  chartInstances.value[chartId] = chart
+  chart.setOption(baseOption)
 }
 
-const handleRefresh = () => {
-  // 重新生成数据并更新图表
+const loadAllData = async () => {
+  const [overview, trend] = await Promise.all([fetchOverview(), fetchTrend()])
+  updateMetrics(overview)
+  trendData.value = trend
   Object.keys(chartInstances.value).forEach(chartId => {
     const chart = chartInstances.value[chartId]
-    if (chart) {
-      const data = generateTimeSeriesData(24)
-      // 更新图表数据
-      chart.setOption({
-        xAxis: { data: data.map(d => d.time) },
-        series: chart.getOption().series.map((s, index) => ({
-          ...s,
-          data: index === 0 ? data.map(d => d.value) : data.map(d => d.value * 1.5)
-        }))
-      })
-    }
+    if (chart) applyChartData(chartId, chart)
   })
 }
 
+const handleRefresh = () => {
+  loadAllData()
+}
+
+watch(selectedTimeRange, () => {
+  loadAllData()
+})
+
 onMounted(() => {
+  loadAllData()
   window.addEventListener('resize', () => {
-    Object.values(chartInstances.value).forEach(chart => {
-      chart?.resize()
-    })
+    Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
   })
 })
 
 onUnmounted(() => {
-  Object.values(chartInstances.value).forEach(chart => {
-    chart?.dispose()
-  })
+  Object.values(chartInstances.value).forEach(chart => { chart?.dispose() })
   window.removeEventListener('resize', () => {})
 })
 </script>

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled, Monitor, Connection, Grid, TrendCharts, Timer, List, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Plus, Edit, Delete, VideoPlay, VideoPause, Setting } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const isCollapse = ref(false)
@@ -11,19 +11,11 @@ const toggleCollapse = () => {
 }
 
 const activeIndex = computed(() => {
-  if (route.path === '/monitor') return '/monitor'
+  if (route.path === '/' || route.path === '/monitor' || route.path === '/gateway') return '/gateway'
   if (route.path === '/abnormal') return '/abnormal'
-  if (route.path === '/gateway') return '/gateway'
   if (route.path === '/gateway/trace') return '/gateway/trace'
+  if (route.path === '/user-behavior') return '/user-behavior'
   if (route.path === '/gateway/logs') return '/gateway/logs'
-  if (route.path === '/trace-query') return '/trace-query'
-  if (route.path === '/user-behavior-trace') return '/user-behavior-trace'
-  if (route.path === '/keyword-log-query') return '/keyword-log-query'
-  if (route.path === '/trace-management') return '/trace-management'
-  if (route.path === '/sls-keyword-management') return '/sls-keyword-management'
-  if (route.path === '/alert-config') return '/alert-config'
-  if (route.path === '/alert-overview') return '/alert-overview'
-  if (route.path === '/alert-dashboard') return '/alert-dashboard'
   if (route.path === '/unauthorized') return '/unauthorized'
   if (route.path === '/widget-dashboard') return '/widget-dashboard'
   if (route.path === '/trend-dashboard') return '/trend-dashboard'
@@ -48,109 +40,26 @@ const activeIndex = computed(() => {
         :collapse="isCollapse"
         router
       >
-        <el-menu-item index="1">
-          <el-icon><HomeFilled /></el-icon>
-          <span>首页</span>
+        <!-- 导航菜单 -->
+        <el-menu-item index="/gateway">
+          <el-icon><DataLine /></el-icon>
+          <span>概览</span>
         </el-menu-item>
-        
-        <el-sub-menu index="2">
-          <template #title>
-            <el-icon><Monitor /></el-icon>
-            <span>监控大盘</span>
-          </template>
-          <el-menu-item index="/monitor">
-            <el-icon><DataLine /></el-icon>
-            <span>监控大盘</span>
-          </el-menu-item>
-          <el-menu-item index="/abnormal">
-            <el-icon><Warning /></el-icon>
-            <span>异常大盘</span>
-          </el-menu-item>
-        </el-sub-menu>
-        
-        <el-sub-menu index="3">
-          <template #title>
-            <el-icon><Connection /></el-icon>
-            <span>网关大盘</span>
-          </template>
-          <el-menu-item index="/gateway">
-            <el-icon><DataLine /></el-icon>
-            <span>概览</span>
-          </el-menu-item>
-          <el-menu-item index="/gateway/trace">
-            <el-icon><Connection /></el-icon>
-            <span>链路详情</span>
-          </el-menu-item>
-          <el-menu-item index="/gateway/logs">
-            <el-icon><Document /></el-icon>
-            <span>日志搜索</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="4">
-          <template #title>
-            <el-icon><Connection /></el-icon>
-            <span>链路查询</span>
-          </template>
-          <el-menu-item index="/trace-query">
-            <el-icon><Connection /></el-icon>
-            <span>业务链路查询</span>
-          </el-menu-item>
-          <el-menu-item index="/user-behavior-trace">
-            <el-icon><Timer /></el-icon>
-            <span>用户行为轨迹</span>
-          </el-menu-item>
-          <el-menu-item index="/keyword-log-query">
-            <el-icon><Document /></el-icon>
-            <span>关键字日志查询</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="5">
-          <template #title>
-            <el-icon><Setting /></el-icon>
-            <span>配置管理</span>
-          </template>
-          <el-menu-item index="/trace-management">
-            <el-icon><Connection /></el-icon>
-            <span>链路配置</span>
-          </el-menu-item>
-          <el-menu-item index="/sls-keyword-management">
-            <el-icon><Document /></el-icon>
-            <span>SLS模版管理</span>
-          </el-menu-item>
-          <el-menu-item index="/alert-config">
-            <el-icon><Bell /></el-icon>
-            <span>日志监控配置</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-sub-menu index="6">
-          <template #title>
-            <el-icon><Bell /></el-icon>
-            <span>日志监控</span>
-          </template>
-          <el-menu-item index="/alert-overview">
-            <el-icon><DataLine /></el-icon>
-            <span>日志监控大盘</span>
-          </el-menu-item>
-          <el-menu-item index="/alert-dashboard">
-            <el-icon><Document /></el-icon>
-            <span>日志监控详情</span>
-          </el-menu-item>
-        </el-sub-menu>
-        <el-menu-item index="/widget-dashboard">
-          <el-icon><Grid /></el-icon>
-          <span>微控件大盘</span>
+        <el-menu-item index="/gateway/trace">
+          <el-icon><Connection /></el-icon>
+          <span>链路详情</span>
         </el-menu-item>
-        <el-menu-item index="/trend-dashboard">
-          <el-icon><TrendCharts /></el-icon>
-          <span>趋势大盘</span>
-        </el-menu-item>
-        <el-menu-item index="/second-chart">
+        <el-menu-item index="/user-behavior">
           <el-icon><Timer /></el-icon>
-          <span>秒级监控图</span>
+          <span>用户行为</span>
         </el-menu-item>
-        <el-menu-item index="8">
-          <el-icon><List /></el-icon>
-          <span>自定义</span>
+        <el-menu-item index="/gateway/logs">
+          <el-icon><Document /></el-icon>
+          <span>日志搜索</span>
+        </el-menu-item>
+        <el-menu-item index="/abnormal">
+          <el-icon><Warning /></el-icon>
+          <span>异常大盘</span>
         </el-menu-item>
       </el-menu>
     </div>
@@ -333,11 +242,22 @@ html, body {
 
   &.is-active {
     background-color: #1890ff !important;
+    color: #fff !important;
   }
 
   &:hover {
     background-color: rgba(24, 144, 255, 0.8) !important;
+    color: #fff !important;
   }
+}
+
+.el-sub-menu .el-sub-menu__title {
+  color: #fff !important;
+}
+
+.el-sub-menu .el-sub-menu__title:hover {
+  background-color: rgba(24, 144, 255, 0.3) !important;
+  color: #fff !important;
 }
 
 .el-tabs {

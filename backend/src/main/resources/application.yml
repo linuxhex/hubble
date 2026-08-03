@@ -8,10 +8,13 @@ spring:
     name: cloud-eyes-api
 
   datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DB_URL:jdbc:mysql://localhost:3306/yunkc_agent?zeroDateTimeBehavior=convertToNull&useOldAliasMetadataBehavior=true}
-    username: ${DB_USERNAME:db_user}
-    password: ${DB_PASSWORD:db_password}
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:hubble;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
@@ -31,10 +34,10 @@ mybatis-plus:
 # 阿里云SLS配置
 aliyun:
   sls:
-    access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:your-access-key-id}
-    access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:your-access-key-secret}
+    access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID}
+    access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET}
     endpoint: ${ALIYUN_SLS_ENDPOINT:cn-hangzhou.log.aliyuncs.com}
-    project: ${ALIYUN_SLS_PROJECT:your-sls-project}
+    project: ${ALIYUN_SLS_PROJECT}
     query:
       max-results: 100
       timeout-seconds: 30
@@ -44,6 +47,10 @@ aliyun:
       core-size: 4
       max-size: 8
       queue-capacity: 100
+  arms:
+    access-key-id: ${ARMS_AK_ID:${ALIYUN_SLS_ACCESS_KEY_ID:}}
+    access-key-secret: ${ARMS_AK_SECRET:${ALIYUN_SLS_ACCESS_KEY_SECRET:}}
+    region: ${ARMS_REGION:cn-hangzhou}
 
 # 父系统集成配置
 parent-system:

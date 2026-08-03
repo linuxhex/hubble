@@ -34,9 +34,20 @@
         <div v-if="expandedItems[index]" class="content-details">
           <el-descriptions :column="2" border size="small">
             <el-descriptions-item label="追踪ID">
-              <span v-if="item.trace" class="trace-link" @click.stop="handleTraceClick(item.trace)">
-                <el-icon class="trace-icon"><Link /></el-icon>
-                {{ item.trace }}
+              <span v-if="item.trace" class="trace-link-wrapper">
+                <span class="trace-link" @click.stop="handleTraceClick(item.trace)">
+                  <el-icon class="trace-icon"><Link /></el-icon>
+                  {{ item.trace }}
+                </span>
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  @click.stop="handleOpenSls(item.trace)"
+                  class="sls-link"
+                >
+                  SLS
+                </el-button>
               </span>
               <span v-else>-</span>
             </el-descriptions-item>
@@ -64,8 +75,11 @@
 
 <script setup>
 import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowDown, ArrowUp, Link } from '@element-plus/icons-vue'
 import { generateSlsLink } from '@/utils/sls'
+
+const router = useRouter()
 
 const props = defineProps({
   items: {
@@ -84,8 +98,14 @@ const toggleExpand = (index) => {
   expandedItems.value[index] = !expandedItems.value[index]
 }
 
-// 处理追踪ID点击，跳转到SLS
+// 处理追踪ID点击，跳转到内部链路详情页
 const handleTraceClick = (traceId) => {
+  if (!traceId) return
+  router.push({ path: '/gateway/trace', query: { traceId } })
+}
+
+// 在 SLS 控制台查看
+const handleOpenSls = (traceId) => {
   if (!traceId) return
   
   // 构建查询字符串：在message中搜索包含该trace ID的日志
@@ -211,6 +231,12 @@ watch(() => props.items, () => {
   border-top: 1px solid #e4e7ed;
 }
 
+.content-details .trace-link-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .content-details .trace-link {
   display: inline-flex;
   align-items: center;
@@ -220,14 +246,24 @@ watch(() => props.items, () => {
   font-family: 'Courier New', monospace;
   cursor: pointer;
   text-decoration: none;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .content-details .trace-link .trace-icon {
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .content-details .trace-link:hover {
   text-decoration: underline;
+}
+
+.content-details .sls-link {
+  flex-shrink: 0;
+  font-size: 12px;
 }
 
 .content-details .response-data {

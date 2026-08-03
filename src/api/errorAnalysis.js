@@ -1,6 +1,18 @@
 import request from '@/utils/request.js'
 
 /**
+ * 直接查询错误（不依赖告警配置）
+ */
+export function getDirectErrors(params) {
+  return request.get('/error-analysis/query/direct-errors', {
+    params: {
+      timeRange: params.timeRange || '30m',
+      limit: params.limit || 10
+    }
+  })
+}
+
+/**
  * 查询错误类型排行榜
  */
 export function getTopErrorTypes(params) {

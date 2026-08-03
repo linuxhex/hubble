@@ -33,6 +33,14 @@
               link
               type="primary"
               size="small"
+              @click="handleViewTrace(row.trace)"
+            >
+              链路
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
               @click="handleOpenSls(row.trace)"
               class="sls-link"
             >
@@ -98,6 +106,14 @@
               link
               type="primary"
               size="small"
+              @click="handleViewTrace(detailLog.trace)"
+            >
+              查看链路
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
               @click="handleOpenSls(detailLog.trace)"
             >
               <el-icon><Link /></el-icon>
@@ -125,8 +141,11 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { Link } from '@element-plus/icons-vue'
 import { openSlsConsole } from '@/utils/sls'
+
+const router = useRouter()
 
 const props = defineProps({
   logs: {
@@ -273,6 +292,11 @@ const handleOpenSls = (traceId) => {
     endTime: props.endTime,
     logstore: props.logstore
   })
+}
+
+// 跳转到链路详情页
+const handleViewTrace = (traceId) => {
+  router.push({ path: '/gateway/trace', query: { traceId } })
 }
 </script>
 

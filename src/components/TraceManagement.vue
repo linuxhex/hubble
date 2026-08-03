@@ -521,8 +521,8 @@ const loadList = async () => {
       keyword: searchForm.value.keyword || undefined,
       category: searchForm.value.category
     })
-    traceList.value = res.data.list
-    total.value = res.data.total
+    traceList.value = res?.data?.list || []
+    total.value = res?.data?.total || 0
   } catch (error) {
     showError(error.message || '加载失败')
   } finally {

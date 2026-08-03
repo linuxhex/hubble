@@ -112,8 +112,8 @@ import { ref, onMounted, h } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Edit, Delete, DataLine, Monitor, Connection, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { getGatewayOverview, getGatewayTrend } from '@/api/gateway.js'
 
-// 控件类型定义
 const widgetTypes = [
   { label: '数值卡片', value: 'number-card' },
   { label: '折线图', value: 'line-chart' },
@@ -122,91 +122,94 @@ const widgetTypes = [
   { label: '表格', value: 'table' }
 ]
 
-// 生成图表数据
-function generateChartData() {
-  const data = []
-  for (let i = 0; i < 24; i++) {
-    data.push({
-      time: `${String(i).padStart(2, '0')}:00`,
-      value: Math.floor(Math.random() * 1000 + 500)
-    })
-  }
-  return data
-}
-
 const showAddWidgetDialog = ref(false)
-const newWidget = ref({
-  type: '',
-  title: '',
-  colSpan: 1,
-  rowSpan: 1
-})
-
+const newWidget = ref({ type: '', title: '', colSpan: 1, rowSpan: 1 })
 const chartInstances = ref({})
 
 const widgets = ref([
-  {
-    id: 1,
-    type: 'number-card',
-    title: '总请求数',
-    icon: 'DataLine',
-    colSpan: 1,
-    rowSpan: 1,
-    data: { value: '1,234,567', trend: '+12.5%' },
-    component: 'NumberCard'
-  },
-  {
-    id: 2,
-    type: 'number-card',
-    title: '平均响应时间',
-    icon: 'Timer',
-    colSpan: 1,
-    rowSpan: 1,
-    data: { value: '234ms', trend: '-5.8%' },
-    component: 'NumberCard'
-  },
-  {
-    id: 3,
-    type: 'line-chart',
-    title: '请求趋势',
-    icon: 'Monitor',
-    colSpan: 2,
-    rowSpan: 2,
-    data: generateChartData(),
-    component: 'LineChart',
-    chartId: 'chart-3'
-  },
-  {
-    id: 4,
-    type: 'number-card',
-    title: '错误率',
-    icon: 'DataLine',
-    colSpan: 1,
-    rowSpan: 1,
-    data: { value: '0.15%', trend: '+0.03%' },
-    component: 'NumberCard'
-  }
+  { id: 1, type: 'number-card', title: '总请求数', icon: 'DataLine', colSpan: 1, rowSpan: 1, data: { value: '-', trend: '-' }, component: 'NumberCard' },
+  { id: 2, type: 'number-card', title: '平均响应时间', icon: 'Timer', colSpan: 1, rowSpan: 1, data: { value: '-', trend: '-' }, component: 'NumberCard' },
+  { id: 3, type: 'line-chart', title: '请求趋势', icon: 'Monitor', colSpan: 2, rowSpan: 2, data: [], component: 'LineChart', chartId: 'chart-3' },
+  { id: 4, type: 'number-card', title: '错误率', icon: 'DataLine', colSpan: 1, rowSpan: 1, data: { value: '-', trend: '-' }, component: 'NumberCard' }
 ])
 
-// 初始化图表控件
+const formatTrend = (val) => {
+  if (val == null) return '-'
+  const sign = val >= 0 ? '+' : ''
+  return sign + val.toFixed(1) + '%'
+}
+
+const loadDashboardData = async () => {
+  try {
+    const [overviewRes, trendRes] = await Promise.all([
+      getGatewayOverview(),
+      getGatewayTrend()
+    ])
+    const overview = overviewRes.data || overviewRes
+    const trend = trendRes.data || trendRes
+
+    const numberCards = widgets.value.filter(w => w.component === 'NumberCard')
+    numberCards.forEach(card => {
+      if (card.title === '总请求数') {
+        card.data = {
+          value: (overview.totalRequests || 0).toLocaleString(),
+          trend: formatTrend(overview.totalTrend)
+        }
+      } else if (card.title === '平均响应时间') {
+        card.data = {
+          value: Math.round(overview.avgResponseTime || 0) + 'ms',
+          trend: formatTrend(overview.avgTrend)
+        }
+      } else if (card.title === '错误率') {
+        card.data = {
+          value: (overview.errorRate || 0).toFixed(2) + '%',
+          trend: formatTrend(overview.errorTrend)
+        }
+      } else if (card.title === 'QPS') {
+        card.data = {
+          value: (overview.qps || 0).toFixed(1),
+          trend: formatTrend(overview.qpsTrend)
+        }
+      }
+    })
+
+    const lineCharts = widgets.value.filter(w => w.component === 'LineChart')
+    lineCharts.forEach(lc => {
+      lc.data = (trend.timestamps || []).map((t, i) => ({
+        time: t,
+        value: (trend.infoCounts || [])[i] || 0
+      }))
+      const chartInst = chartInstances.value[lc.id]
+      if (chartInst) {
+        chartInst.setOption({
+          xAxis: { data: lc.data.map(d => d.time) },
+          series: [{ data: lc.data.map(d => d.value) }]
+        })
+      }
+    })
+  } catch {
+    // API 调用失败时保持默认显示
+  }
+}
+
 const initWidgetChart = (el, widget) => {
   if (!el || !widget || widget.component !== 'LineChart') return
   if (chartInstances.value[widget.id]) return
-  
+
   setTimeout(() => {
     const chart = echarts.init(el)
     const option = {
       grid: { left: '10%', right: '10%', top: '10%', bottom: '10%' },
       xAxis: {
         type: 'category',
-        data: widget.data.map(d => d.time),
+        data: (widget.data || []).map(d => d.time),
         axisLabel: { fontSize: 10 }
       },
       yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
       series: [{
         type: 'line',
         smooth: true,
-        data: widget.data.map(d => d.value),
+        data: (widget.data || []).map(d => d.value),
         areaStyle: { color: 'rgba(64,158,255,0.1)' },
         itemStyle: { color: '#409EFF' }
       }]
@@ -230,9 +233,9 @@ const handleAddWidget = () => {
     icon: 'DataLine',
     colSpan: newWidget.value.colSpan || 1,
     rowSpan: newWidget.value.rowSpan || 1,
-    data: newWidget.value.type === 'number-card' 
-      ? { value: '0', trend: '0%' }
-      : generateChartData(),
+    data: newWidget.value.type === 'number-card'
+      ? { value: '-', trend: '-' }
+      : [],
     component: newWidget.value.type === 'number-card' ? 'NumberCard' : 'LineChart',
     chartId: newWidget.value.type === 'line-chart' ? `chart-${widgetId}` : undefined
   }
@@ -248,7 +251,6 @@ const handleEditWidget = (widget) => {
 }
 
 const handleRemoveWidget = (id) => {
-  // 销毁图表实例
   if (chartInstances.value[id]) {
     chartInstances.value[id].dispose()
     delete chartInstances.value[id]
@@ -258,32 +260,20 @@ const handleRemoveWidget = (id) => {
 }
 
 const handleResetLayout = () => {
-  // 销毁所有图表实例
-  Object.values(chartInstances.value).forEach(chart => {
-    chart?.dispose()
-  })
+  Object.values(chartInstances.value).forEach(chart => { chart?.dispose() })
   chartInstances.value = {}
-  
+
   widgets.value = [
-    {
-      id: 1,
-      type: 'number-card',
-      title: '总请求数',
-      icon: 'DataLine',
-      colSpan: 1,
-      rowSpan: 1,
-      data: { value: '1,234,567', trend: '+12.5%' },
-      component: 'NumberCard'
-    }
+    { id: 1, type: 'number-card', title: '总请求数', icon: 'DataLine', colSpan: 1, rowSpan: 1, data: { value: '-', trend: '-' }, component: 'NumberCard' }
   ]
+  loadDashboardData()
   ElMessage.success('布局已重置')
 }
 
 onMounted(() => {
+  loadDashboardData()
   window.addEventListener('resize', () => {
-    Object.values(chartInstances.value).forEach(chart => {
-      chart?.resize()
-    })
+    Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
   })
 })
 </script>

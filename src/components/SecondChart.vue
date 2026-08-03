@@ -36,8 +36,8 @@
       <div class="chart-header">
         <h3>{{ getMetricName(selectedMetric) }} - 秒级监控</h3>
         <div class="chart-info">
-          <span>数据更新间隔: 1秒</span>
-          <span>显示时长: 最近60秒</span>
+          <span>数据更新间隔: 5秒</span>
+          <span>显示时长: 最近60个数据点</span>
         </div>
       </div>
       <div ref="chartRef" class="chart-container"></div>
@@ -72,6 +72,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Refresh, VideoPlay, VideoPause } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { getGatewayOverview } from '@/api/gateway.js'
 
 const selectedMetric = ref('qps')
 const isPaused = ref(false)
@@ -93,87 +94,75 @@ const chartData = ref({
   values: []
 })
 
-// 生成初始60秒数据
-const generateInitialData = () => {
-  const now = Date.now()
-  const times = []
-  const values = []
-  
-  for (let i = 59; i >= 0; i--) {
-    const time = new Date(now - i * 1000)
-    times.push(time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-    values.push(Math.floor(Math.random() * 1000 + 500))
+const fetchOverview = async () => {
+  try {
+    const res = await getGatewayOverview()
+    return res.data || res
+  } catch {
+    return null
   }
-  
-  chartData.value = { times, values }
+}
+
+const updateMetricsFromOverview = (data) => {
+  if (!data) return
+  realtimeMetrics.value[0].value = (data.qps || 0).toFixed(1)
+  realtimeMetrics.value[1].value = Math.round(data.avgResponseTime || 0).toString()
+  realtimeMetrics.value[2].value = (data.errorRate || 0).toFixed(2)
+  realtimeMetrics.value[3].value = ((data.totalRequests || 0) / 1024 / 1024).toFixed(2)
+}
+
+const addDataPointFromOverview = (data) => {
+  if (!data || isPaused.value) return
+
+  const now = new Date()
+  const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const metricValue = getMetricValue(data)
+
+  chartData.value.times.push(time)
+  chartData.value.values.push(metricValue)
+
+  if (chartData.value.times.length > 60) {
+    chartData.value.times.shift()
+    chartData.value.values.shift()
+  }
+
+  updateChart()
   updateTableData()
 }
 
-// 更新表格数据
+const getMetricValue = (data) => {
+  if (!data) return 0
+  switch (selectedMetric.value) {
+    case 'qps': return data.qps || 0
+    case 'responseTime': return data.avgResponseTime || 0
+    case 'errorRate': return data.errorRate || 0
+    case 'throughput': return ((data.totalRequests || 0) / 1024 / 1024)
+    default: return data.qps || 0
+  }
+}
+
 const updateTableData = () => {
   const data = []
   for (let i = 0; i < chartData.value.times.length; i++) {
     data.push({
       time: chartData.value.times[i],
-      qps: chartData.value.values[i],
-      responseTime: Math.floor(chartData.value.values[i] * 0.1),
-      errorRate: (Math.random() * 0.5).toFixed(2),
-      throughput: (chartData.value.values[i] / 100).toFixed(2)
+      qps: chartData.value.values[i]?.toFixed?.(1) ?? chartData.value.values[i],
+      responseTime: realtimeMetrics.value[1].value,
+      errorRate: realtimeMetrics.value[2].value,
+      throughput: realtimeMetrics.value[3].value
     })
   }
   tableData.value = data.reverse()
 }
 
-// 添加新数据点
-const addDataPoint = () => {
-  if (isPaused.value) return
-  
-  const now = new Date()
-  const time = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const value = Math.floor(Math.random() * 1000 + 500)
-  
-  chartData.value.times.push(time)
-  chartData.value.values.push(value)
-  
-  // 保持最多60个数据点
-  if (chartData.value.times.length > 60) {
-    chartData.value.times.shift()
-    chartData.value.values.shift()
-  }
-  
-  updateChart()
-  updateMetrics()
-  updateTableData()
-}
-
-// 更新图表
 const updateChart = () => {
   if (!chart) return
-  
   chart.setOption({
-    xAxis: {
-      data: chartData.value.times
-    },
-    series: [{
-      data: chartData.value.values
-    }]
+    xAxis: { data: chartData.value.times },
+    series: [{ data: chartData.value.values }]
   })
 }
 
-// 更新实时指标
-const updateMetrics = () => {
-  if (chartData.value.values.length === 0) return
-  
-  const latestValue = chartData.value.values[chartData.value.values.length - 1]
-  const avgValue = chartData.value.values.reduce((a, b) => a + b, 0) / chartData.value.values.length
-  
-  realtimeMetrics.value[0].value = latestValue.toLocaleString()
-  realtimeMetrics.value[1].value = Math.floor(avgValue * 0.1).toLocaleString()
-  realtimeMetrics.value[2].value = (Math.random() * 0.5).toFixed(2)
-  realtimeMetrics.value[3].value = (avgValue / 100).toFixed(2)
-}
-
-// 获取指标名称
 const getMetricName = (metric) => {
   const names = {
     qps: 'QPS',
@@ -184,61 +173,36 @@ const getMetricName = (metric) => {
   return names[metric] || metric
 }
 
-// 初始化图表
 const initChart = () => {
   if (!chartRef.value) return
-  
-  generateInitialData()
-  
+
   chart = echarts.init(chartRef.value)
-  
+
   const option = {
     tooltip: {
       trigger: 'axis',
       axisPointer: {
         type: 'cross',
-        label: {
-          backgroundColor: '#6a7985'
-        }
+        label: { backgroundColor: '#6a7985' }
       }
     },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: '10%',
-      containLabel: true
-    },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: false,
       data: chartData.value.times,
-      axisLabel: {
-        fontSize: 10,
-        rotate: 45
-      }
+      axisLabel: { fontSize: 10, rotate: 45 }
     },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        fontSize: 10
-      }
-    },
+    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
     series: [{
       name: getMetricName(selectedMetric.value),
       type: 'line',
       smooth: true,
       data: chartData.value.values,
-      itemStyle: {
-        color: '#409EFF'
-      },
+      itemStyle: { color: '#409EFF' },
       areaStyle: {
         color: {
-          type: 'linear',
-          x: 0,
-          y: 0,
-          x2: 0,
-          y2: 1,
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
           colorStops: [
             { offset: 0, color: 'rgba(64,158,255,0.3)' },
             { offset: 1, color: 'rgba(64,158,255,0)' }
@@ -248,42 +212,44 @@ const initChart = () => {
       animation: false
     }]
   }
-  
+
   chart.setOption(option)
-  
-  // 每秒更新数据
-  updateTimer = setInterval(() => {
-    addDataPoint()
-  }, 1000)
 }
 
-const handleRefresh = () => {
-  generateInitialData()
+const pollData = async () => {
+  if (isPaused.value) return
+  const data = await fetchOverview()
+  if (data) {
+    updateMetricsFromOverview(data)
+    addDataPointFromOverview(data)
+  }
+}
+
+const handleRefresh = async () => {
+  chartData.value = { times: [], values: [] }
   updateChart()
-  updateMetrics()
+  await pollData()
 }
 
 watch(selectedMetric, () => {
+  chartData.value = { times: [], values: [] }
   if (chart) {
     chart.setOption({
-      series: [{
-        name: getMetricName(selectedMetric.value)
-      }]
+      xAxis: { data: [] },
+      series: [{ name: getMetricName(selectedMetric.value), data: [] }]
     })
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   initChart()
-  window.addEventListener('resize', () => {
-    chart?.resize()
-  })
+  await pollData()
+  updateTimer = setInterval(pollData, 5000)
+  window.addEventListener('resize', () => { chart?.resize() })
 })
 
 onUnmounted(() => {
-  if (updateTimer) {
-    clearInterval(updateTimer)
-  }
+  if (updateTimer) clearInterval(updateTimer)
   chart?.dispose()
   window.removeEventListener('resize', () => {})
 })

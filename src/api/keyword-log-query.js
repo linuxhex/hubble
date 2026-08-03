@@ -1,8 +1,13 @@
 import request from '@/utils/request'
 
 /**
- * 查询关键字日志
+ * 查询网关日志
  */
-export function queryKeywordLogs(data) {
-  return request.post('/traces/query/keyword', data)
+export function queryGatewayLogs(data) {
+  return request.post('/gateway/logs/query', data)
 }
+
+/**
+ * @deprecated 使用 queryGatewayLogs 替代
+ */
+export const queryKeywordLogs = queryGatewayLogs

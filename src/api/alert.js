@@ -64,3 +64,21 @@ export function getAlertStatistics(configId, timeRange) {
     params: timeRange ? { timeRange } : undefined
   })
 }
+
+/**
+ * 按服务维度查看健康状态
+ */
+export function getServiceHealth(timeRange) {
+  return request.get('/alert-data/service-health', {
+    params: timeRange ? { timeRange } : undefined
+  })
+}
+
+/**
+ * 分钟级健康时间线
+ */
+export function getMinuteTimeline(timeRange) {
+  return request.get('/alert-data/minute-timeline', {
+    params: timeRange ? { timeRange } : undefined
+  })
+}

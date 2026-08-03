@@ -4,11 +4,7 @@
     <div class="search-area">
       <el-form :model="searchForm" inline class="search-form">
         <el-form-item label="应用名称" class="no-margin">
-          <el-input v-model="searchForm.appName" placeholder="cargo-ltl-app" size="small" style="width: 160px">
-            <template #append>
-              <el-button>更多</el-button>
-            </template>
-          </el-input>
+          <el-input v-model="searchForm.appName" placeholder="cargo-ltl-app" size="small" style="width: 160px" />
         </el-form-item>
         <el-form-item label="请求URL" class="no-margin">
           <el-input v-model="searchForm.url" placeholder="URL: example.ymm-xxx-app/xxx" size="small" style="width: 300px" />
@@ -23,12 +19,12 @@
           <el-input v-model="searchForm.userId" placeholder="请输入用户ID" size="small" style="width: 120px" />
         </el-form-item>
         <el-form-item label="链路ID" class="no-margin">
-          <el-input v-model="searchForm.traceId" placeholder="请输入链路ID" size="small" style="width: 120px" />
+          <el-input v-model="searchForm.traceId" placeholder="请输入链路ID" size="small" style="width: 220px" />
         </el-form-item>
         <el-form-item class="no-margin operation-buttons">
-          <el-button type="primary" size="small">查询</el-button>
-          <el-button type="primary" size="small">查全网</el-button>
-          <el-button size="small" circle>
+          <el-button type="primary" size="small" @click="handleQuery">查询</el-button>
+          <el-button type="primary" size="small" @click="handleQueryAll">查全网</el-button>
+          <el-button size="small" circle @click="handleRefresh">
             <el-icon><Refresh /></el-icon>
           </el-button>
           <el-tooltip content="日志分布" placement="top">
@@ -68,33 +64,41 @@
     <!-- 日志列表 -->
     <div class="log-list">
       <div class="list-header">
-        <span>共搜索41条数据</span>
+        <span>共搜索{{ totalCount }}条数据</span>
       </div>
-      <el-table :data="logs" style="width: 100%" size="small" border>
-        <el-table-column prop="appName" label="项目名" width="120" />
-        <el-table-column prop="serverIp" label="服务器IP" width="120" />
+      <el-table :data="logs" style="width: 100%" size="small" border class="compact-table" v-loading="loading">
+        <el-table-column prop="appName" label="项目名" width="160" show-overflow-tooltip />
+        <el-table-column prop="serverIp" label="服务器IP" width="120" show-overflow-tooltip />
         <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip>
           <template #default="scope">
             <el-button 
               type="primary" 
               link 
               @click="handleUrlClick(scope.row)"
-            >{{ scope.row.url }}</el-button>
+            >{{ scope.row.url || '--' }}</el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="userId" label="用户ID" width="180" show-overflow-tooltip />
+        <el-table-column prop="userId" label="用户ID" width="120" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.userId || '--' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="duration" label="耗时(ms)" width="100" sortable>
           <template #default="scope">
-            <span>{{ scope.row.duration.toFixed(2) }}</span>
+            <span>{{ typeof scope.row.duration === 'number' && scope.row.duration > 0 ? scope.row.duration.toFixed(2) : '--' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="timestamp" label="发生时间" width="180" />
         <el-table-column prop="statusCode" label="状态码" width="80">
           <template #default="scope">
-            <span :class="{ 'success-status': scope.row.statusCode === 200 }">{{ scope.row.statusCode }}</span>
+            <span :class="{ 'success-status': scope.row.statusCode === 200, 'error-status': scope.row.statusCode >= 400 }">{{ scope.row.statusCode }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="message" label="调用源" width="150" />
+        <el-table-column label="调用源" width="180" show-overflow-tooltip>
+          <template #default="scope">
+            {{ extractSource(scope.row.message) }}
+          </template>
+        </el-table-column>
         <el-table-column fixed="right" label="操作" width="120">
           <template #default="scope">
             <div class="operation-cell">
@@ -114,76 +118,6 @@
         </el-table-column>
       </el-table>
     </div>
-
-    <!-- 详情弹窗 -->
-    <el-dialog
-      v-model="detailVisible"
-      title="链路详情"
-      width="900px"
-      destroy-on-close
-    >
-      <div class="detail-content">
-        <div v-for="item in detailData" :key="item.id" class="trace-item">
-          <div class="trace-header" @click="toggleExpand(item)">
-            <span class="expand-icon">{{ item.expanded ? '-' : '+' }}</span>
-            <span class="trace-type" :class="item.type">{{ item.type }}</span>
-            <span class="trace-name">
-              <template v-if="item.type === 'HTTP'">
-                <el-button 
-                  type="primary" 
-                  link 
-                  @click.stop="showHttpDetail(item)"
-                >{{ item.name }}</el-button>
-              </template>
-              <template v-else>{{ item.name }}</template>
-            </span>
-            <span class="trace-duration">{{ item.duration }}ms</span>
-          </div>
-          <div v-if="item.detail" class="trace-detail" v-show="item.expanded">
-            <pre>{{ item.detail }}</pre>
-          </div>
-          <div v-if="item.children && item.expanded" class="trace-children" style="margin-left: 20px">
-            <div v-for="child in item.children" :key="child.id" class="trace-item">
-              <div class="trace-header" @click="toggleExpand(child)">
-                <span class="expand-icon">{{ child.expanded ? '-' : '+' }}</span>
-                <span class="trace-type" :class="child.type">{{ child.type }}</span>
-                <span class="trace-name">{{ child.name }}</span>
-                <span class="trace-duration">{{ child.duration }}ms</span>
-              </div>
-              <div v-if="child.detail" class="trace-detail" v-show="child.expanded">
-                <pre>{{ child.detail }}</pre>
-              </div>
-              <div v-if="child.children && child.expanded" class="trace-children" style="margin-left: 20px">
-                <div v-for="subChild in child.children" :key="subChild.id" class="trace-item">
-                  <div class="trace-header" @click="toggleExpand(subChild)">
-                    <span class="expand-icon">{{ subChild.expanded ? '-' : '+' }}</span>
-                    <span class="trace-type" :class="subChild.type">{{ subChild.type }}</span>
-                    <span class="trace-name">{{ subChild.name }}</span>
-                    <span class="trace-duration">{{ subChild.duration }}ms</span>
-                  </div>
-                  <div v-if="subChild.detail" class="trace-detail" v-show="subChild.expanded">
-                    <pre>{{ subChild.detail }}</pre>
-                  </div>
-                  <div v-if="subChild.children && subChild.expanded" class="trace-children" style="margin-left: 20px">
-                    <div v-for="grandChild in subChild.children" :key="grandChild.id" class="trace-item">
-                      <div class="trace-header" @click="toggleExpand(grandChild)">
-                        <span class="expand-icon">{{ grandChild.expanded ? '-' : '+' }}</span>
-                        <span class="trace-type" :class="grandChild.type">{{ grandChild.type }}</span>
-                        <span class="trace-name">{{ grandChild.name }}</span>
-                        <span class="trace-duration">{{ grandChild.duration }}ms</span>
-                      </div>
-                      <div v-if="grandChild.detail" class="trace-detail" v-show="grandChild.expanded">
-                        <pre>{{ grandChild.detail }}</pre>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </el-dialog>
 
     <!-- HTTP详情弹窗 -->
     <el-dialog
@@ -319,22 +253,23 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import { Refresh, Histogram, PieChart, Upload, Download, Document, ArrowDown } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import * as echarts from 'echarts'
+import { queryGatewayLogs } from '@/api/keyword-log-query.js'
 
 const router = useRouter()
+const route = useRoute()
 
-// 搜索表单
 const searchForm = reactive({
   appName: '',
   url: '',
   statusCode: '',
   phone: '',
   userId: '',
-  traceId: ''
+  traceId: '',
+  keyword: ''
 })
 
-// 处理链路点击
 const handleTraceClick = (row) => {
   router.push({
     path: '/gateway/trace',
@@ -346,44 +281,101 @@ const handleTraceClick = (row) => {
   })
 }
 
-// 日志数据
-const logs = ref([
-  {
-    appName: 'cargo-ltl-app',
-    serverIp: '172.29.32.183',
-    url: 'POST /cargo-ltl-app/ltlline/detainment/endPage',
-    userId: '96500606549780783B',
-    duration: 20.64,
-    timestamp: '2022-01-21 15:52:06.590',
-    statusCode: 200,
-    message: '安卓｜小程序',
-    traceId: '96500606549780783B_20220121155206'
-  },
-  {
-    appName: 'cargo-ltl-app',
-    serverIp: '172.29.32.183',
-    url: 'POST /cargo-ltl-app/ltlline/detainment/endPage',
-    userId: '96500606549780783B',
-    duration: 17.37,
-    timestamp: '2022-01-21 15:38:02.320',
-    statusCode: 200,
-    message: 'IOS',
-    traceId: '96500606549780783B_20220121153802'
-  },
-  {
-    appName: 'cargo-ltl-app',
-    serverIp: '172.29.32.183',
-    url: 'POST /cargo-ltl-app/v3/cargo/publish/complete',
-    userId: '96500606549737168B',
-    duration: 2285.02,
-    timestamp: '2022-01-21 15:37:49.843',
-    statusCode: 200,
-    message: '小程序'
-  }
-  // ... 更多数据
-])
+const logs = ref([])
+const totalCount = ref(0)
+const loading = ref(false)
 
-// 分布图相关
+const fetchLogs = async () => {
+  loading.value = true
+  try {
+    const params = {
+      page: 1,
+      pageSize: 50
+    }
+    if (searchForm.keyword) {
+      // 如果同时有 appName 和 keyword，组合成完整的 SLS 查询
+      if (searchForm.appName) {
+        params.keyword = `__tag__:_container_name_: ${searchForm.appName} and ${searchForm.keyword}`
+      } else {
+        params.keyword = searchForm.keyword
+      }
+    } else {
+      if (searchForm.appName) params.appName = searchForm.appName
+      if (searchForm.url) params.url = searchForm.url
+      if (searchForm.statusCode) params.statusCode = searchForm.statusCode
+      if (searchForm.phone) params.phone = searchForm.phone
+      if (searchForm.userId) params.userId = searchForm.userId
+      if (searchForm.traceId) params.traceId = searchForm.traceId
+    }
+
+    const res = await queryGatewayLogs(params)
+    const data = res?.data || res
+    logs.value = data?.list || data?.records || data || []
+    totalCount.value = data?.total || logs.value.length
+  } catch (e) {
+    console.error('查询日志失败:', e)
+    logs.value = []
+    totalCount.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleQuery = () => {
+  fetchLogs()
+}
+
+const handleQueryAll = () => {
+  searchForm.appName = ''
+  searchForm.url = ''
+  searchForm.statusCode = ''
+  searchForm.phone = ''
+  searchForm.userId = ''
+  searchForm.traceId = ''
+  fetchLogs()
+}
+
+const handleRefresh = () => {
+  fetchLogs()
+}
+
+const extractSource = (message) => {
+  if (!message) return '--'
+  // 匹配 Java 类名: com.xxx.YyyClass 取最后一段
+  const classMatch = message.match(/([\w.]*[A-Z]\w+)\./)
+  if (classMatch) {
+    const full = classMatch[1]
+    const parts = full.split('.')
+    return parts[parts.length - 1]
+  }
+  // 匹配 Feign 调用: XxxService#method
+  const feignMatch = message.match(/(\w+Service)#(\w+)/)
+  if (feignMatch) return `${feignMatch[1]}#${feignMatch[2]}`
+  // 匹配容器名/服务名
+  const serviceMatch = message.match(/\[([a-zA-Z][\w-]*)\]/)
+  if (serviceMatch) return serviceMatch[1]
+  return message.length > 50 ? message.substring(0, 50) + '...' : message
+}
+
+onMounted(() => {
+  // 读取路由参数，预填充搜索表单
+  if (route.query.appName) {
+    searchForm.appName = route.query.appName
+  }
+  if (route.query.keyword) {
+    // 从异常大盘跳转时，使用keyword作为搜索条件
+    searchForm.keyword = route.query.keyword
+  }
+  if (route.query.level === 'ERROR') {
+    // 如果指定了ERROR级别，可以在搜索时添加level过滤
+    searchForm.statusCode = '' // 暂时不处理level，后续可以扩展
+  }
+  // 从异常大盘跳转时，自动触发搜索
+  if (route.query.appName || route.query.keyword) {
+    fetchLogs()
+  }
+})
+
 const logDistributionVisible = ref(false)
 const statusDistributionVisible = ref(false)
 const logChartRef = ref(null)
@@ -391,115 +383,71 @@ const statusChartRef = ref(null)
 let logChart = null
 let statusChart = null
 
-// 显示日志分布
 const showLogDistribution = () => {
   logDistributionVisible.value = true
   setTimeout(() => {
+    if (!logChartRef.value) return
     if (!logChart) {
       logChart = echarts.init(logChartRef.value)
     }
-    
+
+    const hourBuckets = {}
+    logs.value.forEach(log => {
+      const ts = log.timestamp || ''
+      const hour = ts.length >= 13 ? ts.substring(0, 13) + ':00' : '未知'
+      hourBuckets[hour] = (hourBuckets[hour] || 0) + 1
+    })
+
+    const sortedHours = Object.keys(hourBuckets).sort()
     const option = {
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: {
-          type: 'shadow'
-        }
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true
-      },
-      xAxis: {
-        type: 'category',
-        data: ['00:00', '02:00', '04:00', '06:00', '08:00', '10:00', '12:00', 
-               '14:00', '16:00', '18:00', '20:00', '22:00']
-      },
-      yAxis: {
-        type: 'value'
-      },
-      series: [
-        {
-          name: '请求数',
-          type: 'bar',
-          data: [120, 80, 60, 40, 180, 220, 280, 300, 260, 220, 180, 140],
-          itemStyle: {
-            color: '#409EFF'
-          }
-        }
-      ]
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+      xAxis: { type: 'category', data: sortedHours },
+      yAxis: { type: 'value' },
+      series: [{ name: '请求数', type: 'bar', data: sortedHours.map(h => hourBuckets[h]), itemStyle: { color: '#409EFF' } }]
     }
-    
     logChart.setOption(option)
   })
 }
 
-// 显示状态码分布
 const showStatusDistribution = () => {
   statusDistributionVisible.value = true
   setTimeout(() => {
+    if (!statusChartRef.value) return
     if (!statusChart) {
       statusChart = echarts.init(statusChartRef.value)
     }
-    
+
+    const statusBuckets = {}
+    logs.value.forEach(log => {
+      const code = String(log.statusCode || '未知')
+      statusBuckets[code] = (statusBuckets[code] || 0) + 1
+    })
+
+    const colorMap = { '200': '#67C23A', '404': '#E6A23C', '500': '#F56C6C', '403': '#909399' }
     const option = {
-      tooltip: {
-        trigger: 'item',
-        formatter: '{b}: {c} ({d}%)'
-      },
-      legend: {
-        orient: 'vertical',
-        left: 'left'
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: '70%',
-          data: [
-            { value: 850, name: '200', itemStyle: { color: '#67C23A' } },
-            { value: 50, name: '404', itemStyle: { color: '#E6A23C' } },
-            { value: 30, name: '500', itemStyle: { color: '#F56C6C' } },
-            { value: 20, name: '403', itemStyle: { color: '#909399' } }
-          ],
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowOffsetX: 0,
-              shadowColor: 'rgba(0, 0, 0, 0.5)'
-            }
-          }
-        }
-      ]
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      legend: { orient: 'vertical', left: 'left' },
+      series: [{
+        type: 'pie', radius: '70%',
+        data: Object.entries(statusBuckets).map(([name, value]) => ({
+          value, name, itemStyle: { color: colorMap[name] || '#909399' }
+        })),
+        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+      }]
     }
-    
     statusChart.setOption(option)
   })
 }
 
-// 监听弹窗关闭，销毁图表实例
 watch([logDistributionVisible, statusDistributionVisible], ([newLogVisible, newStatusVisible], [oldLogVisible, oldStatusVisible]) => {
-  if (!newLogVisible && oldLogVisible) {
-    logChart?.dispose()
-    logChart = null
-  }
-  if (!newStatusVisible && oldStatusVisible) {
-    statusChart?.dispose()
-    statusChart = null
-  }
+  if (!newLogVisible && oldLogVisible) { logChart?.dispose(); logChart = null }
+  if (!newStatusVisible && oldStatusVisible) { statusChart?.dispose(); statusChart = null }
 })
 
-// 详情弹窗相关
-const detailVisible = ref(false)
-const detailData = ref([])
-
-// 处理详情点击
 const handleDetailClick = (row) => {
   showFullDetail.value = true
   httpDetailVisible.value = true
-  
-  // 设置基本信息
   httpDetail.method = row.method || 'POST'
   httpDetail.path = row.url
   httpDetail.source = row.message
@@ -507,69 +455,33 @@ const handleDetailClick = (row) => {
   httpDetail.status = row.statusCode
   httpDetail.duration = row.duration
 
-  // 设置请求参数
   httpDetail.requestBody = JSON.stringify({
     userId: row.userId,
-    pageSize: 10,
-    pageNum: 1,
-    queryTime: row.timestamp
+    traceId: row.traceId,
+    appName: row.appName,
+    serverIp: row.serverIp
   }, null, 2)
 
-  // 设置返回结果
   httpDetail.responseBody = JSON.stringify({
-    code: row.statusCode,
-    message: "success",
-    data: {
-      total: 42,
-      list: [
-        {
-          id: "123456",
-          status: "PROCESSING",
-          createTime: row.timestamp
-        }
-      ]
-    }
+    statusCode: row.statusCode,
+    duration: row.duration,
+    message: row.message
   }, null, 2)
 
-  // 设置请求头
   httpDetail.requestHeaders = JSON.stringify({
     "Content-Type": "application/json",
-    "X-Request-ID": row.traceId,
-    "Authorization": "Bearer xxxxxxxx",
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive"
+    "X-Trace-ID": row.traceId || ''
   }, null, 2)
 
-  // 设置响应头
   httpDetail.responseHeaders = JSON.stringify({
     "Content-Type": "application/json;charset=UTF-8",
-    "Transfer-Encoding": "chunked",
-    "Connection": "keep-alive",
-    "X-Application-Context": "application:production",
-    "X-Content-Type-Options": "nosniff",
-    "X-XSS-Protection": "1; mode=block",
-    "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
-    "Pragma": "no-cache",
-    "Expires": "0",
-    "X-Frame-Options": "DENY",
-    "Content-Language": "zh-CN",
     "X-Response-Time": `${row.duration}ms`
   }, null, 2)
 
-  // 重置展开状态
   httpDetail.showRequestHeaders = false
   httpDetail.showResponseHeaders = false
 }
 
-// 切换展开/收起状态
-const toggleExpand = (item) => {
-  item.expanded = !item.expanded
-}
-
-// HTTP详情弹窗相关
 const httpDetailVisible = ref(false)
 const showFullDetail = ref(false)
 const httpDetail = reactive({
@@ -587,36 +499,11 @@ const httpDetail = reactive({
   showResponseHeaders: false
 })
 
-// 处理URL点击
 const handleUrlClick = (row) => {
   showFullDetail.value = false
   httpDetailVisible.value = true
-  
-  // 设置请求参数
-  httpDetail.requestBody = JSON.stringify({
-    userId: row.userId,
-    pageSize: 10,
-    pageNum: 1,
-    queryTime: row.timestamp
-  }, null, 2)
-
-  // 设置返回结果
-  httpDetail.responseBody = JSON.stringify({
-    code: row.statusCode,
-    message: "success",
-    data: {
-      total: 42,
-      list: [
-        {
-          id: "123456",
-          status: "PROCESSING",
-          createTime: row.timestamp
-        }
-      ]
-    }
-  }, null, 2)
-
-  // 清空其他信息
+  httpDetail.requestBody = JSON.stringify({ url: row.url, userId: row.userId, traceId: row.traceId }, null, 2)
+  httpDetail.responseBody = JSON.stringify({ statusCode: row.statusCode, duration: row.duration }, null, 2)
   httpDetail.method = ''
   httpDetail.path = ''
   httpDetail.source = ''
@@ -627,104 +514,6 @@ const handleUrlClick = (row) => {
   httpDetail.responseHeaders = ''
   httpDetail.showRequestHeaders = false
   httpDetail.showResponseHeaders = false
-}
-
-// 处理链路中的HTTP详情点击
-const showHttpDetail = (item) => {
-  httpDetailVisible.value = true
-  
-  // 从detail中解析完整的请求信息
-  let requestData = {}
-  let responseData = {}
-  
-  try {
-    // 尝试解析完整的detail信息
-    const detailLines = item.detail?.split('\n') || []
-    let currentSection = null
-    let currentData = []
-    
-    for (const line of detailLines) {
-      if (line.includes('Request Headers:')) {
-        currentSection = 'headers'
-        currentData = []
-      } else if (line.includes('Request Body:')) {
-        currentSection = 'body'
-        currentData = []
-      } else if (line.includes('Response:')) {
-        currentSection = 'response'
-        currentData = []
-      } else if (line.trim()) {
-        currentData.push(line)
-      }
-      
-      if (currentSection === 'headers' && currentData.length > 0) {
-        requestData.headers = currentData.join('\n')
-      } else if (currentSection === 'body' && currentData.length > 0) {
-        requestData.body = currentData.join('\n')
-      } else if (currentSection === 'response' && currentData.length > 0) {
-        responseData = currentData.join('\n')
-      }
-    }
-  } catch (e) {
-    console.error('解析detail失败:', e)
-  }
-
-  // 设置请求参数
-  httpDetail.requestBody = requestData.body || JSON.stringify({
-    method: item.name.split(' ')[0],
-    path: item.name.split(' ')[1],
-    timestamp: new Date().toISOString(),
-    duration: item.duration,
-    traceId: item.id
-  }, null, 2)
-
-  // 设置返回结果
-  try {
-    httpDetail.responseBody = responseData || JSON.stringify({
-      code: 200,
-      message: "success",
-      data: {
-        traceId: item.id,
-        status: "COMPLETED",
-        duration: item.duration,
-        timestamp: new Date().toISOString()
-      }
-    }, null, 2)
-  } catch (e) {
-    httpDetail.responseBody = responseData
-  }
-
-  // 设置请求头
-  try {
-    httpDetail.requestHeaders = requestData.headers || JSON.stringify({
-      "Content-Type": "application/json",
-      "X-Request-ID": item.id,
-      "X-Trace-ID": item.id,
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "application/json",
-      "Accept-Language": "zh-CN,zh;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Connection": "keep-alive"
-    }, null, 2)
-  } catch (e) {
-    httpDetail.requestHeaders = requestData.headers
-  }
-
-  // 设置响应头
-  httpDetail.responseHeaders = JSON.stringify({
-    "Content-Type": "application/json;charset=UTF-8",
-    "Transfer-Encoding": "chunked",
-    "Connection": "keep-alive",
-    "X-Application-Context": "application:production",
-    "X-Content-Type-Options": "nosniff",
-    "X-XSS-Protection": "1; mode=block",
-    "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
-    "Pragma": "no-cache",
-    "Expires": "0",
-    "X-Frame-Options": "DENY",
-    "Content-Language": "zh-CN",
-    "X-Response-Time": `${item.duration}ms`
-  }, null, 2)
 }
 </script>
 
@@ -777,6 +566,19 @@ const showHttpDetail = (item) => {
   font-size: 12px;
 }
 
+:deep(.compact-table .el-table__row td) {
+  padding: 4px 0;
+}
+
+:deep(.compact-table .el-table__header th) {
+  padding: 6px 0;
+}
+
+:deep(.el-table .cell) {
+  line-height: 20px;
+  padding: 0 8px;
+}
+
 :deep(.el-table th) {
   background-color: #f5f7fa;
   color: #606266;
@@ -786,6 +588,11 @@ const showHttpDetail = (item) => {
 
 .success-status {
   color: #67c23a;
+}
+
+.error-status {
+  color: #f56c6c;
+  font-weight: 500;
 }
 
 .operation-cell {

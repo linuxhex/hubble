@@ -1,330 +1,99 @@
 <template>
   <div class="abnormal-dashboard">
-    <!-- 过滤器 -->
     <div class="dashboard-header">
       <div class="dashboard-title">
         <h2>异常大盘</h2>
       </div>
       <div class="filter-area">
-        <el-dropdown @command="handleCommand">
-          <span class="time-filter">
-            异常大盘 <el-icon><ArrowDown /></el-icon>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="/monitor">监控大盘</el-dropdown-item>
-              <el-dropdown-item command="/abnormal">异常大盘</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <el-radio-group v-model="timeRange" size="small" @change="fetchData">
+          <el-radio-button value="15m">15分钟</el-radio-button>
+          <el-radio-button value="30m">30分钟</el-radio-button>
+          <el-radio-button value="1h">1小时</el-radio-button>
+        </el-radio-group>
       </div>
     </div>
 
-    <!-- 异常服务列表 -->
-    <div class="service-list">
-      <div v-for="(timeSlot, index) in timeSlots" :key="index" class="time-slot">
+    <div v-loading="loading" class="service-list">
+      <div v-for="(slot, index) in timeSlots" :key="index" class="time-slot">
         <div class="time-header">
-          <span class="time">{{ timeSlot.time }}</span>
+          <span class="time">{{ slot.displayTime }}</span>
           <span class="counter">事件</span>
         </div>
         <div class="service-items">
-          <div v-for="(service, sIndex) in timeSlot.services" :key="sIndex" 
-               class="service-item"
-               :class="{ 'error-bg': service.count > 500 }">
-            <div class="service-name">{{ service.name }}</div>
-            <div class="service-count">{{ service.count }}</div>
+          <div
+            v-for="(svc, sIndex) in slot.services"
+            :key="sIndex"
+            class="service-item clickable"
+            :class="{ 'error-bg': svc.isRed, 'warn-bg': svc.isYellow }"
+            @click="handleServiceClick(svc.name)"
+          >
+            <div class="service-name">{{ svc.name }}</div>
+            <div class="service-count">{{ svc.count }}</div>
           </div>
+          <div v-if="slot.services.length === 0" class="no-service">无异常</div>
         </div>
       </div>
+
+      <div v-if="!loading && timeSlots.length === 0" class="empty-tip">暂无异常数据</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { getMinuteTimeline } from '@/api/alert.js'
 
 const router = useRouter()
+const timeSlots = ref([])
+const loading = ref(false)
+const timeRange = ref('15m')
 
-// 模拟数据
-const timeSlots = ref([
-  {
-    time: '17:43',
-    services: [
-      { name: 'cargo-detail', count: 286 },
-      { name: 'ymm-cargo-search-app', count: 225 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:42',
-    services: [
-      { name: 'cargo-detail', count: 1063 },
-      { name: 'service-page-app', count: 201 },
-      { name: 'trade-notary-app', count: 142 },
-      { name: 'cargo-recommendation-app', count: 436 },
-      { name: 'cargo-publish', count: 419 },
-      { name: 'cargo-cm', count: 313 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:41',
-    services: [
-      { name: 'cargo-detail', count: 272 },
-      { name: 'cargo-publish', count: 36 },
-      { name: 'trade-notary-app', count: 29 },
-      { name: 'nav-route-web', count: 23 },
-      { name: 'ymm-cargo-search-app', count: 18 },
-      { name: 'scheduler-server', count: 12 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:40',
-    services: [
-      { name: 'cargo-detail', count: 350 },
-      { name: 'ymm-cargo-search-app', count: 91 },
-      { name: 'bedou-api', count: 41 },
-      { name: 'cargo-publish', count: 30 },
-      { name: 'trade-notary-app', count: 30 },
-      { name: 'ymm-position-service', count: 15 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:39',
-    services: [
-      { name: 'cargo-detail', count: 578 },
-      { name: 'ymm-cargo-search-app', count: 382 },
-      { name: 'cargo-publish', count: 114 },
-      { name: 'cargo-cm', count: 104 },
-      { name: 'sp-cargo-search-service', count: 97 },
-      { name: 'cargo-recommendation-app', count: 97 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:38',
-    services: [
-      { name: 'cargo-detail', count: 312 },
-      { name: 'cargo-publish', count: 42 },
-      { name: 'trade-notary-app', count: 29 },
-      { name: 'bedou-api', count: 25 },
-      { name: 'ymm-cargo-search-app', count: 22 },
-      { name: 'nav-route-web', count: 18 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:37',
-    services: [
-      { name: 'cargo-detail', count: 457 },
-      { name: 'cargo-publish', count: 121 },
-      { name: 'cargo-cm', count: 107 },
-      { name: 'ymm-cargo-search-app', count: 103 },
-      { name: 'cargo-recommendation-app', count: 90 },
-      { name: 'ymm-cargo-app', count: 48 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:36',
-    services: [
-      { name: 'cargo-detail', count: 635 },
-      { name: 'ymm-cargo-search-app', count: 174 },
-      { name: 'cargo-cm', count: 75 },
-      { name: 'cargo-notify-app', count: 49 },
-      { name: 'sp-cargo-search-service', count: 43 },
-      { name: 'cargo-publish', count: 32 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:35',
-    services: [
-      { name: 'cargo-detail', count: 327 },
-      { name: 'cargo-publish', count: 35 },
-      { name: 'trade-notary-app', count: 24 },
-      { name: 'nav-route-app', count: 24 },
-      { name: 'bedou-api', count: 22 },
-      { name: 'ymm-activity-service', count: 20 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:34',
-    services: [
-      { name: 'cargo-detail', count: 300 },
-      { name: 'cargo-cm', count: 28 },
-      { name: 'cargo-publish', count: 27 },
-      { name: 'navigation-service', count: 24 },
-      { name: 'trade-notary-app', count: 23 },
-      { name: 'ymm-activity-service', count: 22 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:33',
-    services: [
-      { name: 'cargo-detail', count: 1113 },
-      { name: 'trade-om-app', count: 116 },
-      { name: 'cargo-recommendation-app', count: 458 },
-      { name: 'cargo-publish', count: 385 },
-      { name: 'cargo-cm', count: 290 },
-      { name: 'ymm-cargo-search-app', count: 284 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:32',
-    services: [
-      { name: 'cargo-detail', count: 378 },
-      { name: 'cargo-publish', count: 123 },
-      { name: 'cargo-cm', count: 26 },
-      { name: 'cargo-recommendation-app', count: 23 },
-      { name: 'trade-notary-app', count: 22 },
-      { name: 'ymm-appm-service', count: 21 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:31',
-    services: [
-      { name: 'cargo-detail', count: 371 },
-      { name: 'cargo-cm', count: 69 },
-      { name: 'ymm-cargo-search-app', count: 68 },
-      { name: 'cargo-publish', count: 53 },
-      { name: 'trade-notary-app', count: 42 },
-      { name: 'ymm-cargo-app', count: 36 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:30',
-    services: [
-      { name: 'cargo-detail', count: 240 },
-      { name: 'bedou-api', count: 33 },
-      { name: 'cargo-service', count: 34 },
-      { name: 'cargo-publish', count: 30 },
-      { name: 'ymm-appm-service', count: 28 },
-      { name: 'nav-route-web', count: 28 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:29',
-    services: [
-      { name: 'cargo-detail', count: 290 },
-      { name: 'cargo-service', count: 34 },
-      { name: 'ymm-cargo-search-app', count: 31 },
-      { name: 'trade-notary-app', count: 30 },
-      { name: 'cargo-publish', count: 28 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:28',
-    services: [
-      { name: 'cargo-service', count: 68 },
-      { name: 'cargo-detail', count: 642 },
-      { name: 'ymm-cargo-search-app', count: 59 },
-      { name: 'cargo-publish', count: 52 },
-      { name: 'cargo-recommendation-app', count: 45 },
-      { name: 'nav-route-web', count: 40 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:27',
-    services: [
-      { name: 'cargo-detail', count: 392 },
-      { name: 'cargo-cm', count: 40 },
-      { name: 'ymm-cargo-search-app', count: 38 },
-      { name: 'cargo-publish', count: 30 },
-      { name: 'bedou-api', count: 26 },
-      { name: 'navigation-service', count: 24 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
-  },
-  {
-    time: '17:26',
-    services: [
-      { name: 'cargo-detail', count: 327 },
-      { name: 'trade-notary-app', count: 37 },
-      { name: 'ymm-cargo-search-app', count: 29 },
-      { name: 'cargo-publish', count: 28 },
-      { name: 'cargo-cm', count: 20 },
-      { name: 'ymm-appm-service', count: 18 },
-      { name: 'sp-cargo-search-service', count: 76 },
-      { name: 'cargo-publish', count: 63 },
-      { name: 'ymm-appm-service', count: 25 },
-      { name: 'trade-notary-app', count: 20 },
-    ]
+const fetchData = async () => {
+  loading.value = true
+  try {
+    const res = await getMinuteTimeline(timeRange.value)
+    if (res.code !== 200) return
+
+    const data = res.data
+    const timeline = data.timeline || []
+
+    timeSlots.value = timeline
+      .map(point => {
+        const services = (point.services || [])
+          .slice(0, 10)
+          .map(s => ({
+            name: s.name,
+            count: s.count,
+            isRed: s.status === 'RED',
+            isYellow: s.status === 'YELLOW'
+          }))
+
+        return {
+          displayTime: point.minute ? point.minute.substring(11, 16) : '',
+          minute: point.minute,
+          status: point.status,
+          totalErrors: point.totalErrors || 0,
+          services
+        }
+      })
+      .filter(slot => slot.services.length > 0)
+      .sort((a, b) => b.minute.localeCompare(a.minute))
+  } catch (e) {
+    console.error('获取异常数据失败:', e)
+  } finally {
+    loading.value = false
   }
-])
-
-const handleCommand = (command) => {
-  // 路由跳转
-  router.push(command)
 }
+
+const handleServiceClick = (serviceName) => {
+  router.push({
+    path: '/gateway/logs',
+    query: { appName: serviceName, keyword: 'level: ERROR' }
+  })
+}
+
+onMounted(() => { fetchData() })
 </script>
 
 <style scoped>
@@ -356,7 +125,7 @@ const handleCommand = (command) => {
 .filter-area {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 12px;
 }
 
 .time-filter {
@@ -407,14 +176,15 @@ const handleCommand = (command) => {
 
 .service-items {
   padding: 2px 4px;
-  max-height: 240px;
+  max-height: 320px;
   overflow-y: auto;
 }
 
 .service-item {
   display: flex;
   justify-content: space-between;
-  padding: 3px 0;
+  align-items: center;
+  padding: 2px 0;
   border-bottom: 1px solid #f0f0f0;
   font-size: 11px;
 }
@@ -423,15 +193,28 @@ const handleCommand = (command) => {
   border-bottom: none;
 }
 
+.service-item.clickable {
+  cursor: pointer;
+}
+
+.service-item.clickable:hover {
+  opacity: 0.85;
+}
+
 .service-name {
   color: #1890ff;
-  cursor: pointer;
   max-width: 65%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.service-count {
+  color: #666;
+  font-family: monospace;
+}
+
+/* 告警 - 红色背景 */
 .service-item.error-bg {
   background-color: #ff4d4f;
   border-radius: 2px;
@@ -444,8 +227,34 @@ const handleCommand = (command) => {
   color: white;
 }
 
-.service-count {
-  color: #666;
-  font-family: monospace;
+/* 预警 - 粉色背景 */
+.service-item.warn-bg {
+  background-color: #ffccc7;
+  border-radius: 2px;
+  padding: 3px 4px;
+  margin: 0 -4px;
 }
-</style> 
+
+.service-item.warn-bg .service-name {
+  color: #cf1322;
+}
+
+.service-item.warn-bg .service-count {
+  color: #cf1322;
+}
+
+.no-service {
+  font-size: 11px;
+  color: #999;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.empty-tip {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 40px 0;
+  grid-column: 1 / -1;
+}
+</style>

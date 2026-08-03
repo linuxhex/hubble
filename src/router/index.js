@@ -4,6 +4,7 @@ import AbnormalDashboard from '../components/AbnormalDashboard.vue'
 import GatewayDashboard from '../components/GatewayDashboard.vue'
 import GatewayTrace from '../components/GatewayTrace.vue'
 import GatewayLogs from '../components/GatewayLogs.vue'
+import UserBehavior from '../components/UserBehavior.vue'
 import UserBehaviorTraceQuery from '../components/UserBehaviorTraceQuery.vue'
 import TraceQuery from '../components/TraceQuery.vue'
 import KeywordLogQuery from '../components/KeywordLogQuery.vue'
@@ -20,12 +21,11 @@ import SecondChart from '../components/SecondChart.vue'
 const routes = [
   {
     path: '/',
-    redirect: '/monitor'
+    redirect: '/gateway'
   },
   {
     path: '/monitor',
-    name: 'Monitor',
-    component: MonitorDashboard
+    redirect: '/gateway'
   },
   {
     path: '/abnormal',
@@ -46,6 +46,11 @@ const routes = [
     path: '/gateway/logs',
     name: 'GatewayLogs',
     component: GatewayLogs
+  },
+  {
+    path: '/user-behavior',
+    name: 'UserBehavior',
+    component: UserBehavior
   },
   {
     path: '/trace-query',
