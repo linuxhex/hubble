@@ -361,7 +361,7 @@ public class GatewayService {
     );
 
     private Map<String, long[]> queryServiceStats(String logstore, long from, long to) {
-        // 采样发现服务名，再合并已知服务，逐个精确查询
+        // 先采样发现服务名，再合并已知服务
         Set<String> allServices = new LinkedHashSet<>(KNOWN_SERVICES);
         try {
             List<LogEntry> sample = queryLogs(logstore, "*", from, to, 0, 500);
@@ -376,11 +376,12 @@ public class GatewayService {
             log.warn("采样发现服务名失败: {}", e.getMessage());
         }
 
+        // 逐个服务精确查询总数（用 analytics SQL）
         Map<String, long[]> stats = new HashMap<>();
         for (String service : allServices) {
             if (service.startsWith("event-trac") || service.startsWith("EventTrac")) continue;
             try {
-                String svcQuery = "__tag__:_container_name_: " + service + " | SELECT count(*) as cnt";
+                String svcQuery = service + " | SELECT count(*) as cnt";
                 var svcRows = slsQueryClient.queryAnalytics(logstore, svcQuery, from, to, 1);
                 if (!svcRows.isEmpty()) {
                     long cnt = Long.parseLong(svcRows.get(0).getOrDefault("cnt", "0"));
