@@ -95,6 +95,7 @@ const route = useRoute()
 const traceId = ref('')
 const currentTraceId = ref('')
 const timeRange = ref('1h')
+const traceTimestamp = ref(null)
 const loading = ref(false)
 const searched = ref(false)
 const nodes = ref([])
@@ -107,7 +108,7 @@ const fetchTraceChain = async () => {
   searched.value = false
   selectedNode.value = null
   try {
-    const res = await getTraceChain(traceId.value.trim(), timeRange.value)
+    const res = await getTraceChain(traceId.value.trim(), timeRange.value, traceTimestamp.value)
     const data = res?.data || res
     currentTraceId.value = data.traceId || traceId.value
     nodes.value = data.nodes || []
@@ -128,8 +129,12 @@ const selectNode = (index) => {
 
 onMounted(() => {
   const queryTraceId = route.query.traceId
+  const queryTimestamp = route.query.timestamp
   if (queryTraceId) {
     traceId.value = queryTraceId
+    if (queryTimestamp) {
+      traceTimestamp.value = queryTimestamp
+    }
     fetchTraceChain()
   }
 })

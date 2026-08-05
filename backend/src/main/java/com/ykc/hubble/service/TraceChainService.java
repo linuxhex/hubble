@@ -23,9 +23,30 @@ public class TraceChainService {
     private final MonitorProperties monitorProperties;
     private final SlsConfig slsConfig;
 
-    public Map<String, Object> queryTraceChain(String traceId, String timeRange) {
+    public Map<String, Object> queryTraceChain(String traceId, String timeRange, String timestamp) {
         long now = System.currentTimeMillis() / 1000;
-        long from = now - parseTimeRange(timeRange);
+        long from;
+        long to;
+        
+        // If timestamp is provided, center the query window around it
+        if (timestamp != null && !timestamp.isBlank()) {
+            long traceTime = parseTraceTimestamp(timestamp);
+            if (traceTime > 0) {
+                // Query 30 minutes before and after the trace time
+                from = traceTime - 1800;
+                to = traceTime + 1800;
+                log.info("使用指定时间戳查询链路: traceId={}, timestamp={}, from={}, to={}", 
+                    traceId, timestamp, from, to);
+            } else {
+                // Fallback to default timeRange if timestamp parsing fails
+                from = now - parseTimeRange(timeRange);
+                to = now;
+            }
+        } else {
+            // Default behavior: query from now-timeRange to now
+            from = now - parseTimeRange(timeRange);
+            to = now;
+        }
 
         String logstore = monitorProperties.getDefaultQueryLogstore();
         // Try multiple query strategies, from most precise to most broad
@@ -47,7 +68,7 @@ public class TraceChainService {
             String query = queries[i];
             log.info("尝试查询链路 [{}/{}]: 策略={}, traceId={}, query={}", 
                 i + 1, queries.length, queryLabels[i], traceId, query);
-            logs = queryLogs(logstore, query, from, now, 0, 1000);
+            logs = queryLogs(logstore, query, from, to, 0, 1000);
             if (!logs.isEmpty()) {
                 log.info("查询成功: 策略={}, traceId={}, 日志数量={}", queryLabels[i], traceId, logs.size());
                 break;
@@ -142,6 +163,29 @@ public class TraceChainService {
             case "24h" -> 86400;
             default -> 3600;
         };
+    }
+
+    private long parseTraceTimestamp(String timestamp) {
+        if (timestamp == null || timestamp.isBlank()) return 0;
+        try {
+            // Handle URL-encoded space (+ or %20)
+            String normalized = timestamp.replace("+", " ").replace("%20", " ");
+            // Try parsing "yyyy-MM-dd HH:mm:ss.SSS" format
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(normalized,
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
+            return ldt.atZone(java.time.ZoneId.systemDefault()).toEpochSecond();
+        } catch (Exception e1) {
+            try {
+                // Try parsing "yyyy-MM-dd HH:mm:ss" format (without milliseconds)
+                String normalized = timestamp.replace("+", " ").replace("%20", " ");
+                java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(normalized,
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                return ldt.atZone(java.time.ZoneId.systemDefault()).toEpochSecond();
+            } catch (Exception e2) {
+                log.warn("无法解析时间戳: {}, error: {}", timestamp, e2.getMessage());
+                return 0;
+            }
+        }
     }
 
     private long parseTimestamp(String timeStr) {

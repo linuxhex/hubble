@@ -17,7 +17,8 @@ public class TraceChainController {
     @GetMapping("/{traceId}")
     public Result<Map<String, Object>> queryTraceChain(
             @PathVariable String traceId,
-            @RequestParam(defaultValue = "1h") String timeRange) {
-        return Result.success(traceChainService.queryTraceChain(traceId, timeRange));
+            @RequestParam(defaultValue = "1h") String timeRange,
+            @RequestParam(required = false) String timestamp) {
+        return Result.success(traceChainService.queryTraceChain(traceId, timeRange, timestamp));
     }
 }
