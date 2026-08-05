@@ -376,17 +376,39 @@ public class GatewayService {
             log.warn("采样发现服务名失败: {}", e.getMessage());
         }
 
-        // 逐个服务精确查询总数（用 analytics SQL）
+        // 逐个服务精确查询总数和平均 RT（用 analytics SQL）
         Map<String, long[]> stats = new HashMap<>();
         for (String service : allServices) {
             if (service.startsWith("event-trac") || service.startsWith("EventTrac")) continue;
             try {
+                // 查询请求数
                 String svcQuery = service + " | SELECT count(*) as cnt";
                 var svcRows = slsQueryClient.queryAnalytics(logstore, svcQuery, from, to, 1);
                 if (!svcRows.isEmpty()) {
                     long cnt = Long.parseLong(svcRows.get(0).getOrDefault("cnt", "0"));
                     if (cnt > 0) {
-                        stats.put(service, new long[]{cnt, 0});
+                        // 采样计算平均 RT
+                        long avgRt = 0;
+                        try {
+                            List<LogEntry> serviceLogs = queryLogs(logstore, service, from, to, 0, 100);
+                            if (!serviceLogs.isEmpty()) {
+                                double totalRt = 0;
+                                int rtCount = 0;
+                                for (LogEntry log : serviceLogs) {
+                                    double rt = extractDuration(log.getMessage());
+                                    if (rt > 0) {
+                                        totalRt += rt;
+                                        rtCount++;
+                                    }
+                                }
+                                if (rtCount > 0) {
+                                    avgRt = Math.round(totalRt / rtCount);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("计算服务 {} 平均 RT 失败: {}", service, e.getMessage());
+                        }
+                        stats.put(service, new long[]{cnt, avgRt});
                     }
                 }
             } catch (Exception e) {
