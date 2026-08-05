@@ -2,6 +2,7 @@ package com.ykc.hubble.controller;
 
 import com.ykc.hubble.common.Result;
 import com.ykc.hubble.service.GatewayService;
+import com.ykc.hubble.vo.ApiDegradationVO;
 import com.ykc.hubble.vo.GatewayHotApiVO;
 import com.ykc.hubble.vo.GatewayOverviewVO;
 import com.ykc.hubble.vo.GatewayTrendVO;
@@ -33,5 +34,11 @@ public class GatewayController {
     public Result<List<GatewayHotApiVO>> hotApis(
             @RequestParam(defaultValue = "24h") String timeRange) {
         return Result.success(gatewayService.hotApis(timeRange));
+    }
+
+    @GetMapping("/degradation")
+    public Result<List<ApiDegradationVO>> degradation(
+            @RequestParam(defaultValue = "day") String compareMode) {
+        return Result.success(gatewayService.degradation(compareMode));
     }
 }

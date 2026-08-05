@@ -46,6 +46,7 @@ public class AuthFilter extends OncePerRequestFilter {
             "/alert-data/query",
             "/alert-data/service-health",
             "/alert-data/minute-timeline",
+            "/alert-data/service-drilldown",
             "/alert-data/service-logs",
             "/alert-data/trace-logs",
             "/alert-data/sse",

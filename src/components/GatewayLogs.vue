@@ -94,9 +94,10 @@
             <span :class="{ 'success-status': scope.row.statusCode === 200, 'error-status': scope.row.statusCode >= 400 }">{{ scope.row.statusCode }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="调用源" width="180" show-overflow-tooltip>
+        <el-table-column label="下游依赖" width="180" show-overflow-tooltip>
           <template #default="scope">
-            {{ extractSource(scope.row.message) }}
+            <span v-if="scope.row.downstreamService" class="downstream-tag">{{ scope.row.downstreamService }}</span>
+            <span v-else class="text-muted">--</span>
           </template>
         </el-table-column>
         <el-table-column fixed="right" label="操作" width="120">
@@ -339,24 +340,6 @@ const handleRefresh = () => {
   fetchLogs()
 }
 
-const extractSource = (message) => {
-  if (!message) return '--'
-  // 匹配 Java 类名: com.xxx.YyyClass 取最后一段
-  const classMatch = message.match(/([\w.]*[A-Z]\w+)\./)
-  if (classMatch) {
-    const full = classMatch[1]
-    const parts = full.split('.')
-    return parts[parts.length - 1]
-  }
-  // 匹配 Feign 调用: XxxService#method
-  const feignMatch = message.match(/(\w+Service)#(\w+)/)
-  if (feignMatch) return `${feignMatch[1]}#${feignMatch[2]}`
-  // 匹配容器名/服务名
-  const serviceMatch = message.match(/\[([a-zA-Z][\w-]*)\]/)
-  if (serviceMatch) return serviceMatch[1]
-  return message.length > 50 ? message.substring(0, 50) + '...' : message
-}
-
 onMounted(() => {
   // 读取路由参数，预填充搜索表单
   if (route.query.appName) {
@@ -593,6 +576,15 @@ const handleUrlClick = (row) => {
 .error-status {
   color: #f56c6c;
   font-weight: 500;
+}
+
+.downstream-tag {
+  color: #1890ff;
+  font-weight: 500;
+}
+
+.text-muted {
+  color: #c0c4cc;
 }
 
 .operation-cell {

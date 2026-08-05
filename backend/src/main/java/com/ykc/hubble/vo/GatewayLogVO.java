@@ -13,4 +13,5 @@ public class GatewayLogVO {
     private int statusCode;
     private String message;
     private String traceId;
+    private String downstreamService;
 }

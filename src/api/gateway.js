@@ -11,3 +11,7 @@ export function getGatewayTrend(params) {
 export function getGatewayHotApis(params) {
   return request.get('/gateway/hot-apis', { params })
 }
+
+export function getApiDegradation(params) {
+  return request.get('/gateway/degradation', { params })
+}

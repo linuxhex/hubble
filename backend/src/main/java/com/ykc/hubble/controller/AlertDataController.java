@@ -88,4 +88,12 @@ public class AlertDataController {
             @RequestParam(defaultValue = "15m") String timeRange) {
         return Result.success(alertDataService.minuteHealthTimeline(timeRange));
     }
+
+    @GetMapping("/service-drilldown")
+    @Operation(summary = "服务下钻", description = "查看服务错误日志、异常分类、下游依赖")
+    public Result<Map<String, Object>> serviceDrillDown(
+            @RequestParam String serviceName,
+            @RequestParam(defaultValue = "15m") String timeRange) {
+        return Result.success(alertDataService.serviceDrillDown(serviceName, timeRange));
+    }
 }

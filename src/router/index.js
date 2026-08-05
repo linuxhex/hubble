@@ -17,6 +17,7 @@ import Unauthorized from '../components/Unauthorized.vue'
 import WidgetDashboard from '../components/WidgetDashboard.vue'
 import TrendDashboard from '../components/TrendDashboard.vue'
 import SecondChart from '../components/SecondChart.vue'
+import ApiDegradation from '../components/ApiDegradation.vue'
 
 const routes = [
   {
@@ -111,6 +112,11 @@ const routes = [
     path: '/second-chart',
     name: 'SecondChart',
     component: SecondChart
+  },
+  {
+    path: '/degradation-ranking',
+    name: 'ApiDegradation',
+    component: ApiDegradation
   }
 ]
 

@@ -82,3 +82,9 @@ export function getMinuteTimeline(timeRange) {
     params: timeRange ? { timeRange } : undefined
   })
 }
+
+export function getServiceDrillDown(serviceName, timeRange) {
+  return request.get('/alert-data/service-drilldown', {
+    params: { serviceName, timeRange: timeRange || '15m' }
+  })
+}

@@ -20,16 +20,28 @@
           <span class="counter">事件</span>
         </div>
         <div class="service-items">
-          <div
+          <el-tooltip
             v-for="(svc, sIndex) in slot.services"
             :key="sIndex"
-            class="service-item clickable"
-            :class="{ 'error-bg': svc.isRed, 'warn-bg': svc.isYellow }"
-            @click="handleServiceClick(svc.name)"
+            placement="right"
+            :show-after="300"
           >
-            <div class="service-name">{{ svc.name }}</div>
-            <div class="service-count">{{ svc.count }}</div>
-          </div>
+            <template #content>
+              <div class="tooltip-content">
+                <div><b>{{ svc.name }}</b> - {{ svc.count }} 条错误</div>
+                <div>阈值: 红={{ svc.redThreshold }} 黄={{ svc.yellowThreshold }}</div>
+                <div style="color:#999;margin-top:4px">点击查看详情</div>
+              </div>
+            </template>
+            <div
+              class="service-item clickable"
+              :class="{ 'error-bg': svc.isRed, 'warn-bg': svc.isYellow }"
+              @click="handleServiceClick(svc.name)"
+            >
+              <div class="service-name">{{ svc.name }}</div>
+              <div class="service-count">{{ svc.count }}</div>
+            </div>
+          </el-tooltip>
           <div v-if="slot.services.length === 0" class="no-service">无异常</div>
         </div>
       </div>
@@ -66,7 +78,9 @@ const fetchData = async () => {
             name: s.name,
             count: s.count,
             isRed: s.status === 'RED',
-            isYellow: s.status === 'YELLOW'
+            isYellow: s.status === 'YELLOW',
+            redThreshold: s.redThreshold || 50,
+            yellowThreshold: s.yellowThreshold || 20
           }))
 
         return {
@@ -89,7 +103,10 @@ const fetchData = async () => {
 const handleServiceClick = (serviceName) => {
   router.push({
     path: '/gateway/logs',
-    query: { appName: serviceName, keyword: 'level: ERROR' }
+    query: {
+      appName: serviceName,
+      keyword: 'level: ERROR'
+    }
   })
 }
 
@@ -203,7 +220,7 @@ onMounted(() => { fetchData() })
 
 .service-name {
   color: #1890ff;
-  max-width: 65%;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

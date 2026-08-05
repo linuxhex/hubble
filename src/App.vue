@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const isCollapse = ref(false)
@@ -20,6 +20,7 @@ const activeIndex = computed(() => {
   if (route.path === '/widget-dashboard') return '/widget-dashboard'
   if (route.path === '/trend-dashboard') return '/trend-dashboard'
   if (route.path === '/second-chart') return '/second-chart'
+  if (route.path === '/degradation-ranking') return '/degradation-ranking'
   return '1'
 })
 </script>
@@ -60,6 +61,10 @@ const activeIndex = computed(() => {
         <el-menu-item index="/abnormal">
           <el-icon><Warning /></el-icon>
           <span>异常大盘</span>
+        </el-menu-item>
+        <el-menu-item index="/degradation-ranking">
+          <el-icon><Sort /></el-icon>
+          <span>接口劣化</span>
         </el-menu-item>
       </el-menu>
     </div>

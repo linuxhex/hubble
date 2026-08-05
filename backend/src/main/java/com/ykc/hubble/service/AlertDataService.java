@@ -35,6 +35,50 @@ public class AlertDataService {
     private final SlsQueryClient slsQueryClient;
     private final MonitorProperties monitorProperties;
 
+    // 异常大盘分钟级时间线缓存：key=timeRange, value=[data, timestamp]
+    private final Map<String, TimelineCacheEntry> timelineCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long TIMELINE_CACHE_TTL_MS = 60 * 1000; // 1 分钟
+
+    @jakarta.annotation.PostConstruct
+    public void initTimelineCache() {
+        log.info("初始化异常大盘时间线缓存...");
+        for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
+            try {
+                Map<String, Object> data = loadMinuteHealthTimeline(range);
+                timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+                log.info("缓存 {} 时间线完成", range);
+            } catch (Exception e) {
+                log.warn("初始化缓存 {} 失败: {}", range, e.getMessage());
+            }
+        }
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60 * 1000) // 每 1 分钟刷新
+    public void refreshTimelineCache() {
+        log.debug("后台刷新异常大盘时间线缓存...");
+        for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
+            try {
+                Map<String, Object> data = loadMinuteHealthTimeline(range);
+                timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+                log.debug("刷新 {} 时间线缓存完成", range);
+            } catch (Exception e) {
+                log.warn("刷新缓存 {} 失败: {}", range, e.getMessage());
+            }
+        }
+    }
+
+    private static class TimelineCacheEntry {
+        final Map<String, Object> data;
+        final long timestamp;
+        TimelineCacheEntry(Map<String, Object> data, long timestamp) {
+            this.data = data;
+            this.timestamp = timestamp;
+        }
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > TIMELINE_CACHE_TTL_MS;
+        }
+    }
+
     /**
      * 统计：当前值 / 今日峰值 / 均值 / 告警计数 / 健康度
      */
@@ -171,23 +215,21 @@ public class AlertDataService {
         long from = now - TimeRanges.toSeconds(timeRange);
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        // 第一步：从100条原始日志中发现所有服务名
-        List<LogEntry> logs;
-        try {
-            logs = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 100);
-        } catch (Exception e) {
-            log.warn("查询服务健康状态失败: {}", e.getMessage());
-            return new ArrayList<>();
-        }
-        
+        // 第一步：发现所有服务名（直接采样，analytics SQL 无法正确 GROUP BY __tag__ 字段）
         List<String> serviceNames = new ArrayList<>();
-        for (var entry : logs) {
-            String service = (entry.getContainerName() != null && !entry.getContainerName().isBlank())
-                    ? entry.getContainerName() : "unknown";
-            if (service.startsWith("event-trac")) continue;
-            if (!serviceNames.contains(service)) {
-                serviceNames.add(service);
+        try {
+            List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 500);
+            for (var entry : sample) {
+                String service = (entry.getContainerName() != null && !entry.getContainerName().isBlank())
+                        ? entry.getContainerName() : "unknown";
+                if (service.startsWith("event-trac")) continue;
+                if (!serviceNames.contains(service)) {
+                    serviceNames.add(service);
+                }
             }
+            log.info("serviceHealth 采样发现 {} 个服务", serviceNames.size());
+        } catch (Exception e) {
+            log.warn("采样发现服务失败: {}", e.getMessage());
         }
 
         if (serviceNames.isEmpty()) {
@@ -260,90 +302,149 @@ public class AlertDataService {
      * 每分钟每服务独立对比当前阈值，worst-wins 到分钟。
      */
     public Map<String, Object> minuteHealthTimeline(String timeRange) {
+        String range = timeRange != null ? timeRange : "15m";
+        TimelineCacheEntry entry = timelineCache.get(range);
+
+        // 如果有缓存且未过期，直接返回
+        if (entry != null && !entry.isExpired()) {
+            log.debug("返回缓存时间线数据: range={}", range);
+            return entry.data;
+        }
+
+        // 如果缓存过期或不存在，触发后台刷新，但先返回旧缓存（如果有）
+        if (entry != null) {
+            log.info("时间线缓存已过期，触发后台刷新: range={}", range);
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    Map<String, Object> data = loadMinuteHealthTimeline(range);
+                    timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+                    log.info("后台刷新时间线缓存完成: range={}", range);
+                } catch (Exception e) {
+                    log.error("后台刷新时间线缓存失败: range={}, error={}", range, e.getMessage());
+                }
+            });
+            return entry.data; // 返回旧缓存
+        }
+
+        // 首次加载，同步等待
+        try {
+            Map<String, Object> data = loadMinuteHealthTimeline(range);
+            timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+            return data;
+        } catch (Exception e) {
+            log.error("首次加载时间线缓存失败: range={}, error={}", range, e.getMessage());
+            Map<String, Object> emptyResult = new LinkedHashMap<>();
+            emptyResult.put("timeline", Collections.emptyList());
+            return emptyResult;
+        }
+    }
+
+    private Map<String, Object> loadMinuteHealthTimeline(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
         long from = now - TimeRanges.toSeconds(timeRange);
         String logstore = monitorProperties.getDefaultQueryLogstore();
-        long redTh = monitorProperties.getMinuteRedThreshold();
-        long yellowTh = monitorProperties.getMinuteYellowThreshold();
 
-        // 第一步：采样 100 条 ERROR 日志发现所有服务名
-        List<String> serviceNames;
+        List<String> serviceNames = new ArrayList<>();
+        // 直接采样发现服务名（analytics SQL 无法正确 GROUP BY __tag__ 字段）
         try {
-            List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 100);
-            serviceNames = new ArrayList<>();
+            List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 500);
             for (LogEntry entry : sample) {
                 String svc = entry.getContainerName();
                 if (svc != null && !svc.isBlank() && !svc.startsWith("event-trac") && !serviceNames.contains(svc)) {
                     serviceNames.add(svc);
                 }
             }
+            log.info("采样发现 {} 个服务", serviceNames.size());
         } catch (Exception e) {
             log.warn("采样服务名失败: {}", e.getMessage());
-            serviceNames = Collections.emptyList();
         }
 
         if (serviceNames.isEmpty()) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("timeline", Collections.emptyList());
-            result.put("minuteRedThreshold", redTh);
-            result.put("minuteYellowThreshold", yellowTh);
             return result;
         }
 
-        // 第二步：对每个服务用 analytics 查询每分钟错误数（服务名在 WHERE 中，避免 SELECT 字段引用问题）
+        // 每个服务：查分钟级错误数 + 计算动态阈值
         Map<String, Map<String, Long>> byMinute = new java.util.TreeMap<>();
+        Map<String, ServiceThresholds> thresholdsMap = new HashMap<>();
+
         for (String service : serviceNames) {
             try {
                 String query = "__tag__:_container_name_: " + service + " AND level: ERROR"
                         + " | SELECT date_format(__time__, '%Y-%m-%d %H:%i') as minute, count(*) as cnt GROUP BY minute";
                 var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1000);
+
+                long totalErrors = 0;
+                int minuteCount = 0;
                 for (var row : rows) {
                     String minute = row.getOrDefault("minute", "");
                     long cnt = 0;
                     try { cnt = Long.parseLong(row.getOrDefault("cnt", "0")); } catch (NumberFormatException ignored) {}
                     if (cnt > 0) {
+                        totalErrors += cnt;
+                        minuteCount++;
                         byMinute.computeIfAbsent(minute, k -> new LinkedHashMap<>())
                                 .merge(service, cnt, Long::sum);
                     }
                 }
+
+                double avgPerMin = minuteCount > 0 ? (double) totalErrors / minuteCount : 0;
+                int redTh = Math.max((int) Math.ceil(avgPerMin * 3), 5);
+                int yellowTh = Math.max((int) Math.ceil(avgPerMin * 1.5), 2);
+                thresholdsMap.put(service, new ServiceThresholds(redTh, yellowTh));
+
             } catch (Exception e) {
                 log.warn("查询服务分钟级数据失败: service={}, error={}", service, e.getMessage());
             }
         }
 
-        // 第三步：每分钟独立判定
+        // 构建完整时间线（覆盖所有分钟，无数据的填 0）
         List<Map<String, Object>> timeline = new ArrayList<>();
-        for (var e : byMinute.entrySet()) {
+        java.time.format.DateTimeFormatter minuteFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        java.time.LocalDateTime startMinute = java.time.LocalDateTime.ofInstant(
+                java.time.Instant.ofEpochSecond(from), java.time.ZoneId.systemDefault()).withSecond(0).withNano(0);
+        java.time.LocalDateTime endMinute = java.time.LocalDateTime.ofInstant(
+                java.time.Instant.ofEpochSecond(now), java.time.ZoneId.systemDefault()).withSecond(0).withNano(0);
+
+        for (java.time.LocalDateTime minute = startMinute; !minute.isAfter(endMinute); minute = minute.plusMinutes(1)) {
+            String minuteKey = minute.format(minuteFmt);
+            Map<String, Long> minuteData = byMinute.getOrDefault(minuteKey, Collections.emptyMap());
+
             long totalErrors = 0;
             List<Map<String, Object>> services = new ArrayList<>();
             String status = "NORMAL";
-            for (var svcEntry : e.getValue().entrySet()) {
-                long cnt = svcEntry.getValue();
+
+            for (String service : serviceNames) {
+                long cnt = minuteData.getOrDefault(service, 0L);
+                if (cnt == 0) continue;
+
                 totalErrors += cnt;
+                ServiceThresholds th = thresholdsMap.getOrDefault(service, new ServiceThresholds(5, 2));
 
                 String svcStatus;
-                if (cnt >= redTh) {
+                if (cnt >= th.redThreshold) {
                     svcStatus = "RED";
                     status = "RED";
-                } else if (cnt >= yellowTh) {
+                } else if (cnt >= th.yellowThreshold) {
                     svcStatus = "YELLOW";
-                    if (!"RED".equals(status)) {
-                        status = "YELLOW";
-                    }
+                    if (!"RED".equals(status)) status = "YELLOW";
                 } else {
                     svcStatus = "GREEN";
                 }
 
                 Map<String, Object> svcItem = new LinkedHashMap<>();
-                svcItem.put("name", svcEntry.getKey());
+                svcItem.put("name", service);
                 svcItem.put("count", cnt);
                 svcItem.put("status", svcStatus);
+                svcItem.put("redThreshold", th.redThreshold);
+                svcItem.put("yellowThreshold", th.yellowThreshold);
                 services.add(svcItem);
             }
             services.sort((a, b) -> Long.compare((Long) b.get("count"), (Long) a.get("count")));
 
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("minute", e.getKey());
+            item.put("minute", minuteKey);
             item.put("status", status);
             item.put("totalErrors", totalErrors);
             item.put("services", services);
@@ -352,9 +453,26 @@ public class AlertDataService {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("timeline", timeline);
-        result.put("minuteRedThreshold", redTh);
-        result.put("minuteYellowThreshold", yellowTh);
         return result;
+    }
+
+    private long queryWarnCount(String logstore, String serviceName, long from, long to) {
+        try {
+            String query = "__tag__:_container_name_: " + serviceName + " AND level: WARN | SELECT count(*) as cnt";
+            var rows = slsQueryClient.queryAnalytics(logstore, query, from, to, 1);
+            if (!rows.isEmpty()) {
+                try { return Long.parseLong(rows.get(0).getOrDefault("cnt", "0")); } catch (NumberFormatException e) { return 0; }
+            }
+        } catch (Exception e) {
+            log.warn("查询WARN数失败: service={}, error={}", serviceName, e.getMessage());
+        }
+        return 0;
+    }
+
+    private static class ServiceThresholds {
+        final int redThreshold;
+        final int yellowThreshold;
+        ServiceThresholds(int red, int yellow) { this.redThreshold = red; this.yellowThreshold = yellow; }
     }
 
     private long queryServiceTypeCount(String logstore, String serviceName, String keyword, long from, long to) {
@@ -372,6 +490,85 @@ public class AlertDataService {
             log.warn("查询服务错误类型数失败: service={}, keyword={}, error={}", serviceName, keyword, e.getMessage());
         }
         return 0;
+    }
+
+    /**
+     * 服务下钻：错误日志 + 异常分类 + 下游依赖
+     */
+    public Map<String, Object> serviceDrillDown(String serviceName, String timeRange) {
+        long now = System.currentTimeMillis() / 1000;
+        long from = now - TimeRanges.toSeconds(timeRange);
+        String logstore = monitorProperties.getDefaultQueryLogstore();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("serviceName", serviceName);
+
+        // 1. 查询最近20条 ERROR 日志
+        List<Map<String, Object>> errorLogs = new ArrayList<>();
+        try {
+            List<LogEntry> logs = slsQueryClient.queryLogstore(logstore,
+                    "__tag__:_container_name_: " + serviceName + " AND level: ERROR",
+                    from, now, 0, 20);
+            for (LogEntry entry : logs) {
+                Map<String, Object> logItem = new LinkedHashMap<>();
+                logItem.put("time", entry.getTime());
+                logItem.put("level", entry.getLevel());
+                logItem.put("message", truncateMessage(entry.getMessage(), 500));
+                logItem.put("traceId", entry.getTrace());
+                logItem.put("logger", entry.getFields() != null ? entry.getFields().get("logger") : null);
+                errorLogs.add(logItem);
+            }
+        } catch (Exception e) {
+            log.warn("查询服务错误日志失败: service={}, error={}", serviceName, e.getMessage());
+        }
+        result.put("errorLogs", errorLogs);
+
+        // 2. 异常分类统计
+        Map<String, Object> breakdown = new LinkedHashMap<>();
+        long npeCount = queryServiceTypeCount(logstore, serviceName, "NullPointerException", from, now);
+        long timeoutCount = queryServiceTypeCount(logstore, serviceName,
+                "(Timeout OR SocketTimeout OR \"Connection timed out\")", from, now);
+        long warnCount = queryWarnCount(logstore, serviceName, from, now);
+        long totalErrors = queryServiceErrorCount(logstore, serviceName, from, now);
+        long otherCount = Math.max(0, totalErrors - npeCount - timeoutCount);
+        breakdown.put("npe", npeCount);
+        breakdown.put("timeout", timeoutCount);
+        breakdown.put("warn", warnCount);
+        breakdown.put("other", otherCount);
+        breakdown.put("total", totalErrors);
+        result.put("errorBreakdown", breakdown);
+
+        // 3. 提取下游依赖（从日志 message 中匹配 Feign/RestTemplate 调用）
+        List<String> downstreamServices = new ArrayList<>();
+        java.util.regex.Pattern feignPattern = java.util.regex.Pattern.compile(
+                "(?:POST|GET|PUT|DELETE|PATCH)\\s+https?://([a-zA-Z0-9_-]+)/",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Pattern servicePattern = java.util.regex.Pattern.compile(
+                "(?:Calling|Invoking|FeignClient|restTemplate)\\s+([a-zA-Z0-9_-]+(?:-server|-prod|-uat))",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        for (String msg : errorLogs.stream()
+                .map(l -> l.get("message") != null ? l.get("message").toString() : "")
+                .toList()) {
+            if (msg == null || msg.isBlank()) continue;
+            var m1 = feignPattern.matcher(msg);
+            if (m1.find()) {
+                String ds = m1.group(1);
+                if (!downstreamServices.contains(ds)) downstreamServices.add(ds);
+            }
+            var m2 = servicePattern.matcher(msg);
+            if (m2.find()) {
+                String ds = m2.group(1);
+                if (!downstreamServices.contains(ds)) downstreamServices.add(ds);
+            }
+        }
+        result.put("downstreamServices", downstreamServices);
+
+        return result;
+    }
+
+    private String truncateMessage(String message, int maxLen) {
+        if (message == null) return "";
+        return message.length() > maxLen ? message.substring(0, maxLen) + "..." : message;
     }
 
 }

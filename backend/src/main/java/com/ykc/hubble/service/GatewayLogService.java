@@ -154,6 +154,9 @@ public class GatewayLogService {
         // 从 message 中解析缺失的 URL、userId、耗时等信息
         parseMessageFields(message, vo);
 
+        // 提取下游依赖服务名
+        vo.setDownstreamService(extractDownstreamService(message));
+
         if (entry.getTime() != null) {
             try {
                 long ts = Long.parseLong(entry.getTime());
@@ -252,6 +255,53 @@ public class GatewayLogService {
         java.util.regex.Matcher cnMatcher = java.util.regex.Pattern
                 .compile("用户(?:ID)?[：:]\\s*(\\d+)").matcher(message);
         if (cnMatcher.find()) return cnMatcher.group(1);
+
+        return null;
+    }
+
+    private String extractDownstreamService(String message) {
+        if (message == null || message.isBlank()) return null;
+
+        // [SERVICE-NAME] 格式：日志开头的方括号服务名，如 [OMP-POLY-CENTER]
+        java.util.regex.Matcher bracketMatcher = java.util.regex.Pattern
+                .compile("^\\[([A-Z][A-Z0-9_-]+)\\]")
+                .matcher(message);
+        if (bracketMatcher.find()) {
+            String name = bracketMatcher.group(1);
+            if (!"NONE".equals(name) && !"NULL".equals(name) && !"UNKNOWN".equals(name)) {
+                return name;
+            }
+        }
+
+        // Nacos Service 对象：name='service-name' 或 name="service-name"
+        java.util.regex.Matcher nacosMatcher = java.util.regex.Pattern
+                .compile("name=['\"]([a-zA-Z][\\w-]*)['\"]")
+                .matcher(message);
+        if (nacosMatcher.find()) return nacosMatcher.group(1);
+
+        // Feign/RestTemplate HTTP 调用: POST http://service-name/path
+        java.util.regex.Matcher httpCallMatcher = java.util.regex.Pattern
+                .compile("(?:POST|GET|PUT|DELETE|PATCH)\\s+https?://([a-zA-Z][\\w-]*)/", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(message);
+        if (httpCallMatcher.find()) return httpCallMatcher.group(1);
+
+        // Feign 客户端: XxxService#method 或 XxxClient#method
+        java.util.regex.Matcher feignMatcher = java.util.regex.Pattern
+                .compile("(\\w+(?:Service|Client|FeignClient))#(\\w+)")
+                .matcher(message);
+        if (feignMatcher.find()) return feignMatcher.group(1);
+
+        // RestTemplate 调用: restTemplate.xxx("http://service-name/...")
+        java.util.regex.Matcher restMatcher = java.util.regex.Pattern
+                .compile("restTemplate\\.\\w+\\([\"']https?://([a-zA-Z][\\w-]*)/", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(message);
+        if (restMatcher.find()) return restMatcher.group(1);
+
+        // Calling/Invoking 下游服务
+        java.util.regex.Matcher callMatcher = java.util.regex.Pattern
+                .compile("(?:Calling|Invoking|FeignClient)\\s+([a-zA-Z][\\w-]*(?:-server|-prod|-uat|-service))", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(message);
+        if (callMatcher.find()) return callMatcher.group(1);
 
         return null;
     }
