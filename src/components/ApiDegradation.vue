@@ -44,8 +44,19 @@ const getRankType = (rank) => {
 }
 
 const formatRate = (rate) => {
-  if (rate >= 100) return `${rate.toFixed(1)}%`
-  return `${rate.toFixed(1)}%`
+  return `${Math.abs(rate).toFixed(1)}%`
+}
+
+const rateIcon = (rate) => {
+  if (rate > 0) return '↑'
+  if (rate < 0) return '+'
+  return '-'
+}
+
+const rateClass = (rate) => {
+  if (rate > 0) return 'degradation-rate bad'
+  if (rate < 0) return 'degradation-rate good'
+  return 'degradation-rate neutral'
 }
 
 const startAutoRefresh = () => {
@@ -123,8 +134,8 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column label="劣化幅度" width="140" align="center" prop="degradationRate">
           <template #default="{ row }">
-            <span class="degradation-rate">
-              ↑ {{ formatRate(row.degradationRate) }}
+            <span :class="rateClass(row.degradationRate)">
+              {{ rateIcon(row.degradationRate) }} {{ formatRate(row.degradationRate) }}
             </span>
           </template>
         </el-table-column>
@@ -181,8 +192,19 @@ onBeforeUnmount(() => {
 }
 
 .degradation-rate {
-  color: #f56c6c;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.degradation-rate.bad {
+  color: #f56c6c;
+}
+
+.degradation-rate.good {
+  color: #67c23a;
+}
+
+.degradation-rate.neutral {
+  color: #909399;
 }
 </style>
