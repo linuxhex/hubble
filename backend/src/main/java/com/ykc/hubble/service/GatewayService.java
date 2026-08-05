@@ -298,8 +298,8 @@ public class GatewayService {
             vo.setCurrentAvgTime(Math.round(currentAvg * 10.0) / 10.0);
             vo.setPreviousAvgTime(Math.round(previousAvg * 10.0) / 10.0);
             vo.setDegradationRate(Math.round(rate * 10.0) / 10.0);
-            vo.setCurrentCount((int) currentCount);
-            vo.setPreviousCount((int) previousCount);
+            vo.setCurrentCount(currentCount);
+            vo.setPreviousCount(previousCount);
             result.add(vo);
         }
 
@@ -335,8 +335,8 @@ public class GatewayService {
                 vo.setCurrentAvgTime(Math.round(currentAvg * 10.0) / 10.0);
                 vo.setPreviousAvgTime(Math.round(previousAvg * 10.0) / 10.0);
                 vo.setDegradationRate(Math.round(rate * 10.0) / 10.0);
-                vo.setCurrentCount((int) currentCount);
-                vo.setPreviousCount((int) previousCount);
+                vo.setCurrentCount(currentCount);
+                vo.setPreviousCount(previousCount);
                 result.add(vo);
             }
             result.sort((a, b) -> Double.compare(b.getDegradationRate(), a.getDegradationRate()));

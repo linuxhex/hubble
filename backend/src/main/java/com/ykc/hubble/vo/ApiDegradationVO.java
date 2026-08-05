@@ -24,8 +24,8 @@ public class ApiDegradationVO {
     private double degradationRate;
 
     /** 当前请求数 */
-    private int currentCount;
+    private long currentCount;
 
     /** 上期请求数 */
-    private int previousCount;
+    private long previousCount;
 }
