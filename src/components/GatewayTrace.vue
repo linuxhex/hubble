@@ -229,18 +229,40 @@ onMounted(() => {
 
 .chain-header {
   background: white;
-  padding: 12px 24px;
+  padding: 10px 16px;
   border-radius: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
+@media (max-width: 768px) {
+  .chain-header {
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
 .chain-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #333;
+}
+
+@media (max-width: 768px) {
+  .chain-title {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chain-title {
+    font-size: 13px;
+  }
 }
 
 .chain-meta {
@@ -248,13 +270,34 @@ onMounted(() => {
   color: #999;
 }
 
+@media (max-width: 480px) {
+  .chain-meta {
+    font-size: 11px;
+  }
+}
+
 .trace-summary {
   background: white;
-  padding: 16px 24px;
+  padding: 12px 16px;
   border-radius: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   display: flex;
-  gap: 32px;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .trace-summary {
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .trace-summary {
+    gap: 12px;
+  }
 }
 
 .summary-item {
@@ -268,10 +311,28 @@ onMounted(() => {
   color: #999;
 }
 
+@media (max-width: 480px) {
+  .summary-label {
+    font-size: 11px;
+  }
+}
+
 .summary-value {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: #333;
+}
+
+@media (max-width: 768px) {
+  .summary-value {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .summary-value {
+    font-size: 15px;
+  }
 }
 
 .summary-value.summary-error {
@@ -280,7 +341,7 @@ onMounted(() => {
 
 .chain-flow {
   background: white;
-  padding: 24px;
+  padding: 16px;
   border-radius: 4px;
   display: flex;
   align-items: flex-start;
@@ -295,13 +356,27 @@ onMounted(() => {
 }
 
 .chain-node {
-  width: 200px;
+  width: 180px;
   border: 2px solid #e4e7ed;
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   cursor: pointer;
   transition: all 0.2s;
   background: white;
+}
+
+@media (max-width: 768px) {
+  .chain-node {
+    width: 140px;
+    padding: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chain-node {
+    width: 120px;
+    padding: 6px;
+  }
 }
 
 .chain-node:hover {
@@ -327,48 +402,80 @@ onMounted(() => {
 }
 
 .node-service {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 110px;
+}
+
+@media (max-width: 768px) {
+  .node-service {
+    font-size: 12px;
+    max-width: 90px;
+  }
+}
+
+@media (max-width: 480px) {
+  .node-service {
+    font-size: 11px;
+    max-width: 75px;
+  }
 }
 
 .node-status {
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 10px;
+  padding: 2px 5px;
   border-radius: 10px;
   font-weight: 500;
 }
 
-.node-status.success {
-  background: #f0f9eb;
-  color: #67c23a;
-}
-
-.node-status.error {
-  background: #fef0f0;
-  color: #f56c6c;
+@media (max-width: 480px) {
+  .node-status {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
 }
 
 .node-path {
-  font-size: 12px;
+  font-size: 11px;
   color: #1890ff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+}
+
+@media (max-width: 768px) {
+  .node-path {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .node-path {
+    font-size: 9px;
+    margin-bottom: 4px;
+  }
 }
 
 .node-stats {
   display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-  padding: 6px 0;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 0;
   border-top: 1px solid #f0f0f0;
   border-bottom: 1px solid #f0f0f0;
+}
+
+@media (max-width: 480px) {
+  .node-stats {
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 3px 0;
+  }
 }
 
 .stat-item {
@@ -382,39 +489,100 @@ onMounted(() => {
   color: #999;
 }
 
+@media (max-width: 480px) {
+  .stat-label {
+    font-size: 9px;
+  }
+}
+
 .stat-value {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: #333;
+}
+
+@media (max-width: 768px) {
+  .stat-value {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-value {
+    font-size: 10px;
+  }
 }
 
 .stat-value.stat-slow {
   color: #f56c6c;
 }
 
+.node-status.success {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.node-status.error {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
 .node-meta {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10px;
   color: #999;
+}
+
+@media (max-width: 480px) {
+  .node-meta {
+    font-size: 9px;
+  }
 }
 
 .chain-arrow {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 8px;
   position: relative;
-  min-width: 80px;
+  min-width: 60px;
   justify-content: center;
 }
 
+@media (max-width: 768px) {
+  .chain-arrow {
+    padding: 0 6px;
+    min-width: 50px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chain-arrow {
+    padding: 0 4px;
+    min-width: 40px;
+  }
+}
+
 .arrow-line {
-  width: 50px;
+  width: 40px;
   height: 2px;
   background: linear-gradient(to right, #dcdfe6, #c0c4cc);
   margin-bottom: 6px;
   position: relative;
+}
+
+@media (max-width: 768px) {
+  .arrow-line {
+    width: 30px;
+  }
+}
+
+@media (max-width: 480px) {
+  .arrow-line {
+    width: 25px;
+    margin-bottom: 4px;
+  }
 }
 
 .arrow-line::after {
@@ -430,7 +598,7 @@ onMounted(() => {
 }
 
 .arrow-duration {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
   font-weight: 500;
   white-space: nowrap;
@@ -438,6 +606,20 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: 10px;
   border: 1px solid #e4e7ed;
+}
+
+@media (max-width: 768px) {
+  .arrow-duration {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .arrow-duration {
+    font-size: 9px;
+    padding: 1px 4px;
+  }
 }
 
 .arrow-head {
