@@ -162,6 +162,8 @@ public class GatewayService {
             long fromMs = from * 1000;
             long toMs = now * 1000;
             
+            log.info("查询概览数据: timeRange={}, intervalInSec={}, fromMs={}, toMs={}", timeRange, intervalInSec, fromMs, toMs);
+            
             // 查询接口调用统计：rt（响应时间）、count（调用次数）、error（错误数）
             var response = armsClient.queryMetrics(
                 "appstat.transaction",
