@@ -86,29 +86,39 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        List<LogEntry> logs = queryLogs(logstore, "*", from, now, 0, 1000);
+        // 使用分析查询获取准确的统计数据
+        long totalRequests = slsQueryClient.countLogstore(logstore, "*", from, now);
+        long errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
 
         GatewayOverviewVO vo = new GatewayOverviewVO();
-        vo.setTotalRequests(logs.size());
-        vo.setQps(seconds > 0 ? (double) logs.size() / seconds : 0);
+        vo.setTotalRequests(totalRequests);
+        vo.setQps(seconds > 0 ? (double) totalRequests / seconds : 0);
+        vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
 
-        long errorCount = logs.stream().filter(l -> "ERROR".equalsIgnoreCase(l.getLevel())).count();
-        vo.setErrorRate(logs.isEmpty() ? 0 : errorCount * 100.0 / logs.size());
-
-        double avgTime = logs.stream()
+        // 采样部分日志计算平均响应时间（取最近的日志）
+        List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 100);
+        double avgTime = sampleLogs.stream()
                 .mapToLong(l -> extractResponseTime(l.getMessage()))
                 .average()
                 .orElse(0);
         vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
 
-        double prevTotal = logs.size() * 0.92;
-        double prevErrors = errorCount * 0.85;
-        double prevAvg = avgTime * 1.06;
+        // 趋势计算（与上一周期对比）
+        long prevFrom = from - seconds;
+        long prevTotal = slsQueryClient.countLogstore(logstore, "*", prevFrom, from);
+        long prevErrors = slsQueryClient.countLogstore(logstore, "level: ERROR", prevFrom, from);
+        
+        List<LogEntry> prevSampleLogs = queryLogs(logstore, "*", prevFrom, from, 0, 100);
+        double prevAvg = prevSampleLogs.stream()
+                .mapToLong(l -> extractResponseTime(l.getMessage()))
+                .average()
+                .orElse(0);
+        
         double prevQps = prevTotal / seconds;
-        vo.setTotalTrend(prevTotal > 0 ? (logs.size() - prevTotal) / prevTotal * 100 : 0);
-        vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) / prevAvg * 100 : 0);
-        vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) / prevErrors * 100 : 0);
-        vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) / prevQps * 100 : 0);
+        vo.setTotalTrend(prevTotal > 0 ? (totalRequests - prevTotal) * 100.0 / prevTotal : 0);
+        vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
+        vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
+        vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
         return vo;
     }
 
@@ -162,29 +172,42 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        List<LogEntry> logs = queryLogs(logstore, "*", from, now, 0, 5000);
-
-        Map<String, List<LogEntry>> grouped = logs.stream()
-                .filter(l -> l.getContainerName() != null && !l.getContainerName().isBlank())
-                .collect(Collectors.groupingBy(LogEntry::getContainerName));
-
-        return grouped.entrySet().stream()
-                .map(e -> {
-                    GatewayHotApiVO api = new GatewayHotApiVO();
-                    api.setPath("/" + e.getKey());
-                    api.setMethod("GET");
-                    api.setQps(seconds > 0 ? (double) e.getValue().size() / seconds : 0);
-                    double avg = e.getValue().stream()
-                            .mapToLong(l -> extractResponseTime(l.getMessage()))
-                            .average().orElse(0);
-                    api.setAvgTime(Math.round(avg) + "ms");
-                    long errors = e.getValue().stream().filter(l -> "ERROR".equalsIgnoreCase(l.getLevel())).count();
-                    api.setErrorRate(String.format("%.1f%%", e.getValue().isEmpty() ? 0 : errors * 100.0 / e.getValue().size()));
-                    return api;
-                })
-                .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
-                .limit(10)
-                .collect(Collectors.toList());
+        // 使用分析查询获取热门接口统计
+        String query = "* | SELECT __tag__:_container_name_ as service, " +
+                "COUNT(*) as count, " +
+                "AVG(CAST(extract_response_time(message) AS DOUBLE)) as avg_time, " +
+                "SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count " +
+                "GROUP BY __tag__:_container_name_ " +
+                "ORDER BY count DESC " +
+                "LIMIT 10";
+        
+        try {
+            List<Map<String, String>> results = slsQueryClient.queryAnalytics(logstore, query, from, now, 10);
+            
+            return results.stream()
+                    .map(row -> {
+                        GatewayHotApiVO api = new GatewayHotApiVO();
+                        String service = row.getOrDefault("service", "unknown");
+                        api.setPath("/" + service);
+                        api.setMethod("GET");
+                        
+                        long count = Long.parseLong(row.getOrDefault("count", "0"));
+                        api.setQps(seconds > 0 ? (double) count / seconds : 0);
+                        
+                        double avgTime = Double.parseDouble(row.getOrDefault("avg_time", "0"));
+                        api.setAvgTime(Math.round(avgTime) + "ms");
+                        
+                        long errorCount = Long.parseLong(row.getOrDefault("error_count", "0"));
+                        double errorRate = count > 0 ? errorCount * 100.0 / count : 0;
+                        api.setErrorRate(String.format("%.1f%%", errorRate));
+                        
+                        return api;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("查询热门接口失败", e);
+            return new ArrayList<>();
+        }
     }
 
     public List<ApiDegradationVO> degradation(String compareMode) {
