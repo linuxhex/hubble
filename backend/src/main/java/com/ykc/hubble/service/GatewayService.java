@@ -490,6 +490,7 @@ public class GatewayService {
         }
 
         // 使用分析查询按时间分组统计
+        // 先统计所有日志，再尝试按 level 分类
         String query = String.format(
             "* | SELECT " +
             "  CASE " +
@@ -497,9 +498,9 @@ public class GatewayService {
             "    WHEN '%s' = 'hour' THEN date_format(__time__ - __time__ %% 3600, '%%H:%%i') " +
             "    ELSE date_format(__time__ - __time__ %% 86400, '%%m-%%d') " +
             "  END as time_bucket, " +
+            "  COUNT(*) as total_count, " +
             "  SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count, " +
-            "  SUM(CASE WHEN level = 'WARN' THEN 1 ELSE 0 END) as warn_count, " +
-            "  SUM(CASE WHEN level != 'ERROR' AND level != 'WARN' THEN 1 ELSE 0 END) as info_count " +
+            "  SUM(CASE WHEN level = 'WARN' THEN 1 ELSE 0 END) as warn_count " +
             "GROUP BY time_bucket " +
             "ORDER BY time_bucket",
             timeUnit, timeUnit
@@ -507,16 +508,26 @@ public class GatewayService {
 
         try {
             List<Map<String, String>> results = slsQueryClient.queryAnalytics(logstore, query, from, now, 1000);
+            log.info("SLS 趋势查询返回 {} 条数据, timeUnit={}", results.size(), timeUnit);
+            
+            if (!results.isEmpty()) {
+                log.info("SLS 趋势第一条数据: {}", results.get(0));
+            }
             
             // 构建时间序列数据
             Map<String, long[]> bucketMap = new LinkedHashMap<>();
             for (Map<String, String> row : results) {
                 String timeBucket = row.getOrDefault("time_bucket", "");
+                long totalCount = Long.parseLong(row.getOrDefault("total_count", "0"));
                 long errorCount = Long.parseLong(row.getOrDefault("error_count", "0"));
                 long warnCount = Long.parseLong(row.getOrDefault("warn_count", "0"));
-                long infoCount = Long.parseLong(row.getOrDefault("info_count", "0"));
+                // info = total - error - warn
+                long infoCount = totalCount - errorCount - warnCount;
+                if (infoCount < 0) infoCount = 0;
                 bucketMap.put(timeBucket, new long[]{infoCount, warnCount, errorCount});
             }
+            
+            log.info("SLS 趋势构建 {} 个时间点", bucketMap.size());
 
             GatewayTrendVO vo = new GatewayTrendVO();
             vo.setTimestamps(new ArrayList<>(bucketMap.keySet()));
