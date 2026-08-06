@@ -86,6 +86,101 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
+        // 优先从 ARMS 获取数据
+        try {
+            long fromMs = from * 1000;
+            long toMs = now * 1000;
+            
+            // 查询接口调用统计：rt（响应时间）、count（调用次数）、error（错误数）
+            var response = armsClient.queryMetrics(
+                "appstat.transaction",
+                Arrays.asList("rt", "count", "error"),
+                fromMs,
+                toMs,
+                null
+            );
+            
+            if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
+                long totalRequests = 0;
+                long errorCount = 0;
+                double totalRt = 0;
+                
+                for (var itemObj : response.getData().getItems()) {
+                    if (itemObj instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                        if (measures != null) {
+                            totalRequests += ((Number) measures.getOrDefault("count", 0L)).longValue();
+                            errorCount += ((Number) measures.getOrDefault("error", 0L)).longValue();
+                            double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
+                            long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                            totalRt += rt * count;
+                        }
+                    }
+                }
+                
+                double avgTime = totalRequests > 0 ? totalRt / totalRequests : 0;
+                
+                GatewayOverviewVO vo = new GatewayOverviewVO();
+                vo.setTotalRequests(totalRequests);
+                vo.setQps(seconds > 0 ? (double) totalRequests / seconds : 0);
+                vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
+                vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
+
+                // 趋势计算（与上一周期对比）
+                long prevFrom = from - seconds;
+                var prevResponse = armsClient.queryMetrics(
+                    "appstat.transaction",
+                    Arrays.asList("rt", "count", "error"),
+                    prevFrom * 1000,
+                    fromMs,
+                    null
+                );
+                
+                long prevTotal = 0;
+                long prevErrors = 0;
+                double prevTotalRt = 0;
+                
+                if (prevResponse != null && prevResponse.getData() != null && prevResponse.getData().getItems() != null) {
+                    for (var itemObj : prevResponse.getData().getItems()) {
+                        if (itemObj instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                            @SuppressWarnings("unchecked")
+                            Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                            if (measures != null) {
+                                prevTotal += ((Number) measures.getOrDefault("count", 0L)).longValue();
+                                prevErrors += ((Number) measures.getOrDefault("error", 0L)).longValue();
+                                double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
+                                long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                                prevTotalRt += rt * count;
+                            }
+                        }
+                    }
+                }
+                
+                double prevAvg = prevTotal > 0 ? prevTotalRt / prevTotal : 0;
+                double prevQps = prevTotal / seconds;
+                
+                vo.setTotalTrend(prevTotal > 0 ? (totalRequests - prevTotal) * 100.0 / prevTotal : 0);
+                vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
+                vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
+                vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
+                
+                log.info("从 ARMS 获取概览数据成功: totalRequests={}, qps={}", totalRequests, vo.getQps());
+                return vo;
+            }
+        } catch (Exception e) {
+            log.warn("从 ARMS 获取概览数据失败，降级到 SLS: {}", e.getMessage());
+        }
+
+        // ARMS 失败时降级到 SLS
+        return overviewFromSls(timeRange, now, seconds, from, logstore);
+    }
+    
+    private GatewayOverviewVO overviewFromSls(String timeRange, long now, long seconds, long from, String logstore) {
         // 使用分析查询获取准确的统计数据
         long totalRequests = slsQueryClient.countLogstore(logstore, "*", from, now);
         long errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
@@ -128,6 +223,78 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
+        // 优先从 ARMS 获取数据
+        try {
+            long fromMs = from * 1000;
+            long toMs = now * 1000;
+            
+            // 根据时间范围确定时间粒度
+            int intervalInSec;
+            if (seconds <= 3600) { // 1小时内，按分钟分组
+                intervalInSec = 60;
+            } else if (seconds <= 86400) { // 24小时内，按小时分组
+                intervalInSec = 3600;
+            } else { // 超过24小时，按天分组
+                intervalInSec = 86400;
+            }
+            
+            // 查询接口调用统计，按时间分组
+            var response = armsClient.queryMetrics(
+                "appstat.transaction",
+                Arrays.asList("count", "error"),
+                fromMs,
+                toMs,
+                null
+            );
+            
+            if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
+                // ARMS 返回的数据已经按时间分组
+                Map<String, long[]> bucketMap = new LinkedHashMap<>();
+                DateTimeFormatter fmt = seconds <= 86400 
+                    ? DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+                    : DateTimeFormatter.ofPattern("MM-dd").withZone(ZoneId.systemDefault());
+                
+                for (var itemObj : response.getData().getItems()) {
+                    if (itemObj instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                        Long timestamp = (Long) item.get("time");
+                        if (measures != null && timestamp != null) {
+                            String label = fmt.format(Instant.ofEpochMilli(timestamp));
+                            long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                            long error = ((Number) measures.getOrDefault("error", 0L)).longValue();
+                            long info = count - error;
+                            bucketMap.put(label, new long[]{info, 0, error}); // info, warn, error
+                        }
+                    }
+                }
+                
+                GatewayTrendVO vo = new GatewayTrendVO();
+                vo.setTimestamps(new ArrayList<>(bucketMap.keySet()));
+                vo.setInfoCounts(new ArrayList<>());
+                vo.setWarnCounts(new ArrayList<>());
+                vo.setErrorCounts(new ArrayList<>());
+                
+                for (long[] counts : bucketMap.values()) {
+                    vo.getInfoCounts().add(counts[0]);
+                    vo.getWarnCounts().add(counts[1]);
+                    vo.getErrorCounts().add(counts[2]);
+                }
+                
+                log.info("从 ARMS 获取趋势数据成功: buckets={}", bucketMap.size());
+                return vo;
+            }
+        } catch (Exception e) {
+            log.warn("从 ARMS 获取趋势数据失败，降级到 SLS: {}", e.getMessage());
+        }
+
+        // ARMS 失败时降级到 SLS
+        return trendFromSls(timeRange, now, seconds, from, logstore);
+    }
+    
+    private GatewayTrendVO trendFromSls(String timeRange, long now, long seconds, long from, String logstore) {
         // 根据时间范围确定时间粒度
         String timeUnit;
         int bucketSeconds;
@@ -201,6 +368,80 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
+        // 优先从 ARMS 获取数据
+        try {
+            long fromMs = from * 1000;
+            long toMs = now * 1000;
+            
+            // 查询接口调用统计，按接口分组
+            var response = armsClient.queryMetrics(
+                "appstat.transaction",
+                Arrays.asList("rt", "count", "error"),
+                fromMs,
+                toMs,
+                null
+            );
+            
+            if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
+                // 按接口路径分组统计
+                Map<String, long[]> apiStats = new LinkedHashMap<>(); // path -> [count, totalRt, errorCount]
+                
+                for (var itemObj : response.getData().getItems()) {
+                    if (itemObj instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> tags = (Map<Object, Object>) item.get("tags");
+                        if (measures != null && tags != null) {
+                            String apiPath = String.valueOf(tags.getOrDefault("api", "unknown"));
+                            long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                            double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
+                            long error = ((Number) measures.getOrDefault("error", 0L)).longValue();
+                            
+                            apiStats.computeIfAbsent(apiPath, k -> new long[3]);
+                            long[] stats = apiStats.get(apiPath);
+                            stats[0] += count; // total count
+                            stats[1] += rt * count; // total rt
+                            stats[2] += error; // error count
+                        }
+                    }
+                }
+                
+                // 转换为 VO 并排序
+                List<GatewayHotApiVO> result = apiStats.entrySet().stream()
+                    .map(entry -> {
+                        GatewayHotApiVO api = new GatewayHotApiVO();
+                        api.setPath(entry.getKey());
+                        api.setMethod("GET"); // ARMS 可能没有方法信息，默认为 GET
+                        
+                        long count = entry.getValue()[0];
+                        double totalRt = entry.getValue()[1];
+                        long errorCount = entry.getValue()[2];
+                        
+                        api.setQps(seconds > 0 ? (double) count / seconds : 0);
+                        api.setAvgTime(Math.round(count > 0 ? totalRt / count : 0) + "ms");
+                        api.setErrorRate(String.format("%.1f%%", count > 0 ? errorCount * 100.0 / count : 0));
+                        
+                        return api;
+                    })
+                    .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
+                    .limit(10)
+                    .collect(Collectors.toList());
+                
+                log.info("从 ARMS 获取热门接口成功: count={}", result.size());
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("从 ARMS 获取热门接口失败，降级到 SLS: {}", e.getMessage());
+        }
+
+        // ARMS 失败时降级到 SLS
+        return hotApisFromSls(timeRange, now, seconds, from, logstore);
+    }
+    
+    private List<GatewayHotApiVO> hotApisFromSls(String timeRange, long now, long seconds, long from, String logstore) {
         // 使用分析查询获取热门接口统计
         String query = "* | SELECT __tag__:_container_name_ as service, " +
                 "COUNT(*) as count, " +
