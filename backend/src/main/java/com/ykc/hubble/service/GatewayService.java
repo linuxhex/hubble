@@ -148,13 +148,18 @@ public class GatewayService {
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
         // 根据时间范围确定聚合粒度（ARMS 支持的标准粒度）
+        // ARMS 只支持特定的间隔值：60, 300, 900, 3600, 86400
         int intervalInSec;
-        if (seconds <= 3600) { // 1小时内，按1分钟分组
-            intervalInSec = 60;
-        } else if (seconds <= 86400) { // 24小时内，按5分钟分组
-            intervalInSec = 300;
-        } else { // 超过24小时，按小时分组
+        int rtIntervalInSec;
+        if (seconds <= 3600) { // 1小时内
+            intervalInSec = 3600; // 按小时
+            rtIntervalInSec = 3600;
+        } else if (seconds <= 86400) { // 24小时内
             intervalInSec = 3600;
+            rtIntervalInSec = 3600;
+        } else { // 超过24小时
+            intervalInSec = 86400;
+            rtIntervalInSec = 86400;
         }
 
         // 优先从 ARMS 获取数据
@@ -162,12 +167,13 @@ public class GatewayService {
             long fromMs = from * 1000;
             long toMs = now * 1000;
             
-            log.info("查询概览数据: timeRange={}, intervalInSec={}, fromMs={}, toMs={}", timeRange, intervalInSec, fromMs, toMs);
+            log.info("查询概览数据: timeRange={}, intervalInSec={}, rtIntervalInSec={}, fromMs={}, toMs={}", 
+                timeRange, intervalInSec, rtIntervalInSec, fromMs, toMs);
             
-            // 查询接口调用统计：rt（响应时间）、count（调用次数）、error（错误数）
+            // 1. 查询调用次数和错误数（支持细粒度）
             var response = armsClient.queryMetrics(
                 "appstat.transaction",
-                Arrays.asList("rt", "count", "error"),
+                Arrays.asList("count", "error"),
                 fromMs,
                 toMs,
                 null,
@@ -177,7 +183,6 @@ public class GatewayService {
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
                 long totalRequests = 0;
                 long errorCount = 0;
-                double totalRt = 0;
                 
                 for (var itemObj : response.getData().getItems()) {
                     if (itemObj instanceof Map) {
@@ -188,14 +193,44 @@ public class GatewayService {
                         if (measures != null) {
                             totalRequests += ((Number) measures.getOrDefault("count", 0L)).longValue();
                             errorCount += ((Number) measures.getOrDefault("error", 0L)).longValue();
-                            double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
-                            long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
-                            totalRt += rt * count;
                         }
                     }
                 }
                 
-                double avgTime = totalRequests > 0 ? totalRt / totalRequests : 0;
+                // 2. 查询平均响应时间（使用较粗的粒度）
+                double avgTime = 0;
+                try {
+                    var rtResponse = armsClient.queryMetrics(
+                        "appstat.transaction",
+                        Arrays.asList("rt", "count"),
+                        fromMs,
+                        toMs,
+                        null,
+                        rtIntervalInSec
+                    );
+                    
+                    if (rtResponse != null && rtResponse.getData() != null && rtResponse.getData().getItems() != null) {
+                        double totalRt = 0;
+                        long rtCount = 0;
+                        for (var itemObj : rtResponse.getData().getItems()) {
+                            if (itemObj instanceof Map) {
+                                @SuppressWarnings("unchecked")
+                                Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                                @SuppressWarnings("unchecked")
+                                Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                                if (measures != null) {
+                                    double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
+                                    long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                                    totalRt += rt * count;
+                                    rtCount += count;
+                                }
+                            }
+                        }
+                        avgTime = rtCount > 0 ? totalRt / rtCount : 0;
+                    }
+                } catch (Exception e) {
+                    log.warn("查询 RT 失败，使用 SLS 降级: {}", e.getMessage());
+                }
                 
                 GatewayOverviewVO vo = new GatewayOverviewVO();
                 vo.setTotalRequests(totalRequests);
@@ -207,7 +242,7 @@ public class GatewayService {
                 long prevFrom = from - seconds;
                 var prevResponse = armsClient.queryMetrics(
                     "appstat.transaction",
-                    Arrays.asList("rt", "count", "error"),
+                    Arrays.asList("count", "error"),
                     prevFrom * 1000,
                     fromMs,
                     null,
@@ -216,7 +251,6 @@ public class GatewayService {
                 
                 long prevTotal = 0;
                 long prevErrors = 0;
-                double prevTotalRt = 0;
                 
                 if (prevResponse != null && prevResponse.getData() != null && prevResponse.getData().getItems() != null) {
                     for (var itemObj : prevResponse.getData().getItems()) {
@@ -228,15 +262,46 @@ public class GatewayService {
                             if (measures != null) {
                                 prevTotal += ((Number) measures.getOrDefault("count", 0L)).longValue();
                                 prevErrors += ((Number) measures.getOrDefault("error", 0L)).longValue();
-                                double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
-                                long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
-                                prevTotalRt += rt * count;
                             }
                         }
                     }
                 }
                 
-                double prevAvg = prevTotal > 0 ? prevTotalRt / prevTotal : 0;
+                // 查询上期 RT
+                double prevAvg = 0;
+                try {
+                    var prevRtResponse = armsClient.queryMetrics(
+                        "appstat.transaction",
+                        Arrays.asList("rt", "count"),
+                        prevFrom * 1000,
+                        fromMs,
+                        null,
+                        rtIntervalInSec
+                    );
+                    
+                    if (prevRtResponse != null && prevRtResponse.getData() != null && prevRtResponse.getData().getItems() != null) {
+                        double prevTotalRt = 0;
+                        long prevRtCount = 0;
+                        for (var itemObj : prevRtResponse.getData().getItems()) {
+                            if (itemObj instanceof Map) {
+                                @SuppressWarnings("unchecked")
+                                Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                                @SuppressWarnings("unchecked")
+                                Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                                if (measures != null) {
+                                    double rt = ((Number) measures.getOrDefault("rt", 0.0)).doubleValue();
+                                    long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                                    prevTotalRt += rt * count;
+                                    prevRtCount += count;
+                                }
+                            }
+                        }
+                        prevAvg = prevRtCount > 0 ? prevTotalRt / prevRtCount : 0;
+                    }
+                } catch (Exception e) {
+                    log.warn("查询上期 RT 失败: {}", e.getMessage());
+                }
+                
                 double prevQps = prevTotal / seconds;
                 
                 vo.setTotalTrend(prevTotal > 0 ? (totalRequests - prevTotal) * 100.0 / prevTotal : 0);
@@ -244,7 +309,7 @@ public class GatewayService {
                 vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
                 vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
                 
-                log.info("从 ARMS 获取概览数据成功: totalRequests={}, qps={}", totalRequests, vo.getQps());
+                log.info("从 ARMS 获取概览数据成功: totalRequests={}, qps={}, avgRt={}", totalRequests, vo.getQps(), avgTime);
                 return vo;
             }
         } catch (Exception e) {
@@ -257,8 +322,26 @@ public class GatewayService {
     
     private GatewayOverviewVO overviewFromSls(String timeRange, long now, long seconds, long from, String logstore) {
         // 使用分析查询获取准确的统计数据
-        long totalRequests = slsQueryClient.countLogstore(logstore, "*", from, now);
-        long errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
+        long totalRequests = 0;
+        long errorCount = 0;
+        
+        try {
+            String countQuery = "* | SELECT COUNT(*) as total";
+            List<Map<String, String>> countResult = slsQueryClient.queryAnalytics(logstore, countQuery, from, now, 1);
+            if (!countResult.isEmpty()) {
+                totalRequests = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
+            }
+            
+            String errorQuery = "* | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            List<Map<String, String>> errorResult = slsQueryClient.queryAnalytics(logstore, errorQuery, from, now, 1);
+            if (!errorResult.isEmpty()) {
+                errorCount = Long.parseLong(errorResult.get(0).getOrDefault("total", "0"));
+            }
+        } catch (Exception e) {
+            log.warn("SLS 分析查询失败，使用 GetHistograms 降级: {}", e.getMessage());
+            totalRequests = slsQueryClient.countLogstore(logstore, "*", from, now);
+            errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
+        }
 
         GatewayOverviewVO vo = new GatewayOverviewVO();
         vo.setTotalRequests(totalRequests);
@@ -275,8 +358,26 @@ public class GatewayService {
 
         // 趋势计算（与上一周期对比）
         long prevFrom = from - seconds;
-        long prevTotal = slsQueryClient.countLogstore(logstore, "*", prevFrom, from);
-        long prevErrors = slsQueryClient.countLogstore(logstore, "level: ERROR", prevFrom, from);
+        long prevTotal = 0;
+        long prevErrors = 0;
+        
+        try {
+            String prevCountQuery = "* | SELECT COUNT(*) as total";
+            List<Map<String, String>> prevCountResult = slsQueryClient.queryAnalytics(logstore, prevCountQuery, prevFrom, from, 1);
+            if (!prevCountResult.isEmpty()) {
+                prevTotal = Long.parseLong(prevCountResult.get(0).getOrDefault("total", "0"));
+            }
+            
+            String prevErrorQuery = "* | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            List<Map<String, String>> prevErrorResult = slsQueryClient.queryAnalytics(logstore, prevErrorQuery, prevFrom, from, 1);
+            if (!prevErrorResult.isEmpty()) {
+                prevErrors = Long.parseLong(prevErrorResult.get(0).getOrDefault("total", "0"));
+            }
+        } catch (Exception e) {
+            log.warn("SLS 上期分析查询失败: {}", e.getMessage());
+            prevTotal = slsQueryClient.countLogstore(logstore, "*", prevFrom, from);
+            prevErrors = slsQueryClient.countLogstore(logstore, "level: ERROR", prevFrom, from);
+        }
         
         List<LogEntry> prevSampleLogs = queryLogs(logstore, "*", prevFrom, from, 0, 100);
         double prevAvg = prevSampleLogs.stream()
@@ -289,6 +390,8 @@ public class GatewayService {
         vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
         vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
         vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
+        
+        log.info("SLS 概览数据: totalRequests={}, errorCount={}, avgRt={}", totalRequests, errorCount, avgTime);
         return vo;
     }
 
@@ -304,9 +407,10 @@ public class GatewayService {
             long toMs = now * 1000;
             
             // 根据时间范围确定时间粒度
+            // ARMS 只支持特定的间隔值：60, 300, 900, 3600, 86400
             int intervalInSec;
-            if (seconds <= 3600) { // 1小时内，按分钟分组
-                intervalInSec = 60;
+            if (seconds <= 3600) { // 1小时内，按小时分组
+                intervalInSec = 3600;
             } else if (seconds <= 86400) { // 24小时内，按小时分组
                 intervalInSec = 3600;
             } else { // 超过24小时，按天分组
