@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { getApiDegradation } from '@/api/gateway.js'
+import { getApiDegradation, getP60Ranking } from '@/api/gateway.js'
 
 const loading = ref(false)
 const compareMode = ref('day')
@@ -14,14 +14,22 @@ const countdownText = ref(`${countdown}s`)
 
 const modeOptions = [
   { label: '今天 vs 昨天', value: 'day' },
-  { label: '本周 vs 上周', value: 'week' }
+  { label: '本周 vs 上周', value: 'week' },
+  { label: 'P60 耗时排名', value: 'p60' }
 ]
 
 const fetchData = async () => {
   loading.value = true
   try {
     console.log('Fetching data with mode:', compareMode.value)
-    const res = await getApiDegradation({ compareMode: compareMode.value })
+    let res
+    if (compareMode.value === 'p60') {
+      // P60耗时排名模式：调用单独的接口，默认使用day模式
+      res = await getP60Ranking({ compareMode: 'day' })
+    } else {
+      // 劣化模式：调用劣化接口
+      res = await getApiDegradation({ compareMode: compareMode.value })
+    }
     console.log('API response:', res)
     tableData.value = res.data || []
     console.log('Table data:', tableData.value)

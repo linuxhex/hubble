@@ -134,7 +134,7 @@ public class AlertDataService {
             long now = System.currentTimeMillis() / 1000;
             long from = now - TimeRanges.toSeconds(timeRange);
             String logstore = monitorProperties.getDefaultQueryLogstore();
-            String query = "level: ERROR | SELECT count(*) as cnt";
+            String query = "* | SELECT count(*) as cnt";
             var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1);
             long count = 0;
             if (!rows.isEmpty()) {

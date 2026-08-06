@@ -15,3 +15,7 @@ export function getGatewayHotApis(params) {
 export function getApiDegradation(params) {
   return request.get('/gateway/degradation', { params })
 }
+
+export function getP60Ranking(params) {
+  return request.get('/gateway/p60-ranking', { params })
+}

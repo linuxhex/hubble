@@ -314,11 +314,13 @@ const handleRefresh = () => {
 
 const startAutoRefresh = () => {
   stopAutoRefresh()
+  console.log('[AlertDashboard] 启动自动刷新，间隔:', AUTO_REFRESH_INTERVAL, '秒')
   countdownTimer = window.setInterval(() => {
     countdown.value--
     if (countdown.value <= 0) countdown.value = AUTO_REFRESH_INTERVAL
   }, 1000)
   autoRefreshTimer = window.setInterval(() => {
+    console.log('[AlertDashboard] 自动刷新触发')
     chartKey.value++
     loadStatistics()
     updateChart()
@@ -327,6 +329,7 @@ const startAutoRefresh = () => {
 }
 
 const stopAutoRefresh = () => {
+  console.log('[AlertDashboard] 停止自动刷新')
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
@@ -441,9 +444,13 @@ const handleResize = () => {
 
 const handleVisibilityChange = () => {
   if (document.visibilityState === 'visible') {
+    // 页面重新可见时，重启自动刷新并立即刷新数据
+    startAutoRefresh()
     countdown.value = AUTO_REFRESH_INTERVAL
+    chartKey.value++
     loadStatistics()
     updateChart()
+    fetchErrorTypes()
   }
 }
 
@@ -536,6 +543,11 @@ onMounted(() => {
 })
 
 onActivated(() => {
+  // 组件被激活时（keep-alive），重启自动刷新并刷新数据
+  startAutoRefresh()
+  countdown.value = AUTO_REFRESH_INTERVAL
+  chartKey.value++
+  loadStatistics()
   setTimeout(() => {
     if (chartRef.value) {
       if (chart) chart.dispose()
@@ -543,6 +555,7 @@ onActivated(() => {
       updateChart()
     }
   }, 100)
+  fetchErrorTypes()
 })
 
 onBeforeUnmount(() => {

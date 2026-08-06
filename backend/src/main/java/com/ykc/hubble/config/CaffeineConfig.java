@@ -2,6 +2,7 @@ package com.ykc.hubble.config;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.ykc.hubble.vo.OverviewSnapshotPoint;
 import com.ykc.hubble.vo.SnapshotPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,5 +23,13 @@ public class CaffeineConfig {
     @Bean
     public Cache<Long, Deque<SnapshotPoint>> monitorSnapshotCache() {
         return Caffeine.newBuilder().maximumSize(5000).build();
+    }
+
+    /**
+     * 概览数据时序快照缓存：时间范围 -> 时序点队列
+     */
+    @Bean
+    public Cache<String, Deque<OverviewSnapshotPoint>> overviewSnapshotCaffeineCache() {
+        return Caffeine.newBuilder().maximumSize(1000).build();
     }
 }

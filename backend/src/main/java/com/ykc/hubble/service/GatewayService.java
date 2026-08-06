@@ -812,6 +812,92 @@ public class GatewayService {
         return result.size() > 200 ? result.subList(0, 200) : result;
     }
 
+    public List<ApiDegradationVO> p60Ranking(String compareMode) {
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate today = LocalDate.now(zone);
+        long[] currentRange;
+        long[] previousRange;
+
+        switch (compareMode != null ? compareMode.toLowerCase() : "day") {
+            case "week": {
+                LocalDate thisWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+                long duration = ChronoUnit.DAYS.between(
+                        today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1), today) * 86400;
+                currentRange = new long[]{thisWeekStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
+                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                break;
+            }
+            case "month": {
+                LocalDate thisMonthStart = today.with(TemporalAdjusters.firstDayOfMonth());
+                long duration = ChronoUnit.DAYS.between(thisMonthStart.minusMonths(1), thisMonthStart) * 86400;
+                currentRange = new long[]{thisMonthStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
+                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                break;
+            }
+            default: {
+                currentRange = new long[]{today.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
+                previousRange = new long[]{currentRange[0] - 86400, currentRange[0]};
+                break;
+            }
+        }
+
+        String logstore = monitorProperties.getDefaultQueryLogstore();
+
+        Map<String, long[]> currentApiStats;
+        Map<String, long[]> previousApiStats;
+        try {
+            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
+        } catch (Exception e) {
+            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            currentApiStats = new HashMap<>();
+        }
+        try {
+            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
+        } catch (Exception e) {
+            log.error("查询上期时段API失败: {}", e.getMessage(), e);
+            previousApiStats = new HashMap<>();
+        }
+
+        log.info("P60排名: compareMode={}, currentApis={}, previousApis={}", compareMode, currentApiStats.size(), previousApiStats.size());
+
+        List<ApiDegradationVO> result = new ArrayList<>();
+        for (String apiPath : currentApiStats.keySet()) {
+            long[] cur = currentApiStats.get(apiPath);
+            long[] prev = previousApiStats.get(apiPath);
+            long currentCount = cur != null ? cur[0] : 0;
+            long previousCount = prev != null ? prev[0] : 0;
+            double currentP60 = cur != null ? cur[1] : 0;
+            double previousP60 = prev != null ? prev[1] : 0;
+
+            // 过滤：必须有请求数且有RT数据
+            if (currentCount == 0) continue;
+            if (currentP60 == 0) continue;
+
+            // 计算劣化幅度（用于显示）
+            double rtChangeRate = 0;
+            if (previousP60 > 0) {
+                rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
+            }
+
+            ApiDegradationVO vo = new ApiDegradationVO();
+            vo.setApiPath(apiPath);
+            vo.setCurrentAvgTime(Math.round(currentP60 * 10.0) / 10.0);
+            vo.setPreviousAvgTime(Math.round(previousP60 * 10.0) / 10.0);
+            vo.setDegradationRate(Math.round(rtChangeRate * 10.0) / 10.0);
+            vo.setCurrentCount(currentCount);
+            vo.setPreviousCount(previousCount);
+            result.add(vo);
+        }
+
+        // 按当前P60耗时降序排序
+        result.sort((a, b) -> Double.compare(b.getCurrentAvgTime(), a.getCurrentAvgTime()));
+
+        for (int i = 0; i < result.size(); i++) {
+            result.get(i).setRank(i + 1);
+        }
+        return result.size() > 200 ? result.subList(0, 200) : result;
+    }
+
     private static final List<String> KNOWN_SERVICES = List.of(
             "orderserver", "DeviceBusinessServer", "CHARGEBUSINESSSERVER",
             "BaseServer1", "PolyServer", "financeServer", "clearingserver",

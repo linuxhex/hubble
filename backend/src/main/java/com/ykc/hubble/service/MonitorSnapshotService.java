@@ -106,7 +106,7 @@ public class MonitorSnapshotService {
         long now = System.currentTimeMillis() / 1000;
         try {
             String logstore = monitorProperties.getDefaultQueryLogstore();
-            String keywords = "level: ERROR";
+            String keywords = "*";
 
             try {
                 SlsKeywordVO template = slsKeywordService.getSlsKeywordDetail(cfg.getKeywordTemplateId());
@@ -125,7 +125,18 @@ public class MonitorSnapshotService {
             int interval = cfg.getCollectionInterval() == null ? 60 : cfg.getCollectionInterval();
             long from = now - interval;
 
-            long count = slsQueryClient.countLogstore(logstore, keywords, from, now);
+            // 使用分析查询而不是GetHistograms，因为GetHistograms返回0
+            String query = keywords + " | SELECT count(*) as cnt";
+            var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1);
+            long count = 0;
+            if (!rows.isEmpty()) {
+                try {
+                    count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0"));
+                } catch (NumberFormatException e) {
+                    // ignore
+                }
+            }
+            
             snapshotCache.push(cfg.getId(), now, count);
             lastCollectAt.put(cfg.getId(), now);
 
