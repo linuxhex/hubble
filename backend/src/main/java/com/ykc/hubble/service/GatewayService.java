@@ -147,14 +147,14 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        // 根据时间范围确定聚合粒度
+        // 根据时间范围确定聚合粒度（ARMS 支持的标准粒度）
         int intervalInSec;
-        if (seconds <= 3600) { // 1小时内，按5分钟分组
+        if (seconds <= 3600) { // 1小时内，按1分钟分组
+            intervalInSec = 60;
+        } else if (seconds <= 86400) { // 24小时内，按5分钟分组
             intervalInSec = 300;
-        } else if (seconds <= 86400) { // 24小时内，按小时分组
+        } else { // 超过24小时，按小时分组
             intervalInSec = 3600;
-        } else { // 超过24小时，按天分组
-            intervalInSec = 86400;
         }
 
         // 优先从 ARMS 获取数据
