@@ -635,16 +635,33 @@ public class GatewayService {
     }
     
     private List<GatewayHotApiVO> hotApisFromSls(String timeRange, long now, long seconds, long from, String logstore) {
-        // 简化查询：直接采样日志，按containerName分组统计
+        // 使用采样方法，但先获取总数以正确计算QPS
         try {
+            // 1. 使用分析查询获取总日志数
+            long totalCountTemp = 0;
+            try {
+                String countQuery = "* | SELECT COUNT(*) as total";
+                List<Map<String, String>> countResult = slsQueryClient.queryAnalytics(logstore, countQuery, from, now, 1);
+                if (!countResult.isEmpty()) {
+                    totalCountTemp = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
+                }
+            } catch (Exception e) {
+                log.warn("获取总日志数失败: {}", e.getMessage());
+            }
+            final long totalCount = totalCountTemp;
+            log.info("SLS 热门接口：总日志数={}", totalCount);
+            
+            // 2. 采样1000条日志按服务分组
             List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 1000);
             log.info("SLS 热门接口采样 {} 条日志", sampleLogs.size());
             
-            // 按服务分组统计
+            // 3. 按服务分组统计样本中的数量
             Map<String, Long> serviceCounts = sampleLogs.stream()
                 .filter(log -> log.getContainerName() != null && !log.getContainerName().isBlank())
                 .collect(Collectors.groupingBy(LogEntry::getContainerName, Collectors.counting()));
             
+            // 4. 根据样本比例估算实际数量并计算QPS
+            long sampleSize = sampleLogs.size();
             return serviceCounts.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(10)
@@ -652,7 +669,10 @@ public class GatewayService {
                     GatewayHotApiVO api = new GatewayHotApiVO();
                     api.setPath("/" + entry.getKey());
                     api.setMethod("GET");
-                    api.setQps(seconds > 0 ? (double) entry.getValue() / seconds : 0);
+                    
+                    // 根据样本比例估算实际数量
+                    long estimatedCount = (long) ((double) entry.getValue() / sampleSize * totalCount);
+                    api.setQps(seconds > 0 ? (double) estimatedCount / seconds : 0);
                     api.setAvgTime("-");
                     api.setErrorRate("-");
                     return api;
