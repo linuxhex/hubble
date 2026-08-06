@@ -9,9 +9,6 @@
         <el-form-item label="请求URL" class="no-margin">
           <el-input v-model="searchForm.url" placeholder="URL: example.ymm-xxx-app/xxx" size="small" style="width: 300px" />
         </el-form-item>
-        <el-form-item label="状态码" class="no-margin">
-          <el-input v-model="searchForm.statusCode" placeholder="请输入状态码" size="small" style="width: 100px" />
-        </el-form-item>
         <el-form-item label="手机号" class="no-margin">
           <el-input v-model="searchForm.phone" placeholder="请输入手机号" size="small" style="width: 120px" />
         </el-form-item>
@@ -264,7 +261,6 @@ const route = useRoute()
 const searchForm = reactive({
   appName: '',
   url: '',
-  statusCode: '',
   phone: '',
   userId: '',
   traceId: '',
@@ -303,7 +299,6 @@ const fetchLogs = async () => {
     } else {
       if (searchForm.appName) params.appName = searchForm.appName
       if (searchForm.url) params.url = searchForm.url
-      if (searchForm.statusCode) params.statusCode = searchForm.statusCode
       if (searchForm.phone) params.phone = searchForm.phone
       if (searchForm.userId) params.userId = searchForm.userId
       if (searchForm.traceId) params.traceId = searchForm.traceId
@@ -329,10 +324,10 @@ const handleQuery = () => {
 const handleQueryAll = () => {
   searchForm.appName = ''
   searchForm.url = ''
-  searchForm.statusCode = ''
   searchForm.phone = ''
   searchForm.userId = ''
   searchForm.traceId = ''
+  searchForm.keyword = ''
   fetchLogs()
 }
 
@@ -351,7 +346,7 @@ onMounted(() => {
   }
   if (route.query.level === 'ERROR') {
     // 如果指定了ERROR级别，可以在搜索时添加level过滤
-    searchForm.statusCode = '' // 暂时不处理level，后续可以扩展
+    // 暂时不处理level，后续可以扩展
   }
   // 从异常大盘跳转时，自动触发搜索
   if (route.query.appName || route.query.keyword) {
