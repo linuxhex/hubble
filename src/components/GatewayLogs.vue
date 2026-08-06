@@ -519,8 +519,30 @@ const handleUrlClick = (row) => {
 .search-form {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .search-form {
+    gap: 6px;
+  }
+  
+  .search-form .el-form-item {
+    flex: 1 1 auto;
+    min-width: 150px;
+  }
+  
+  .search-form .el-input {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .search-form .el-form-item {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
 }
 
 .no-margin {
@@ -528,9 +550,31 @@ const handleUrlClick = (row) => {
 }
 
 .operation-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-left: auto !important;
-  white-space: nowrap;
   margin-right: 8px !important;
+}
+
+@media (max-width: 768px) {
+  .operation-buttons {
+    margin-left: 0 !important;
+    justify-content: flex-start;
+    gap: 4px;
+  }
+  
+  .operation-buttons .el-button {
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .operation-buttons {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
 }
 
 .list-header {
