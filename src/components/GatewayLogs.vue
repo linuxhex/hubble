@@ -514,7 +514,7 @@ const handleUrlClick = (row) => {
 .search-form {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
@@ -524,19 +524,33 @@ const handleUrlClick = (row) => {
   }
   
   .search-form .el-form-item {
-    flex: 1 1 auto;
-    min-width: 150px;
+    flex: 0 0 auto;
   }
   
   .search-form .el-input {
-    width: 100% !important;
+    width: 120px !important;
+  }
+  
+  .search-form .el-form-item__label {
+    font-size: 12px;
   }
 }
 
 @media (max-width: 480px) {
-  .search-form .el-form-item {
-    flex: 1 1 100%;
-    min-width: 100%;
+  .search-form {
+    gap: 4px;
+  }
+  
+  .search-form .el-input {
+    width: 100px !important;
+  }
+  
+  .search-form .el-form-item__label {
+    font-size: 11px;
+  }
+  
+  .search-form .el-input__inner {
+    font-size: 12px;
   }
 }
 
@@ -546,7 +560,7 @@ const handleUrlClick = (row) => {
 
 .operation-buttons {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-left: auto !important;
   margin-right: 8px !important;
@@ -554,8 +568,7 @@ const handleUrlClick = (row) => {
 
 @media (max-width: 768px) {
   .operation-buttons {
-    margin-left: 0 !important;
-    justify-content: flex-start;
+    margin-left: auto !important;
     gap: 4px;
   }
   
@@ -567,8 +580,16 @@ const handleUrlClick = (row) => {
 
 @media (max-width: 480px) {
   .operation-buttons {
-    flex: 1 1 100%;
-    justify-content: center;
+    gap: 3px;
+  }
+  
+  .operation-buttons .el-button {
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+  
+  .operation-buttons .el-button--small {
+    padding: 4px 6px;
   }
 }
 

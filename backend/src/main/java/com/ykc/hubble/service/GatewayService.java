@@ -128,42 +128,71 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        List<LogEntry> logs = queryLogs(logstore, "*", from, now, 0, 5000);
-
-        int hours = (int) Math.max(1, seconds / 3600);
-        Map<String, long[]> buckets = new LinkedHashMap<>();
-        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
-
-        for (int i = hours - 1; i >= 0; i--) {
-            long bucketTime = now - (long) i * 3600;
-            String label = fmt.format(Instant.ofEpochSecond(bucketTime));
-            buckets.put(label, new long[3]);
+        // 根据时间范围确定时间粒度
+        String timeUnit;
+        int bucketSeconds;
+        if (seconds <= 3600) { // 1小时内，按分钟分组
+            timeUnit = "minute";
+            bucketSeconds = 60;
+        } else if (seconds <= 86400) { // 24小时内，按小时分组
+            timeUnit = "hour";
+            bucketSeconds = 3600;
+        } else { // 超过24小时，按天分组
+            timeUnit = "day";
+            bucketSeconds = 86400;
         }
 
-        for (LogEntry entry : logs) {
-            long ts = parseTimestamp(entry.getTime());
-            int hourIndex = (int) ((now - ts) / 3600);
-            if (hourIndex < 0 || hourIndex >= hours) continue;
-            String label = fmt.format(Instant.ofEpochSecond(now - (long) hourIndex * 3600));
-            long[] counts = buckets.get(label);
-            if (counts == null) continue;
-            String level = entry.getLevel() != null ? entry.getLevel().toUpperCase() : "";
-            if ("ERROR".equals(level)) counts[2]++;
-            else if ("WARN".equals(level)) counts[1]++;
-            else counts[0]++;
-        }
+        // 使用分析查询按时间分组统计
+        String query = String.format(
+            "* | SELECT " +
+            "  CASE " +
+            "    WHEN '%s' = 'minute' THEN date_format(__time__ - __time__ %% 60, '%%H:%%i') " +
+            "    WHEN '%s' = 'hour' THEN date_format(__time__ - __time__ %% 3600, '%%H:%%i') " +
+            "    ELSE date_format(__time__ - __time__ %% 86400, '%%m-%%d') " +
+            "  END as time_bucket, " +
+            "  SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count, " +
+            "  SUM(CASE WHEN level = 'WARN' THEN 1 ELSE 0 END) as warn_count, " +
+            "  SUM(CASE WHEN level != 'ERROR' AND level != 'WARN' THEN 1 ELSE 0 END) as info_count " +
+            "GROUP BY time_bucket " +
+            "ORDER BY time_bucket",
+            timeUnit, timeUnit
+        );
 
-        GatewayTrendVO vo = new GatewayTrendVO();
-        vo.setTimestamps(new ArrayList<>(buckets.keySet()));
-        vo.setInfoCounts(new ArrayList<>());
-        vo.setWarnCounts(new ArrayList<>());
-        vo.setErrorCounts(new ArrayList<>());
-        for (long[] counts : buckets.values()) {
-            vo.getInfoCounts().add(counts[0]);
-            vo.getWarnCounts().add(counts[1]);
-            vo.getErrorCounts().add(counts[2]);
+        try {
+            List<Map<String, String>> results = slsQueryClient.queryAnalytics(logstore, query, from, now, 1000);
+            
+            // 构建时间序列数据
+            Map<String, long[]> bucketMap = new LinkedHashMap<>();
+            for (Map<String, String> row : results) {
+                String timeBucket = row.getOrDefault("time_bucket", "");
+                long errorCount = Long.parseLong(row.getOrDefault("error_count", "0"));
+                long warnCount = Long.parseLong(row.getOrDefault("warn_count", "0"));
+                long infoCount = Long.parseLong(row.getOrDefault("info_count", "0"));
+                bucketMap.put(timeBucket, new long[]{infoCount, warnCount, errorCount});
+            }
+
+            GatewayTrendVO vo = new GatewayTrendVO();
+            vo.setTimestamps(new ArrayList<>(bucketMap.keySet()));
+            vo.setInfoCounts(new ArrayList<>());
+            vo.setWarnCounts(new ArrayList<>());
+            vo.setErrorCounts(new ArrayList<>());
+            
+            for (long[] counts : bucketMap.values()) {
+                vo.getInfoCounts().add(counts[0]);
+                vo.getWarnCounts().add(counts[1]);
+                vo.getErrorCounts().add(counts[2]);
+            }
+            
+            return vo;
+        } catch (Exception e) {
+            log.error("查询趋势数据失败", e);
+            GatewayTrendVO vo = new GatewayTrendVO();
+            vo.setTimestamps(new ArrayList<>());
+            vo.setInfoCounts(new ArrayList<>());
+            vo.setWarnCounts(new ArrayList<>());
+            vo.setErrorCounts(new ArrayList<>());
+            return vo;
         }
-        return vo;
     }
 
     public List<GatewayHotApiVO> hotApis(String timeRange) {
