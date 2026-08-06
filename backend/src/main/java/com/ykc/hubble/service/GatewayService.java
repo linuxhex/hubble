@@ -39,6 +39,22 @@ public class GatewayService {
     // 接口劣化缓存：key=compareMode, value=[data, timestamp]
     private final Map<String, CacheEntry> degradationCache = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+    
+    // 概览数据缓存：key=timeRange, value=[data, timestamp]
+    private final Map<String, OverviewCacheEntry> overviewCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long OVERVIEW_CACHE_TTL_MS = 60 * 1000; // 1 分钟
+    
+    private static class OverviewCacheEntry {
+        final GatewayOverviewVO data;
+        final long timestamp;
+        OverviewCacheEntry(GatewayOverviewVO data, long timestamp) {
+            this.data = data;
+            this.timestamp = timestamp;
+        }
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > OVERVIEW_CACHE_TTL_MS;
+        }
+    }
 
     @jakarta.annotation.PostConstruct
     public void initCache() {
@@ -81,6 +97,51 @@ public class GatewayService {
     }
 
     public GatewayOverviewVO overview(String timeRange) {
+        // 先检查缓存，有则立即返回
+        OverviewCacheEntry cached = overviewCache.get(timeRange);
+        if (cached != null) {
+            // 如果缓存未过期，直接返回
+            if (!cached.isExpired()) {
+                log.debug("返回概览缓存数据: timeRange={}, age={}ms", timeRange, System.currentTimeMillis() - cached.timestamp);
+                return cached.data;
+            }
+            // 缓存已过期，后台异步更新
+            log.debug("概览缓存已过期，后台更新: timeRange={}", timeRange);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    GatewayOverviewVO freshData = queryOverviewData(timeRange);
+                    overviewCache.put(timeRange, new OverviewCacheEntry(freshData, System.currentTimeMillis()));
+                    log.info("概览缓存已更新: timeRange={}", timeRange);
+                } catch (Exception e) {
+                    log.warn("后台更新概览缓存失败: {}", e.getMessage());
+                }
+            });
+            // 返回旧的缓存数据
+            return cached.data;
+        }
+        
+        // 没有缓存，同步查询并缓存
+        try {
+            GatewayOverviewVO data = queryOverviewData(timeRange);
+            overviewCache.put(timeRange, new OverviewCacheEntry(data, System.currentTimeMillis()));
+            log.info("概览数据已缓存: timeRange={}", timeRange);
+            return data;
+        } catch (Exception e) {
+            log.error("查询概览数据失败: {}", e.getMessage(), e);
+            // 返回空数据
+            GatewayOverviewVO empty = new GatewayOverviewVO();
+            empty.setTotalRequests(0);
+            empty.setQps(0.0);
+            empty.setErrorRate(0.0);
+            empty.setAvgResponseTime(0.0);
+            return empty;
+        }
+    }
+    
+    /**
+     * 实际查询概览数据（ARMS 优先，SLS 降级）
+     */
+    private GatewayOverviewVO queryOverviewData(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
         long seconds = parseTimeRange(timeRange);
         long from = now - seconds;
