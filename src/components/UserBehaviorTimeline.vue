@@ -35,7 +35,7 @@
           <el-descriptions :column="2" border size="small">
             <el-descriptions-item label="追踪ID">
               <span v-if="item.trace" class="trace-link-wrapper">
-                <span class="trace-link" @click.stop="handleTraceClick(item.trace)">
+                <span class="trace-link" @click.stop="handleTraceClick(item.trace, item.dateTime)">
                   <el-icon class="trace-icon"><Link /></el-icon>
                   {{ item.trace }}
                 </span>
@@ -99,9 +99,22 @@ const toggleExpand = (index) => {
 }
 
 // 处理追踪ID点击，跳转到内部链路详情页
-const handleTraceClick = (traceId) => {
+const handleTraceClick = (traceId, timestamp = null) => {
   if (!traceId) return
-  router.push({ path: '/gateway/trace', query: { traceId } })
+  const query = { traceId }
+  if (timestamp) {
+    // Format millisecond timestamp as "yyyy-MM-dd HH:mm:ss.SSS" for backend parsing
+    const date = new Date(timestamp)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hour = String(date.getHours()).padStart(2, '0')
+    const minute = String(date.getMinutes()).padStart(2, '0')
+    const second = String(date.getSeconds()).padStart(2, '0')
+    const millisecond = String(date.getMilliseconds()).padStart(3, '0')
+    query.timestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}.${millisecond}`
+  }
+  router.push({ path: '/gateway/trace', query })
 }
 
 // 在 SLS 控制台查看

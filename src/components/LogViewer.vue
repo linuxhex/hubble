@@ -33,7 +33,7 @@
               link
               type="primary"
               size="small"
-              @click="handleViewTrace(row.trace)"
+              @click="handleViewTrace(row.trace, row.time)"
             >
               链路
             </el-button>
@@ -106,7 +106,7 @@
               link
               type="primary"
               size="small"
-              @click="handleViewTrace(detailLog.trace)"
+              @click="handleViewTrace(detailLog.trace, detailLog.time)"
             >
               查看链路
             </el-button>
@@ -295,8 +295,24 @@ const handleOpenSls = (traceId) => {
 }
 
 // 跳转到链路详情页
-const handleViewTrace = (traceId) => {
-  router.push({ path: '/gateway/trace', query: { traceId } })
+const handleViewTrace = (traceId, timestamp = null) => {
+  const query = { traceId }
+  if (timestamp) {
+    // Format timestamp as "yyyy-MM-dd HH:mm:ss.SSS" for backend parsing
+    const timeNum = parseInt(timestamp)
+    if (!isNaN(timeNum)) {
+      const date = new Date(timeNum * 1000)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hour = String(date.getHours()).padStart(2, '0')
+      const minute = String(date.getMinutes()).padStart(2, '0')
+      const second = String(date.getSeconds()).padStart(2, '0')
+      const millisecond = String(date.getMilliseconds()).padStart(3, '0')
+      query.timestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}.${millisecond}`
+    }
+  }
+  router.push({ path: '/gateway/trace', query })
 }
 </script>
 
