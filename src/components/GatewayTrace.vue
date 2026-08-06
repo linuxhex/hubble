@@ -36,6 +36,25 @@
         <span class="chain-meta">TraceID: {{ currentTraceId }} | 共 {{ totalLogs }} 条日志 | {{ nodes.length }} 个服务</span>
       </div>
 
+      <div class="trace-summary">
+        <div class="summary-item">
+          <span class="summary-label">总耗时</span>
+          <span class="summary-value">{{ totalDuration }}ms</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">服务数</span>
+          <span class="summary-value">{{ nodes.length }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">日志数</span>
+          <span class="summary-value">{{ totalLogs }}</span>
+        </div>
+        <div class="summary-item" v-if="errorCount > 0">
+          <span class="summary-label">异常</span>
+          <span class="summary-value summary-error">{{ errorCount }}</span>
+        </div>
+      </div>
+
       <div class="chain-flow">
         <div
           v-for="(node, index) in nodes"
@@ -52,9 +71,18 @@
               <span class="node-status" :class="node.status">{{ node.status === 'error' ? '异常' : '正常' }}</span>
             </div>
             <div class="node-path">{{ node.apiPath || '--' }}</div>
+            <div class="node-stats">
+              <div class="stat-item">
+                <span class="stat-label">耗时</span>
+                <span class="stat-value" :class="{'stat-slow': node.duration > 1000}">{{ node.duration }}ms</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">日志</span>
+                <span class="stat-value">{{ node.logCount }}</span>
+              </div>
+            </div>
             <div class="node-meta">
               <span class="node-time">{{ node.formattedTime }}</span>
-              <span class="node-logs">{{ node.logCount }} 条日志</span>
             </div>
           </div>
           <div v-if="index < nodes.length - 1" class="chain-arrow">
@@ -67,18 +95,28 @@
 
       <div v-if="selectedNode !== null" class="node-detail">
         <div class="detail-header">
-          <span class="detail-title">{{ nodes[selectedNode].serviceName }} - 日志详情</span>
+          <div class="detail-title-section">
+            <span class="detail-title">{{ nodes[selectedNode].serviceName }} - 日志详情</span>
+            <span class="detail-meta">{{ nodes[selectedNode].logCount }} 条日志 | 耗时 {{ nodes[selectedNode].duration }}ms</span>
+          </div>
           <el-button size="small" @click="selectedNode = null">关闭</el-button>
         </div>
         <div class="detail-logs">
-          <div v-for="(log, lIndex) in nodes[selectedNode].logs" :key="lIndex" class="log-item">
+          <div v-for="(log, lIndex) in nodes[selectedNode].logs" :key="lIndex" class="log-item" :class="{'log-error': log.level === 'ERROR'}">
             <div class="log-header">
               <el-tag :type="log.level === 'ERROR' ? 'danger' : log.level === 'WARN' ? 'warning' : 'info'" size="small">
                 {{ log.level }}
               </el-tag>
               <span class="log-time">{{ log.formattedTime }}</span>
+              <span v-if="log.thread" class="log-thread">{{ log.thread }}</span>
             </div>
             <div class="log-message">{{ log.message }}</div>
+            <div v-if="log.stackTrace" class="log-stack">
+              <details>
+                <summary>查看堆栈</summary>
+                <pre>{{ log.stackTrace }}</pre>
+              </details>
+            </div>
           </div>
         </div>
       </div>
@@ -87,7 +125,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getTraceChain } from '@/api/trace-chain.js'
 
@@ -101,6 +139,14 @@ const searched = ref(false)
 const nodes = ref([])
 const totalLogs = ref(0)
 const selectedNode = ref(null)
+
+const totalDuration = computed(() => {
+  return nodes.value.reduce((sum, node) => sum + (node.duration || 0), 0)
+})
+
+const errorCount = computed(() => {
+  return nodes.value.filter(node => node.status === 'error').length
+})
 
 const fetchTraceChain = async () => {
   if (!traceId.value.trim()) return
@@ -202,6 +248,36 @@ onMounted(() => {
   color: #999;
 }
 
+.trace-summary {
+  background: white;
+  padding: 16px 24px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  display: flex;
+  gap: 32px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #999;
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+}
+
+.summary-value.summary-error {
+  color: #f56c6c;
+}
+
 .chain-flow {
   background: white;
   padding: 24px;
@@ -286,6 +362,36 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
+.node-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 6px 0;
+  border-top: 1px solid #f0f0f0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: #999;
+}
+
+.stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.stat-value.stat-slow {
+  color: #f56c6c;
+}
+
 .node-meta {
   display: flex;
   justify-content: space-between;
@@ -297,28 +403,45 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 12px;
   position: relative;
-  min-width: 60px;
+  min-width: 80px;
+  justify-content: center;
 }
 
 .arrow-line {
-  width: 40px;
+  width: 50px;
   height: 2px;
-  background: #dcdfe6;
-  margin-bottom: 4px;
+  background: linear-gradient(to right, #dcdfe6, #c0c4cc);
+  margin-bottom: 6px;
+  position: relative;
+}
+
+.arrow-line::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: -3px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid #c0c4cc;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
 }
 
 .arrow-duration {
-  font-size: 11px;
-  color: #999;
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
   white-space: nowrap;
+  background: white;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid #e4e7ed;
 }
 
 .arrow-head {
-  color: #dcdfe6;
-  font-size: 12px;
-  margin-top: -14px;
+  display: none;
 }
 
 .node-detail {
@@ -337,10 +460,21 @@ onMounted(() => {
   align-items: center;
 }
 
+.detail-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .detail-title {
   font-size: 14px;
   font-weight: 600;
   color: #333;
+}
+
+.detail-meta {
+  font-size: 12px;
+  color: #999;
 }
 
 .detail-logs {
@@ -354,6 +488,17 @@ onMounted(() => {
   border: 1px solid #f0f0f0;
   border-radius: 4px;
   margin-bottom: 8px;
+  transition: all 0.2s;
+}
+
+.log-item:hover {
+  border-color: #d9d9d9;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.log-item.log-error {
+  border-color: #ffccc7;
+  background: #fff2f0;
 }
 
 .log-item:last-child {
@@ -365,12 +510,22 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .log-time {
   font-size: 12px;
   color: #999;
   font-family: monospace;
+}
+
+.log-thread {
+  font-size: 11px;
+  color: #666;
+  font-family: monospace;
+  padding: 2px 6px;
+  background: #f5f5f5;
+  border-radius: 3px;
 }
 
 .log-message {
@@ -382,5 +537,38 @@ onMounted(() => {
   white-space: pre-wrap;
   max-height: 200px;
   overflow-y: auto;
+}
+
+.log-stack {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e8e8e8;
+}
+
+.log-stack details {
+  font-size: 12px;
+}
+
+.log-stack summary {
+  cursor: pointer;
+  color: #1890ff;
+  font-weight: 500;
+  padding: 4px 0;
+}
+
+.log-stack summary:hover {
+  color: #40a9ff;
+}
+
+.log-stack pre {
+  margin-top: 8px;
+  padding: 12px;
+  background: #f6f8fa;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  color: #586069;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 </style>

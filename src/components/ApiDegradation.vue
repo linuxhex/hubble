@@ -14,18 +14,21 @@ const countdownText = ref(`${countdown}s`)
 
 const modeOptions = [
   { label: '今天 vs 昨天', value: 'day' },
-  { label: '本周 vs 上周', value: 'week' },
-  { label: '本月 vs 上月', value: 'month' }
+  { label: '本周 vs 上周', value: 'week' }
 ]
 
 const fetchData = async () => {
   loading.value = true
   try {
+    console.log('Fetching data with mode:', compareMode.value)
     const res = await getApiDegradation({ compareMode: compareMode.value })
+    console.log('API response:', res)
     tableData.value = res.data || []
+    console.log('Table data:', tableData.value)
     lastUpdated.value = new Date().toLocaleTimeString()
     countdown = REFRESH_INTERVAL / 1000
-  } catch {
+  } catch (error) {
+    console.error('Fetch error:', error)
     tableData.value = []
   } finally {
     loading.value = false
@@ -49,7 +52,7 @@ const formatRate = (rate) => {
 
 const rateIcon = (rate) => {
   if (rate > 0) return '↑'
-  if (rate < 0) return '+'
+  if (rate < 0) return '↓'
   return '-'
 }
 
@@ -57,6 +60,24 @@ const rateClass = (rate) => {
   if (rate > 0) return 'degradation-rate bad'
   if (rate < 0) return 'degradation-rate good'
   return 'degradation-rate neutral'
+}
+
+const rtChangeRate = (row) => {
+  if (row.previousAvgTime <= 0) return ''
+  const rate = ((row.currentAvgTime - row.previousAvgTime) / row.previousAvgTime * 100)
+  return `${Math.abs(rate).toFixed(1)}%`
+}
+
+const rtChangeIcon = (row) => {
+  if (row.currentAvgTime > row.previousAvgTime) return '↑'
+  if (row.currentAvgTime < row.previousAvgTime) return '↓'
+  return '-'
+}
+
+const rtChangeClass = (row) => {
+  if (row.currentAvgTime > row.previousAvgTime) return 'rt-change bad'
+  if (row.currentAvgTime < row.previousAvgTime) return 'rt-change good'
+  return 'rt-change neutral'
 }
 
 const startAutoRefresh = () => {
@@ -122,12 +143,12 @@ onBeforeUnmount(() => {
           </template>
         </el-table-column>
         <el-table-column prop="apiPath" label="接口" min-width="200" show-overflow-tooltip />
-        <el-table-column label="当前平均耗时" width="140" align="right">
+        <el-table-column label="当前P60耗时" width="140" align="right">
           <template #default="{ row }">
             <span class="time-value">{{ row.currentAvgTime.toFixed(1) }} ms</span>
           </template>
         </el-table-column>
-        <el-table-column label="上期平均耗时" width="140" align="right">
+        <el-table-column label="上期P60耗时" width="140" align="right">
           <template #default="{ row }">
             <span class="time-value muted">{{ row.previousAvgTime.toFixed(1) }} ms</span>
           </template>
@@ -205,6 +226,24 @@ onBeforeUnmount(() => {
 }
 
 .degradation-rate.neutral {
+  color: #909399;
+}
+
+.rt-change {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rt-change.bad {
+  color: #f56c6c;
+}
+
+.rt-change.good {
+  color: #67c23a;
+}
+
+.rt-change.neutral {
   color: #909399;
 }
 </style>

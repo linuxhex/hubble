@@ -20,6 +20,11 @@ import org.springframework.context.annotation.Configuration;
 public class MilvusConfig {
 
     /**
+     * 是否启用Milvus（默认启用）
+     */
+    private boolean enabled = true;
+
+    /**
      * Milvus服务地址
      */
     private String host = "localhost";
@@ -54,6 +59,10 @@ public class MilvusConfig {
      */
     @Bean
     public MilvusServiceClient milvusClient() {
+        if (!enabled) {
+            log.info("Milvus已禁用，跳过连接");
+            return null;
+        }
         try {
             ConnectParam.Builder builder = ConnectParam.newBuilder()
                     .withHost(host)
@@ -65,11 +74,12 @@ public class MilvusConfig {
                 builder.withAuthorization(username, password);
             }
 
+            MilvusServiceClient client = new MilvusServiceClient(builder.build());
             log.info("Milvus连接成功: {}:{}, database: {}", host, port, database);
-            return new MilvusServiceClient(builder.build());
+            return client;
         } catch (Exception e) {
-            log.error("Milvus连接失败: {}:{}, database: {}", host, port, database, e);
-            throw new RuntimeException("Milvus连接失败", e);
+            log.warn("Milvus连接失败，相关功能将不可用: {}:{}, database: {}, 错误: {}", host, port, database, e.getMessage());
+            return null;
         }
     }
 }

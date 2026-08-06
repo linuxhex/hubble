@@ -317,6 +317,7 @@ const startAutoRefresh = () => {
     if (countdown.value <= 0) countdown.value = AUTO_REFRESH_INTERVAL
   }, 1000)
   autoRefreshTimer = window.setInterval(() => {
+    chartKey.value++
     loadStatistics()
     updateChart()
     fetchErrorTypes()

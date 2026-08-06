@@ -1,5 +1,7 @@
 package com.ykc.hubble.service;
 
+import com.aliyuncs.arms.model.v20190808.QueryMetricByPageResponse;
+import com.ykc.hubble.client.ArmsClient;
 import com.ykc.hubble.client.SlsQueryClient;
 import com.ykc.hubble.config.MonitorProperties;
 import com.ykc.hubble.config.SlsConfig;
@@ -30,6 +32,7 @@ import java.util.stream.Collectors;
 public class GatewayService {
 
     private final SlsQueryClient slsQueryClient;
+    private final ArmsClient armsClient;
     private final MonitorProperties monitorProperties;
     private final SlsConfig slsConfig;
 
@@ -251,101 +254,65 @@ public class GatewayService {
 
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        Map<String, long[]> currentStats;
-        Map<String, long[]> previousStats;
+        Map<String, long[]> currentApiStats;
+        Map<String, long[]> previousApiStats;
         try {
-            currentStats = queryServiceStats(logstore, currentRange[0], currentRange[1]);
+            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
         } catch (Exception e) {
-            log.error("查询当前时段失败: {}", e.getMessage(), e);
-            currentStats = new HashMap<>();
+            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            currentApiStats = new HashMap<>();
         }
         try {
-            previousStats = queryServiceStats(logstore, previousRange[0], previousRange[1]);
+            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
         } catch (Exception e) {
-            log.error("查询上期时段失败: {}", e.getMessage(), e);
-            previousStats = new HashMap<>();
+            log.error("查询上期时段API失败: {}", e.getMessage(), e);
+            previousApiStats = new HashMap<>();
         }
 
-        log.info("劣化对比: compareMode={}, currentServices={}, previousServices={}", compareMode, currentStats.size(), previousStats.size());
+        log.info("劣化对比: compareMode={}, currentApis={}, previousApis={}", compareMode, currentApiStats.size(), previousApiStats.size());
 
-        Set<String> allServices = new HashSet<>(currentStats.keySet());
-        allServices.addAll(previousStats.keySet());
+        Set<String> allApis = new HashSet<>(currentApiStats.keySet());
+        allApis.addAll(previousApiStats.keySet());
 
         List<ApiDegradationVO> result = new ArrayList<>();
-        for (String service : allServices) {
-            long[] cur = currentStats.get(service);
-            long[] prev = previousStats.get(service);
+        for (String apiPath : allApis) {
+            long[] cur = currentApiStats.get(apiPath);
+            long[] prev = previousApiStats.get(apiPath);
             long currentCount = cur != null ? cur[0] : 0;
             long previousCount = prev != null ? prev[0] : 0;
-            double currentAvg = cur != null ? cur[1] : 0;
-            double previousAvg = prev != null ? prev[1] : 0;
+            double currentP60 = cur != null ? cur[1] : 0;
+            double previousP60 = prev != null ? prev[1] : 0;
 
+            // 过滤：必须有足够的请求数（至少1次）且有RT数据
             if (currentCount == 0 && previousCount == 0) continue;
+            if (currentCount < 1 && previousCount < 1) continue;
+            if (currentP60 == 0 && previousP60 == 0) continue;
+            // 过滤：必须有上期数据（排除新增API，新增API不算劣化）
+            if (previousCount == 0 || previousP60 == 0) continue;
 
-            double rate;
-            if (previousCount > 0) {
-                rate = (currentCount - previousCount) * 100.0 / previousCount;
-            } else if (currentCount > 0) {
-                rate = 100.0;
-            } else {
-                continue;
-            }
+            // 计算P60 RT变化率作为劣化幅度
+            double rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
 
-            if (rate <= 0) continue;
+            // 过滤：只显示真正劣化的API（RT增加）
+            if (rtChangeRate <= 0) continue;
 
             ApiDegradationVO vo = new ApiDegradationVO();
-            vo.setApiPath(service);
-            vo.setCurrentAvgTime(Math.round(currentAvg * 10.0) / 10.0);
-            vo.setPreviousAvgTime(Math.round(previousAvg * 10.0) / 10.0);
-            vo.setDegradationRate(Math.round(rate * 10.0) / 10.0);
+            vo.setApiPath(apiPath);
+            vo.setCurrentAvgTime(Math.round(currentP60 * 10.0) / 10.0);
+            vo.setPreviousAvgTime(Math.round(previousP60 * 10.0) / 10.0);
+            vo.setDegradationRate(Math.round(rtChangeRate * 10.0) / 10.0);
             vo.setCurrentCount(currentCount);
             vo.setPreviousCount(previousCount);
             result.add(vo);
         }
 
+        // 排序：按劣化幅度（P60 RT变化率）降序排序
         result.sort((a, b) -> Double.compare(b.getDegradationRate(), a.getDegradationRate()));
-
-        // 如果劣化服务不足 20 个，从所有服务中补充（包括 rate <= 0 的）
-        if (result.size() < 20) {
-            Set<String> addedServices = result.stream().map(ApiDegradationVO::getApiPath).collect(Collectors.toSet());
-            for (String service : allServices) {
-                if (addedServices.contains(service)) continue;
-                if (result.size() >= 20) break;
-
-                long[] cur = currentStats.get(service);
-                long[] prev = previousStats.get(service);
-                long currentCount = cur != null ? cur[0] : 0;
-                long previousCount = prev != null ? prev[0] : 0;
-                double currentAvg = cur != null ? cur[1] : 0;
-                double previousAvg = prev != null ? prev[1] : 0;
-
-                if (currentCount == 0 && previousCount == 0) continue;
-
-                double rate;
-                if (previousCount > 0) {
-                    rate = (currentCount - previousCount) * 100.0 / previousCount;
-                } else if (currentCount > 0) {
-                    rate = 100.0;
-                } else {
-                    rate = 0.0;
-                }
-
-                ApiDegradationVO vo = new ApiDegradationVO();
-                vo.setApiPath(service);
-                vo.setCurrentAvgTime(Math.round(currentAvg * 10.0) / 10.0);
-                vo.setPreviousAvgTime(Math.round(previousAvg * 10.0) / 10.0);
-                vo.setDegradationRate(Math.round(rate * 10.0) / 10.0);
-                vo.setCurrentCount(currentCount);
-                vo.setPreviousCount(previousCount);
-                result.add(vo);
-            }
-            result.sort((a, b) -> Double.compare(b.getDegradationRate(), a.getDegradationRate()));
-        }
 
         for (int i = 0; i < result.size(); i++) {
             result.get(i).setRank(i + 1);
         }
-        return result.size() > 100 ? result.subList(0, 100) : result;
+        return result.size() > 200 ? result.subList(0, 200) : result;
     }
 
     private static final List<String> KNOWN_SERVICES = List.of(
@@ -387,28 +354,32 @@ public class GatewayService {
                 if (!svcRows.isEmpty()) {
                     long cnt = Long.parseLong(svcRows.get(0).getOrDefault("cnt", "0"));
                     if (cnt > 0) {
-                        // 采样计算平均 RT
-                        long avgRt = 0;
+                        // 采样计算 P60 RT：优先搜索含耗时信息的日志
+                        long p60Rt = 0;
                         try {
-                            List<LogEntry> serviceLogs = queryLogs(logstore, service, from, to, 0, 100);
-                            if (!serviceLogs.isEmpty()) {
-                                double totalRt = 0;
-                                int rtCount = 0;
-                                for (LogEntry log : serviceLogs) {
-                                    double rt = extractDuration(log.getMessage());
+                            String rtQuery = service + " and (cost or useTime or duration or 耗时 or ms or rt or elapsed)";
+                            List<LogEntry> rtLogs = queryLogs(logstore, rtQuery, from, to, 0, 200);
+                            if (rtLogs.isEmpty()) {
+                                rtLogs = queryLogs(logstore, service, from, to, 0, 100);
+                            }
+                            if (!rtLogs.isEmpty()) {
+                                List<Double> rtValues = new ArrayList<>();
+                                for (LogEntry log : rtLogs) {
+                                    double rt = extractDurationFromEntry(log);
                                     if (rt > 0) {
-                                        totalRt += rt;
-                                        rtCount++;
+                                        rtValues.add(rt);
                                     }
                                 }
-                                if (rtCount > 0) {
-                                    avgRt = Math.round(totalRt / rtCount);
+                                if (!rtValues.isEmpty()) {
+                                    Collections.sort(rtValues);
+                                    int p60Index = (int) Math.ceil(0.6 * rtValues.size()) - 1;
+                                    p60Rt = Math.round(rtValues.get(p60Index));
                                 }
                             }
                         } catch (Exception e) {
-                            log.warn("计算服务 {} 平均 RT 失败: {}", service, e.getMessage());
+                            log.warn("计算服务 {} P60 RT 失败: {}", service, e.getMessage());
                         }
-                        stats.put(service, new long[]{cnt, avgRt});
+                        stats.put(service, new long[]{cnt, p60Rt});
                     }
                 }
             } catch (Exception e) {
@@ -418,6 +389,253 @@ public class GatewayService {
 
         log.info("queryServiceStats: from={}, to={}, services={}", from, to, stats.size());
         return stats;
+    }
+
+    private Map<String, long[]> queryApiStats(String logstore, long from, long to) {
+        Map<String, long[]> apiStats = new HashMap<>();
+
+        // 1. 获取服务列表：优先 ARMS，回退 SLS 采样 + 已知服务
+        List<String> serviceNames = discoverServices(logstore, from, to);
+        if (serviceNames.isEmpty()) {
+            serviceNames = new ArrayList<>(KNOWN_SERVICES);
+            log.info("使用已知服务列表: {} 个", serviceNames.size());
+        }
+        log.info("queryApiStats: 发现 {} 个服务", serviceNames.size());
+
+        // 2. 从 ARMS 一次性查询所有接口指标
+        Map<String, long[]> armsApis = queryAllFromArms(serviceNames, from, to);
+        apiStats.putAll(armsApis);
+
+        // 3. 从 SLS 批量查询（单次查询，按 containerName 分组），补充 ARMS 未覆盖的
+        Map<String, long[]> slsApis = queryAllFromSls(logstore, from, to);
+        for (Map.Entry<String, long[]> entry : slsApis.entrySet()) {
+            apiStats.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+
+        log.info("queryApiStats: arms={}, sls={}, total={}", armsApis.size(), slsApis.size(), apiStats.size());
+        return apiStats;
+    }
+
+    private List<String> discoverServices(String logstore, long from, long to) {
+        List<String> serviceNames = new ArrayList<>();
+        try {
+            var appsResponse = armsClient.listApps();
+            if (appsResponse != null && appsResponse.getTraceApps() != null) {
+                for (var app : appsResponse.getTraceApps()) {
+                    String name = app.getAppName();
+                    if (name != null && !name.isBlank()) {
+                        serviceNames.add(name);
+                    }
+                }
+            }
+            log.info("ARMS listApps 返回 {} 个应用", serviceNames.size());
+        } catch (Exception e) {
+            log.warn("ARMS listApps 失败: {}", e.getMessage());
+        }
+
+        if (serviceNames.isEmpty()) {
+            try {
+                List<LogEntry> sample = queryLogs(logstore, "*", from, to, 0, 500);
+                Set<String> seen = new HashSet<>();
+                for (LogEntry entry : sample) {
+                    String svc = entry.getContainerName();
+                    if (svc != null && !svc.isBlank() && seen.add(svc)) {
+                        serviceNames.add(svc);
+                    }
+                }
+                log.info("SLS 采样发现 {} 个服务", serviceNames.size());
+            } catch (Exception e) {
+                log.warn("SLS 采样服务列表失败: {}", e.getMessage());
+            }
+        }
+        return serviceNames;
+    }
+
+    /**
+     * 一次性从 ARMS 查询所有服务的接口指标，按 serviceName/apiPath 分发
+     * 使用 SearchTraces API 获取链路数据，从 span 中提取接口指标
+     */
+    private Map<String, long[]> queryAllFromArms(List<String> serviceNames, long from, long to) {
+        Map<String, long[]> result = new HashMap<>();
+        Map<String, List<Long>> apiRtValues = new HashMap<>();
+        
+        try {
+            long fromMs = from * 1000;
+            long toMs = to * 1000;
+
+            // 使用 SearchTraces 获取最近的链路
+            var tracesResponse = armsClient.searchTraces(null, fromMs, toMs);
+            
+            if (tracesResponse == null || tracesResponse.getTraceInfos() == null) {
+                log.info("ARMS SearchTraces 返回空数据");
+                return result;
+            }
+            
+            List<?> traceInfos = tracesResponse.getTraceInfos();
+            log.info("ARMS SearchTraces 返回 {} 条链路", traceInfos.size());
+            
+            // 遍历每条链路，直接从 TraceInfo 提取接口信息
+            int processedTraces = 0;
+            
+            for (Object traceInfoObj : traceInfos) {
+                if (processedTraces >= 1000) break; // 限制处理的链路数量
+                
+                if (!(traceInfoObj instanceof com.aliyuncs.arms.model.v20190808.SearchTracesResponse.TraceInfo)) {
+                    continue;
+                }
+                
+                var traceInfo = (com.aliyuncs.arms.model.v20190808.SearchTracesResponse.TraceInfo) traceInfoObj;
+                String serviceName = traceInfo.getServiceName();
+                String apiPath = traceInfo.getOperationName();
+                long duration = traceInfo.getDuration() != null ? traceInfo.getDuration() : 0;
+                
+                if (serviceName == null || apiPath == null || duration <= 0) {
+                    continue;
+                }
+                
+                // 归一化 API 路径
+                apiPath = normalizeApiPath(apiPath);
+                String fullKey = serviceName + apiPath;
+                
+                // 统计请求数
+                result.computeIfAbsent(fullKey, k -> new long[]{0, 0})[0]++;
+                
+                // 收集 RT 值
+                apiRtValues.computeIfAbsent(fullKey, k -> new ArrayList<>()).add(duration);
+                
+                processedTraces++;
+            }
+            
+            // 计算每个 API 的平均 RT
+            for (Map.Entry<String, List<Long>> entry : apiRtValues.entrySet()) {
+                List<Long> rtValues = entry.getValue();
+                if (!rtValues.isEmpty()) {
+                    double avgRt = rtValues.stream().mapToLong(Long::longValue).average().orElse(0);
+                    result.get(entry.getKey())[1] = Math.round(avgRt);
+                }
+            }
+            
+            // 调试：打印前5个ARMS接口
+            if (!result.isEmpty()) {
+                int count = 0;
+                for (Map.Entry<String, long[]> entry : result.entrySet()) {
+                    if (count++ >= 5) break;
+                    log.info("ARMS 接口: {}, 请求数: {}, 平均RT: {}ms", 
+                        entry.getKey(), entry.getValue()[0], entry.getValue()[1]);
+                }
+            }
+            
+            log.info("ARMS SearchTraces 提取到 {} 个接口指标，处理了 {} 条链路", 
+                result.size(), processedTraces);
+        } catch (Exception e) {
+            log.warn("ARMS SearchTraces 失败: {}", e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /**
+     * 单次 SLS 查询所有日志，按 containerName + API路径 分组，计算 P60 RT
+     */
+    private Map<String, long[]> queryAllFromSls(String logstore, long from, long to) {
+        Map<String, long[]> result = new HashMap<>();
+        Map<String, List<Double>> apiRtValues = new HashMap<>();
+
+        try {
+            String query = "cost or useTime or duration or 耗时 or ms or rt or elapsed";
+            List<LogEntry> logs = queryLogs(logstore, query, from, to, 0, 5000);
+            log.info("SLS 批量查询到 {} 条含耗时信息的日志", logs.size());
+
+            for (LogEntry entry : logs) {
+                String serviceName = entry.getContainerName();
+                if (serviceName == null || serviceName.isBlank()) continue;
+                if (serviceName.startsWith("event-trac") || serviceName.startsWith("EventTrac")) continue;
+
+                String apiPath = extractUrl(entry.getMessage());
+                if (apiPath == null || apiPath.isBlank()) continue;
+
+                apiPath = normalizeApiPath(apiPath);
+                String fullKey = serviceName + apiPath;
+
+                double rt = extractDurationFromEntry(entry);
+                if (rt <= 0) continue;
+
+                result.computeIfAbsent(fullKey, k -> new long[]{0, 0})[0]++;
+                apiRtValues.computeIfAbsent(fullKey, k -> new ArrayList<>()).add(rt);
+            }
+
+            for (Map.Entry<String, List<Double>> entry : apiRtValues.entrySet()) {
+                List<Double> rtValues = entry.getValue();
+                if (rtValues.isEmpty()) continue;
+                Collections.sort(rtValues);
+                int p60Index = (int) Math.ceil(0.6 * rtValues.size()) - 1;
+                result.get(entry.getKey())[1] = Math.round(rtValues.get(p60Index));
+            }
+
+            log.info("SLS 计算出 {} 个接口的 P60 数据", result.size());
+        } catch (Exception e) {
+            log.warn("SLS 批量查询失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 归一化API路径，移除动态ID段、IP地址、端口和查询参数
+     * 例如：
+     * /DeviceBusinessServer/rpc/charge/realtime/v1/order/32010601247934012608041944284476
+     *   -> /DeviceBusinessServer/rpc/charge/realtime/v1/order/{id}
+     * POST http://172.25.29.136:18000/bankAbilityCenterServer/payScore/queryOrder?userId=123
+     *   -> /bankAbilityCenterServer/payScore/queryOrder
+     */
+    private String normalizeApiPath(String path) {
+        if (path == null) return null;
+        
+        // 移除查询参数
+        int queryIndex = path.indexOf('?');
+        if (queryIndex > 0) {
+            path = path.substring(0, queryIndex);
+        }
+        
+        // 如果是完整的URL，提取路径部分
+        if (path.contains("http://") || path.contains("https://")) {
+            java.util.regex.Matcher urlMatcher = java.util.regex.Pattern
+                    .compile("https?://[^/]+(/\\S*)").matcher(path);
+            if (urlMatcher.find()) {
+                path = urlMatcher.group(1);
+            }
+        }
+        
+        // 移除HTTP方法前缀
+        path = path.replaceAll("^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\s+", "");
+        
+        // 分割路径
+        String[] segments = path.split("/");
+        StringBuilder normalized = new StringBuilder();
+        
+        for (int i = 0; i < segments.length; i++) {
+            String segment = segments[i];
+            
+            // 如果是最后一个或倒数第二个segment，且是长数字或长字符串，替换为{id}
+            if (i >= segments.length - 2) {
+                // 连续5位以上的数字
+                if (segment.matches("\\d{5,}")) {
+                    segment = "{id}";
+                }
+                // UUID格式
+                else if (segment.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+                    segment = "{uuid}";
+                }
+                // 20位以上的字母数字组合（长ID）
+                else if (segment.matches("[A-Za-z0-9]{20,}")) {
+                    segment = "{id}";
+                }
+            }
+            
+            if (!segment.isEmpty()) {
+                normalized.append("/").append(segment);
+            }
+        }
+        
+        return normalized.length() > 0 ? normalized.toString() : path;
     }
 
     private String extractUrl(String message) {
@@ -437,6 +655,24 @@ public class GatewayService {
         return null;
     }
 
+    private double extractDurationFromEntry(LogEntry entry) {
+        if (entry == null) return 0;
+        Map<String, String> fields = entry.getFields();
+        if (fields != null) {
+            for (String key : new String[]{"duration", "cost", "rt", "useTime", "elapsed"}) {
+                String val = fields.get(key);
+                if (val != null && !val.isBlank()) {
+                    try {
+                        double rt = Double.parseDouble(val.replaceAll("[^0-9.]", ""));
+                        if (rt > 0 && rt < 1000000) return rt;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return extractDuration(entry.getMessage());
+    }
+
     private double extractDuration(String message) {
         if (message == null) return 0;
         // Try various duration patterns
@@ -444,6 +680,11 @@ public class GatewayService {
                 .compile("(?:cost|useTime|took|elapsed|rt|duration|time|耗时)[:\\s=]+(\\d+(?:\\.\\d+)?)\\s*(?:ms)?")
                 .matcher(message);
         if (matcher.find()) return Double.parseDouble(matcher.group(1));
+        // Try JSON format: "duration":123 or "cost":123.45
+        java.util.regex.Matcher jsonMatcher = java.util.regex.Pattern
+                .compile("\"(?:duration|cost|useTime|rt|elapsed|time)\"\\s*:\\s*(\\d+(?:\\.\\d+)?)")
+                .matcher(message);
+        if (jsonMatcher.find()) return Double.parseDouble(jsonMatcher.group(1));
         // Try "N ms" pattern
         java.util.regex.Matcher msMatcher = java.util.regex.Pattern
                 .compile("(\\d+(?:\\.\\d+)?)\\s*ms").matcher(message);

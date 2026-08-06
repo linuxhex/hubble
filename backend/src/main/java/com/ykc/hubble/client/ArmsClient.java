@@ -7,6 +7,8 @@ import com.aliyuncs.arms.model.v20190808.GetTraceRequest;
 import com.aliyuncs.arms.model.v20190808.GetTraceResponse;
 import com.aliyuncs.arms.model.v20190808.ListTraceAppsRequest;
 import com.aliyuncs.arms.model.v20190808.ListTraceAppsResponse;
+import com.aliyuncs.arms.model.v20190808.QueryMetricByPageRequest;
+import com.aliyuncs.arms.model.v20190808.QueryMetricByPageResponse;
 import com.aliyuncs.arms.model.v20190808.SearchTracesRequest;
 import com.aliyuncs.arms.model.v20190808.SearchTracesResponse;
 import com.ykc.hubble.config.ArmsConfig;
@@ -14,6 +16,9 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 阿里云 ARMS 客户端：应用监控与链路追踪。
@@ -77,6 +82,38 @@ public class ArmsClient {
         GetTraceRequest req = new GetTraceRequest();
         req.setRegionId(armsConfig.getRegion());
         req.setTraceID(traceId);
+        return client.getAcsResponse(req);
+    }
+
+    /**
+     * 查询指标数据（如 API 响应时间、调用次数等）
+     * 
+     * @param metric 指标名称，如 "appstat.transaction" 表示接口调用统计
+     * @param measures 要查询的度量，如 ["rt", "count"] 表示响应时间和调用次数
+     * @param fromMs 开始时间（毫秒）
+     * @param toMs 结束时间（毫秒）
+     * @param pid 应用PID（可选）
+     * @return 指标数据
+     */
+    public QueryMetricByPageResponse queryMetrics(String metric, List<String> measures, 
+            long fromMs, long toMs, String pid) throws Exception {
+        QueryMetricByPageRequest req = new QueryMetricByPageRequest();
+        req.setRegionId(armsConfig.getRegion());
+        req.setMetric(metric);
+        req.setMeasuress(measures);
+        req.setStartTime(fromMs);
+        req.setEndTime(toMs);
+        req.setIntervalInSec(86400); // 按天聚合
+        req.setCurrentPage(1);
+        req.setPageSize(1000);
+        
+        if (pid != null && !pid.isEmpty()) {
+            QueryMetricByPageRequest.Filters filter = new QueryMetricByPageRequest.Filters();
+            filter.setKey("pid");
+            filter.setValue(pid);
+            req.setFilterss(Arrays.asList(filter));
+        }
+        
         return client.getAcsResponse(req);
     }
 }

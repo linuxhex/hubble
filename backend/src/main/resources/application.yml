@@ -69,6 +69,7 @@ dingtalk:
 
 # Milvus配置
 milvus:
+  enabled: ${MILVUS_ENABLED:false}
   host: ${MILVUS_HOST:localhost}
   port: ${MILVUS_PORT:19530}
   username: ${MILVUS_USERNAME:root}

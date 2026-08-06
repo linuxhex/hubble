@@ -18,6 +18,7 @@ import io.milvus.grpc.MutationResult;
 import io.milvus.grpc.QueryResults;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 import org.apache.commons.lang3.StringUtils;
 
@@ -30,11 +31,19 @@ import java.util.*;
  */
 @Slf4j
 @Repository
-@RequiredArgsConstructor
 public class SlsKeywordRepo {
 
-    private final MilvusServiceClient milvusClient;
+    private MilvusServiceClient milvusClient;
     private final MilvusConfig milvusConfig;
+
+    @Autowired(required = false)
+    public void setMilvusClient(MilvusServiceClient milvusClient) {
+        this.milvusClient = milvusClient;
+    }
+
+    public SlsKeywordRepo(MilvusConfig milvusConfig) {
+        this.milvusConfig = milvusConfig;
+    }
 
     /**
      * Collection名称常量
@@ -53,6 +62,10 @@ public class SlsKeywordRepo {
      * 初始化Collection（如果不存在则创建）
      */
     public void initCollection() {
+        if (milvusClient == null) {
+            log.debug("Milvus客户端未初始化，跳过Collection初始化");
+            return;
+        }
         try {
             // 检查Collection是否存在
             HasCollectionParam hasCollectionParam = HasCollectionParam.newBuilder()
@@ -164,6 +177,10 @@ public class SlsKeywordRepo {
      * @return 插入的记录数
      */
     public int insert(SlsKeyword slsKeyword) {
+        if (milvusClient == null) {
+            log.warn("Milvus客户端未初始化，无法插入数据");
+            return 0;
+        }
         initCollection();
         
         try {
@@ -215,6 +232,10 @@ public class SlsKeywordRepo {
      * @return 模版实体
      */
     public SlsKeyword selectById(String id) {
+        if (milvusClient == null) {
+            log.warn("Milvus客户端未初始化，无法查询数据");
+            return null;
+        }
         initCollection();
         
         try {
@@ -266,6 +287,10 @@ public class SlsKeywordRepo {
      */
     public Map<String, Object> selectAllWithPagination(int page, int pageSize, String desc,
                                                        String application, String tag) {
+        if (milvusClient == null) {
+            log.warn("Milvus客户端未初始化，无法查询数据");
+            return new java.util.HashMap<>();
+        }
         try {
             // 构建查询表达式
             List<String> conditions = new ArrayList<>();
@@ -359,6 +384,10 @@ public class SlsKeywordRepo {
      * @return 删除的记录数
      */
     public int deleteById(String id) {
+        if (milvusClient == null) {
+            log.warn("Milvus客户端未初始化，无法删除数据");
+            return 0;
+        }
         initCollection();
         
         try {
