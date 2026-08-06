@@ -86,6 +86,16 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
+        // 根据时间范围确定聚合粒度
+        int intervalInSec;
+        if (seconds <= 3600) { // 1小时内，按5分钟分组
+            intervalInSec = 300;
+        } else if (seconds <= 86400) { // 24小时内，按小时分组
+            intervalInSec = 3600;
+        } else { // 超过24小时，按天分组
+            intervalInSec = 86400;
+        }
+
         // 优先从 ARMS 获取数据
         try {
             long fromMs = from * 1000;
@@ -97,7 +107,8 @@ public class GatewayService {
                 Arrays.asList("rt", "count", "error"),
                 fromMs,
                 toMs,
-                null
+                null,
+                intervalInSec
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
@@ -136,7 +147,8 @@ public class GatewayService {
                     Arrays.asList("rt", "count", "error"),
                     prevFrom * 1000,
                     fromMs,
-                    null
+                    null,
+                    intervalInSec
                 );
                 
                 long prevTotal = 0;
@@ -244,7 +256,8 @@ public class GatewayService {
                 Arrays.asList("count", "error"),
                 fromMs,
                 toMs,
-                null
+                null,
+                intervalInSec
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
@@ -373,13 +386,14 @@ public class GatewayService {
             long fromMs = from * 1000;
             long toMs = now * 1000;
             
-            // 查询接口调用统计，按接口分组
+            // 查询接口调用统计，按接口分组（使用整个时间范围作为聚合粒度）
             var response = armsClient.queryMetrics(
                 "appstat.transaction",
                 Arrays.asList("rt", "count", "error"),
                 fromMs,
                 toMs,
-                null
+                null,
+                (int) seconds
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {

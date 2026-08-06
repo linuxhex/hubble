@@ -93,17 +93,18 @@ public class ArmsClient {
      * @param fromMs 开始时间（毫秒）
      * @param toMs 结束时间（毫秒）
      * @param pid 应用PID（可选）
+     * @param intervalInSec 聚合粒度（秒），如 60 表示按分钟，3600 表示按小时，86400 表示按天
      * @return 指标数据
      */
     public QueryMetricByPageResponse queryMetrics(String metric, List<String> measures, 
-            long fromMs, long toMs, String pid) throws Exception {
+            long fromMs, long toMs, String pid, int intervalInSec) throws Exception {
         QueryMetricByPageRequest req = new QueryMetricByPageRequest();
         req.setRegionId(armsConfig.getRegion());
         req.setMetric(metric);
         req.setMeasuress(measures);
         req.setStartTime(fromMs);
         req.setEndTime(toMs);
-        req.setIntervalInSec(86400); // 按天聚合
+        req.setIntervalInSec(intervalInSec);
         req.setCurrentPage(1);
         req.setPageSize(1000);
         
@@ -115,5 +116,13 @@ public class ArmsClient {
         }
         
         return client.getAcsResponse(req);
+    }
+    
+    /**
+     * 查询指标数据（重载方法，默认按天聚合）
+     */
+    public QueryMetricByPageResponse queryMetrics(String metric, List<String> measures, 
+            long fromMs, long toMs, String pid) throws Exception {
+        return queryMetrics(metric, measures, fromMs, toMs, pid, 86400);
     }
 }

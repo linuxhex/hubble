@@ -22,6 +22,7 @@
           <el-radio-group v-model="timeRange" @change="handleTimeRangeChange" size="default">
             <el-radio-button value="15m">最近15分钟</el-radio-button>
             <el-radio-button value="30m">最近半小时</el-radio-button>
+            <el-radio-button value="1h">最近1小时</el-radio-button>
             <el-radio-button value="6h">最近6小时</el-radio-button>
             <el-radio-button value="1d">最近1天</el-radio-button>
           </el-radio-group>
@@ -252,9 +253,10 @@ const handleJumpToSls = async () => {
     switch (timeRange.value) {
       case '15m': startTime = endTime - 15 * 60; break
       case '30m': startTime = endTime - 30 * 60; break
+      case '1h': startTime = endTime - 60 * 60; break
       case '6h': startTime = endTime - 6 * 60 * 60; break
       case '1d': startTime = endTime - 24 * 60 * 60; break
-      default: startTime = endTime - 6 * 60 * 60
+      default: startTime = endTime - 60 * 60
     }
 
     const slsLink = generateSlsLink('', {
@@ -344,18 +346,6 @@ const initChart = () => {
   }, 100)
 }
 
-const getStartTime = () => {
-  const now = new Date()
-  const ranges = {
-    '15m': 15 * 60 * 1000,
-    '30m': 30 * 60 * 1000,
-    '6h': 6 * 60 * 60 * 1000,
-    '1d': 24 * 60 * 60 * 1000
-  }
-  const offset = ranges[timeRange.value] || ranges['6h']
-  return new Date(now.getTime() - offset)
-}
-
 const formatTime = (dateTime, range) => {
   const date = new Date(dateTime)
   if (range === '15m' || range === '30m') return date.toTimeString().substring(0, 8)
@@ -365,19 +355,18 @@ const formatTime = (dateTime, range) => {
 
 const updateChart = () => {
   if (!chart || !selectedConfigId.value) return
-  const startTime = getStartTime()
 
   getAlertDataList({
     alertConfigId: selectedConfigId.value,
+    timeRange: timeRange.value,
     current: 1,
     size: 1000
   }).then((res) => {
     if (res.code === 200 && chart) {
       const allData = res.data.records || res.data.list || []
-      const data = allData.filter((item) => new Date(item.collectedAt) >= startTime)
 
       const chartData = []
-      data.forEach((item) => {
+      allData.forEach((item) => {
         const time = formatTime(item.collectedAt, timeRange.value)
         const timestamp = new Date(item.collectedAt).getTime()
         chartData.push({ time, value: item.logCount, timestamp })

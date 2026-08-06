@@ -201,7 +201,7 @@ const initChart = async (configId) => {
 
       const chartData = data
         .map(item => ({
-          time: item.collectedAt ? item.collectedAt.substring(11, 19) : '',
+          time: item.collectedAt ? new Date(item.collectedAt).toTimeString().substring(0, 8) : '',
           value: item.logCount
         }))
         .filter(d => d.time)
