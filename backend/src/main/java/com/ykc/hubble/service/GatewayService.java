@@ -564,14 +564,14 @@ public class GatewayService {
             long fromMs = from * 1000;
             long toMs = now * 1000;
             
-            // 查询接口调用统计，按接口分组（使用整个时间范围作为聚合粒度）
+            // 使用 3600s 间隔（ARMS 支持的值）
             var response = armsClient.queryMetrics(
                 "appstat.transaction",
                 Arrays.asList("rt", "count", "error"),
                 fromMs,
                 toMs,
                 null,
-                (int) seconds
+                3600
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
@@ -594,36 +594,37 @@ public class GatewayService {
                             
                             apiStats.computeIfAbsent(apiPath, k -> new long[3]);
                             long[] stats = apiStats.get(apiPath);
-                            stats[0] += count; // total count
-                            stats[1] += rt * count; // total rt
-                            stats[2] += error; // error count
+                            stats[0] += count;
+                            stats[1] += rt * count;
+                            stats[2] += error;
                         }
                     }
                 }
                 
-                // 转换为 VO 并排序
-                List<GatewayHotApiVO> result = apiStats.entrySet().stream()
-                    .map(entry -> {
-                        GatewayHotApiVO api = new GatewayHotApiVO();
-                        api.setPath(entry.getKey());
-                        api.setMethod("GET"); // ARMS 可能没有方法信息，默认为 GET
-                        
-                        long count = entry.getValue()[0];
-                        double totalRt = entry.getValue()[1];
-                        long errorCount = entry.getValue()[2];
-                        
-                        api.setQps(seconds > 0 ? (double) count / seconds : 0);
-                        api.setAvgTime(Math.round(count > 0 ? totalRt / count : 0) + "ms");
-                        api.setErrorRate(String.format("%.1f%%", count > 0 ? errorCount * 100.0 / count : 0));
-                        
-                        return api;
-                    })
-                    .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
-                    .limit(10)
-                    .collect(Collectors.toList());
-                
-                log.info("从 ARMS 获取热门接口成功: count={}", result.size());
-                return result;
+                if (!apiStats.isEmpty()) {
+                    List<GatewayHotApiVO> result = apiStats.entrySet().stream()
+                        .map(entry -> {
+                            GatewayHotApiVO api = new GatewayHotApiVO();
+                            api.setPath(entry.getKey());
+                            api.setMethod("GET");
+                            
+                            long count = entry.getValue()[0];
+                            double totalRt = entry.getValue()[1];
+                            long errorCount = entry.getValue()[2];
+                            
+                            api.setQps(seconds > 0 ? (double) count / seconds : 0);
+                            api.setAvgTime(Math.round(count > 0 ? totalRt / count : 0) + "ms");
+                            api.setErrorRate(String.format("%.1f%%", count > 0 ? errorCount * 100.0 / count : 0));
+                            
+                            return api;
+                        })
+                        .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
+                        .limit(10)
+                        .collect(Collectors.toList());
+                    
+                    log.info("从 ARMS 获取热门接口成功: count={}", result.size());
+                    return result;
+                }
             }
         } catch (Exception e) {
             log.warn("从 ARMS 获取热门接口失败，降级到 SLS: {}", e.getMessage());
@@ -634,38 +635,29 @@ public class GatewayService {
     }
     
     private List<GatewayHotApiVO> hotApisFromSls(String timeRange, long now, long seconds, long from, String logstore) {
-        // 使用分析查询获取热门接口统计
-        String query = "* | SELECT __tag__:_container_name_ as service, " +
-                "COUNT(*) as count, " +
-                "AVG(CAST(extract_response_time(message) AS DOUBLE)) as avg_time, " +
-                "SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count " +
-                "GROUP BY __tag__:_container_name_ " +
-                "ORDER BY count DESC " +
-                "LIMIT 10";
-        
+        // 简化查询：直接采样日志，按containerName分组统计
         try {
-            List<Map<String, String>> results = slsQueryClient.queryAnalytics(logstore, query, from, now, 10);
+            List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 1000);
+            log.info("SLS 热门接口采样 {} 条日志", sampleLogs.size());
             
-            return results.stream()
-                    .map(row -> {
-                        GatewayHotApiVO api = new GatewayHotApiVO();
-                        String service = row.getOrDefault("service", "unknown");
-                        api.setPath("/" + service);
-                        api.setMethod("GET");
-                        
-                        long count = Long.parseLong(row.getOrDefault("count", "0"));
-                        api.setQps(seconds > 0 ? (double) count / seconds : 0);
-                        
-                        double avgTime = Double.parseDouble(row.getOrDefault("avg_time", "0"));
-                        api.setAvgTime(Math.round(avgTime) + "ms");
-                        
-                        long errorCount = Long.parseLong(row.getOrDefault("error_count", "0"));
-                        double errorRate = count > 0 ? errorCount * 100.0 / count : 0;
-                        api.setErrorRate(String.format("%.1f%%", errorRate));
-                        
-                        return api;
-                    })
-                    .collect(Collectors.toList());
+            // 按服务分组统计
+            Map<String, Long> serviceCounts = sampleLogs.stream()
+                .filter(log -> log.getContainerName() != null && !log.getContainerName().isBlank())
+                .collect(Collectors.groupingBy(LogEntry::getContainerName, Collectors.counting()));
+            
+            return serviceCounts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(10)
+                .map(entry -> {
+                    GatewayHotApiVO api = new GatewayHotApiVO();
+                    api.setPath("/" + entry.getKey());
+                    api.setMethod("GET");
+                    api.setQps(seconds > 0 ? (double) entry.getValue() / seconds : 0);
+                    api.setAvgTime("-");
+                    api.setErrorRate("-");
+                    return api;
+                })
+                .collect(Collectors.toList());
         } catch (Exception e) {
             log.error("查询热门接口失败", e);
             return new ArrayList<>();
