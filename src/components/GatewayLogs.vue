@@ -520,25 +520,11 @@ const handleUrlClick = (row) => {
 
 @media (max-width: 768px) {
   .search-form {
-    gap: 6px;
+    gap: 4px;
   }
   
   .search-form .el-form-item {
     flex: 0 0 auto;
-  }
-  
-  .search-form .el-input {
-    width: 120px !important;
-  }
-  
-  .search-form .el-form-item__label {
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .search-form {
-    gap: 4px;
   }
   
   .search-form .el-input {
@@ -547,10 +533,32 @@ const handleUrlClick = (row) => {
   
   .search-form .el-form-item__label {
     font-size: 11px;
+    padding-right: 4px !important;
   }
   
   .search-form .el-input__inner {
-    font-size: 12px;
+    font-size: 11px;
+    padding: 0 6px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .search-form {
+    gap: 3px;
+  }
+  
+  .search-form .el-input {
+    width: 80px !important;
+  }
+  
+  .search-form .el-form-item__label {
+    font-size: 10px;
+    padding-right: 3px !important;
+  }
+  
+  .search-form .el-input__inner {
+    font-size: 10px;
+    padding: 0 4px !important;
   }
 }
 
@@ -569,17 +577,6 @@ const handleUrlClick = (row) => {
 @media (max-width: 768px) {
   .operation-buttons {
     margin-left: auto !important;
-    gap: 4px;
-  }
-  
-  .operation-buttons .el-button {
-    padding: 5px 8px;
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 480px) {
-  .operation-buttons {
     gap: 3px;
   }
   
@@ -587,9 +584,20 @@ const handleUrlClick = (row) => {
     padding: 4px 6px;
     font-size: 11px;
   }
+}
+
+@media (max-width: 480px) {
+  .operation-buttons {
+    gap: 2px;
+  }
+  
+  .operation-buttons .el-button {
+    padding: 3px 5px;
+    font-size: 10px;
+  }
   
   .operation-buttons .el-button--small {
-    padding: 4px 6px;
+    padding: 3px 5px;
   }
 }
 

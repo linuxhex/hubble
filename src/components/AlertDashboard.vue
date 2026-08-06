@@ -188,7 +188,7 @@ const statistics = ref({
   todayAlertCount: 0,
   detailStatistics: undefined
 })
-const timeRange = ref('15m')
+const timeRange = ref('1h')
 const loading = ref(false)
 
 const errorTypes = ref([])
