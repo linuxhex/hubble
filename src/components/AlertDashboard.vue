@@ -20,10 +20,10 @@
         <div class="time-range-selector-top">
           <div class="selector-label">时间范围：</div>
           <el-radio-group v-model="timeRange" @change="handleTimeRangeChange" size="default">
-            <el-radio-button label="15m">最近15分钟</el-radio-button>
-            <el-radio-button label="30m">最近半小时</el-radio-button>
-            <el-radio-button label="6h">最近6小时</el-radio-button>
-            <el-radio-button label="1d">最近1天</el-radio-button>
+            <el-radio-button value="15m">最近15分钟</el-radio-button>
+            <el-radio-button value="30m">最近半小时</el-radio-button>
+            <el-radio-button value="6h">最近6小时</el-radio-button>
+            <el-radio-button value="1d">最近1天</el-radio-button>
           </el-radio-group>
         </div>
 
