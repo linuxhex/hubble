@@ -68,7 +68,7 @@ public class ErrorAnalysisService {
      * Top 错误类型趋势（P0 单点近似：返回当前各类型计数）
      */
     public ErrorTrendVO topErrorTypesTrend(Long configId, String timeRange, String interval) {
-        List<ErrorTypeVO> types = topErrorTypes(configId, timeRange, 5);
+        List<ErrorTypeVO> types = topErrorTypes(configId, timeRange, 8);
         ErrorTrendVO vo = new ErrorTrendVO();
         vo.setTimestamps(List.of(System.currentTimeMillis()));
         List<ErrorTrendVO.Series> series = new ArrayList<>();
