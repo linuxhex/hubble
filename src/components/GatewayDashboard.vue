@@ -5,11 +5,6 @@
         <h2>监控大盘</h2>
       </div>
       <div class="header-controls">
-        <el-radio-group v-model="timeRange" size="small" @change="fetchGatewayData">
-          <el-radio-button value="1h">1小时</el-radio-button>
-          <el-radio-button value="6h">6小时</el-radio-button>
-          <el-radio-button value="24h">24小时</el-radio-button>
-        </el-radio-group>
         <span class="refresh-tip">{{ countdown > 0 ? `${countdown}s 后刷新` : '刷新中…' }}</span>
       </div>
     </div>

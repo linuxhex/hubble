@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort } from '@element-plus/icons-vue'
 
@@ -22,41 +22,6 @@ const activeIndex = computed(() => {
   if (route.path === '/second-chart') return '/second-chart'
   if (route.path === '/degradation-ranking') return '/degradation-ranking'
   return '1'
-})
-
-const timeRange = reactive({
-  startTime: '',
-  endTime: ''
-})
-
-let timeTimer = null
-
-const updateTime = () => {
-  const now = new Date()
-  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
-  timeRange.startTime = formatDate(oneHourAgo)
-  timeRange.endTime = formatDate(now)
-}
-
-const formatDate = (date) => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const seconds = String(date.getSeconds()).padStart(2, '0')
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-}
-
-onMounted(() => {
-  updateTime()
-  timeTimer = setInterval(updateTime, 1000)
-})
-
-onUnmounted(() => {
-  if (timeTimer) {
-    clearInterval(timeTimer)
-  }
 })
 </script>
 
@@ -115,19 +80,6 @@ onUnmounted(() => {
           </el-icon>
         </div>
         <div class="header-right">
-          <div class="time-selector">
-            <el-button-group>
-              <el-button type="primary" plain size="small">
-                <el-icon><ArrowLeft /></el-icon>
-              </el-button>
-              <el-button type="primary" plain size="small">{{ timeRange.startTime }}</el-button>
-              <el-button type="primary" plain size="small">～</el-button>
-              <el-button type="primary" plain size="small">{{ timeRange.endTime }}</el-button>
-              <el-button type="primary" plain size="small">
-                <el-icon><ArrowRight /></el-icon>
-              </el-button>
-            </el-button-group>
-          </div>
           <el-icon class="notification-icon"><Bell /></el-icon>
           <el-avatar size="small" />
         </div>
