@@ -22,8 +22,193 @@ public class TraceChainService {
     private final SlsQueryClient slsQueryClient;
     private final MonitorProperties monitorProperties;
     private final SlsConfig slsConfig;
+    private final PageDataCacheService pageDataCacheService;
+
+    public List<Map<String, Object>> searchTracesByApi(String apiPath, String timeRange, int limit) {
+        String pageKey = "trace_search";
+        String dataKey = apiPath + "_" + timeRange + "_" + limit;
+        
+        // 检查数据库缓存
+        String cachedJson = pageDataCacheService.getRaw(pageKey, dataKey);
+        if (cachedJson != null) {
+            try {
+                var listType = new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {};
+                List<Map<String, Object>> dbCached = new com.fasterxml.jackson.databind.ObjectMapper().readValue(cachedJson, listType);
+                log.info("返回链路搜索数据库缓存: apiPath={}, size={}", apiPath, dbCached.size());
+                return dbCached;
+            } catch (Exception e) {
+                log.warn("解析链路搜索缓存失败: {}", e.getMessage());
+            }
+        }
+        
+        // 缓存未命中，查询并缓存
+        List<Map<String, Object>> result = loadTracesByApi(apiPath, timeRange, limit);
+        pageDataCacheService.save(pageKey, dataKey, result);
+        return result;
+    }
+    
+    private List<Map<String, Object>> loadTracesByApi(String apiPath, String timeRange, int limit) {
+        long now = System.currentTimeMillis() / 1000;
+        long from = now - parseTimeRange(timeRange);
+
+        String logstore = monitorProperties.getDefaultQueryLogstore();
+        if (!isSlsConfigured()) {
+            log.warn("SLS 未配置，返回空数据");
+            return Collections.emptyList();
+        }
+
+        String serviceNameTemp = apiPath;
+        if (apiPath != null && apiPath.contains("/")) {
+            // Remove leading "/" if present
+            String path = apiPath.startsWith("/") ? apiPath.substring(1) : apiPath;
+            if (path.contains("/")) {
+                serviceNameTemp = path.substring(0, path.indexOf('/'));
+            } else {
+                serviceNameTemp = path;
+            }
+        }
+        // Strip -prod suffix to match SLS container names
+        if (serviceNameTemp.endsWith("-prod")) {
+            serviceNameTemp = serviceNameTemp.substring(0, serviceNameTemp.length() - 5);
+        }
+        // Normalize camelCase to hyphen-case (e.g., orderServer -> order-server)
+        serviceNameTemp = serviceNameTemp.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
+        final String serviceName = serviceNameTemp;
+
+        try {
+            log.info("搜索链路: apiPath={}, serviceName={}, timeRange={}", apiPath, serviceName, timeRange);
+            String query = "__tag__:_container_name_: " + serviceName;
+            List<LogEntry> logs = slsQueryClient.queryLogstore(logstore, query, from, now, 0, 2000);
+            log.info("查询到 {} 条日志", logs.size());
+            if (logs.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            long logsWithTrace = logs.stream().filter(l -> getTraceId(l) != null).count();
+            log.info("其中 {} 条日志有 traceId", logsWithTrace);
+
+            // 如果当前服务没有 trace 字段，尝试从网关日志中查找
+            if (logsWithTrace == 0) {
+                log.info("服务 {} 无 trace 字段，尝试从网关日志查找", serviceName);
+                
+                // 提取 API 路径的不同部分用于搜索
+                String fullPath = apiPath; // e.g., "external-server/hlht/notification_charge_order_info"
+                String pathWithoutService = fullPath; // e.g., "/hlht/notification_charge_order_info"
+                String endpointOnly = fullPath; // e.g., "notification_charge_order_info"
+                
+                if (fullPath.contains("/")) {
+                    String path = fullPath.startsWith("/") ? fullPath.substring(1) : fullPath;
+                    if (path.contains("/")) {
+                        pathWithoutService = path.substring(path.indexOf('/'));
+                        String[] parts = path.split("/");
+                        endpointOnly = parts[parts.length - 1];
+                    }
+                }
+                
+                // 尝试多种查询策略
+                String[] gatewayQueries = {
+                    "__tag__:_container_name_: guan-zhong and " + endpointOnly,
+                    "__tag__:_container_name_: guan-zhong and " + serviceName,
+                    "__tag__:_container_name_: guan-zhong"
+                };
+                String[] queryLabels = {
+                    "端点名(" + endpointOnly + ")",
+                    "服务名(" + serviceName + ")",
+                    "全量网关日志"
+                };
+                
+                List<LogEntry> gatewayLogs = Collections.emptyList();
+                for (int i = 0; i < gatewayQueries.length; i++) {
+                    String gq = gatewayQueries[i];
+                    List<LogEntry> tempLogs = slsQueryClient.queryLogstore(logstore, gq, from, now, 0, 2000);
+                    long tempWithTrace = tempLogs.stream().filter(l -> getTraceId(l) != null).count();
+                    log.info("网关查询策略[{}]: {} → {} 条日志，{} 条有 traceId", 
+                        i + 1, queryLabels[i], tempLogs.size(), tempWithTrace);
+                    
+                    if (tempWithTrace > 0) {
+                        gatewayLogs = tempLogs;
+                        logsWithTrace = tempWithTrace;
+                        log.info("使用策略[{}]成功", i + 1);
+                        break;
+                    }
+                }
+                
+                if (!gatewayLogs.isEmpty() && logsWithTrace > 0) {
+                    logs = gatewayLogs;
+                }
+            }
+
+            Map<String, List<LogEntry>> byTrace = logs.stream()
+                    .filter(l -> getTraceId(l) != null)
+                    .collect(Collectors.groupingBy(l -> getTraceId(l), LinkedHashMap::new, Collectors.toList()));
+            
+            log.info("提取到 {} 个链路", byTrace.size());
+            
+            // Log sample time values for debugging
+            if (!logs.isEmpty()) {
+                LogEntry sample = logs.get(0);
+                log.info("样本日志 - time: {}, trace: {}, container: {}, fields: {}", 
+                    sample.getTime(), getTraceId(sample), sample.getContainerName(),
+                    sample.getFields() != null ? sample.getFields().keySet() : "null");
+            }
+
+            return byTrace.entrySet().stream()
+                    .map(e -> {
+                        String traceId = e.getKey();
+                        List<LogEntry> traceLogs = e.getValue();
+                        traceLogs.sort((a, b) -> Long.compare(parseTimestamp(a.getTime()), parseTimestamp(b.getTime())));
+
+                        long firstTime = parseTimestamp(traceLogs.get(0).getTime());
+                        long lastTime = parseTimestamp(traceLogs.get(traceLogs.size() - 1).getTime());
+                        long duration = lastTime - firstTime;
+
+                        Set<String> services = traceLogs.stream()
+                                .map(LogEntry::getContainerName)
+                                .filter(s -> s != null && !s.isBlank())
+                                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+                        boolean hasError = traceLogs.stream()
+                                .anyMatch(l -> "ERROR".equalsIgnoreCase(l.getLevel()));
+
+                        Map<String, Object> summary = new LinkedHashMap<>();
+                        summary.put("traceId", traceId);
+                        summary.put("serviceName", services.isEmpty() ? serviceName : String.join(" → ", services));
+                        summary.put("serviceCount", services.size());
+                        summary.put("logCount", traceLogs.size());
+                        summary.put("duration", duration);
+                        summary.put("timestamp", firstTime);
+                        summary.put("formattedTime", formatTimestamp(firstTime));
+                        summary.put("hasError", hasError);
+                        return summary;
+                    })
+                    .sorted((a, b) -> Long.compare((long) b.get("timestamp"), (long) a.get("timestamp")))
+                    .limit(limit)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("搜索接口链路失败: apiPath={}, error={}", apiPath, e.getMessage(), e);
+            return Collections.emptyList();
+        }
+    }
 
     public Map<String, Object> queryTraceChain(String traceId, String timeRange, String timestamp) {
+        // 检查数据库缓存
+        String pageKey = "trace_chain";
+        String dataKey = traceId + "_" + timeRange;
+        Map<String, Object> dbCached = pageDataCacheService.get(pageKey, dataKey, Map.class);
+        if (dbCached != null) {
+            log.info("返回链路详情数据库缓存: traceId={}", traceId);
+            return dbCached;
+        }
+        
+        // 缓存未命中，查询并缓存
+        Map<String, Object> result = loadTraceChain(traceId, timeRange, timestamp);
+        if (result != null && !result.isEmpty()) {
+            pageDataCacheService.save(pageKey, dataKey, result);
+        }
+        return result;
+    }
+    
+    private Map<String, Object> loadTraceChain(String traceId, String timeRange, String timestamp) {
         long now = System.currentTimeMillis() / 1000;
         long from;
         long to;
@@ -66,12 +251,90 @@ public class TraceChainService {
         List<LogEntry> logs = Collections.emptyList();
         for (int i = 0; i < queries.length; i++) {
             String query = queries[i];
-            log.info("尝试查询链路 [{}/{}]: 策略={}, traceId={}, query={}", 
-                i + 1, queries.length, queryLabels[i], traceId, query);
-            logs = queryLogs(logstore, query, from, to, 0, 1000);
-            if (!logs.isEmpty()) {
-                log.info("查询成功: 策略={}, traceId={}, 日志数量={}", queryLabels[i], traceId, logs.size());
-                break;
+            log.info("尝试查询链路 [{}/{}]: 策略={}, traceId={}, query={}, from={}, to={}", 
+                i + 1, queries.length, queryLabels[i], traceId, query, from, to);
+            try {
+                logs = queryLogs(logstore, query, from, to, 0, 1000);
+                log.info("查询结果: 策略={}, 日志数量={}", queryLabels[i], logs.size());
+                if (!logs.isEmpty()) {
+                    log.info("查询成功: 策略={}, traceId={}, 日志数量={}", queryLabels[i], traceId, logs.size());
+                    break;
+                }
+            } catch (Exception e) {
+                log.warn("查询失败: 策略={}, error={}", queryLabels[i], e.getMessage());
+            }
+        }
+        
+        // Fallback: query logs from specific services and filter by traceId
+        if (logs.isEmpty()) {
+            log.info("所有精确查询失败，尝试备用方案：从各服务查询日志并按traceId过滤");
+            try {
+                // Try querying from common services first (more efficient than querying all logs)
+                String[] services = {
+                    "order-server", "finance-server", "activity-server", "base-server", 
+                    "charge-server", "external-server", "guan-zhong", "dmp-query-server"
+                };
+                
+                for (String service : services) {
+                    String serviceQuery = "__tag__:_container_name_: " + service;
+                    List<LogEntry> serviceLogs = queryLogs(logstore, serviceQuery, from, to, 0, 1000);
+                    log.info("从服务 {} 查询到 {} 条日志", service, serviceLogs.size());
+                    
+                    List<LogEntry> matched = serviceLogs.stream()
+                        .filter(l -> traceId.equals(getTraceId(l)))
+                        .collect(Collectors.toList());
+                    
+                    if (!matched.isEmpty()) {
+                        log.info("在服务 {} 中找到 {} 条匹配的日志", service, matched.size());
+                        logs = matched;
+                        break;
+                    }
+                }
+                
+                // If still not found, try querying all logs with pagination
+                if (logs.isEmpty()) {
+                    log.info("各服务查询未找到，尝试分页查询所有日志");
+                    List<LogEntry> allLogs = new ArrayList<>();
+                    int pageSize = 100;
+                    int maxPages = 50;
+                    
+                    for (int page = 0; page < maxPages; page++) {
+                        int offset = page * pageSize;
+                        List<LogEntry> pageLogs = queryLogs(logstore, "*", from, to, offset, pageSize);
+                        if (pageLogs.isEmpty()) {
+                            break;
+                        }
+                        allLogs.addAll(pageLogs);
+                        
+                        boolean found = pageLogs.stream().anyMatch(l -> traceId.equals(getTraceId(l)));
+                        if (found && allLogs.size() >= 500) {
+                            break;
+                        }
+                        
+                        if (pageLogs.size() < pageSize) {
+                            break;
+                        }
+                    }
+                    
+                    log.info("分页查询到 {} 条日志，开始按traceId过滤", allLogs.size());
+                    
+                    if (!allLogs.isEmpty()) {
+                        List<String> sampleTraces = allLogs.stream()
+                            .limit(10)
+                            .map(l -> l.getTrace() == null ? "null" : l.getTrace())
+                            .collect(Collectors.toList());
+                        log.info("样本日志的trace值: {}", sampleTraces);
+                        log.info("目标traceId: {}", traceId);
+                    }
+                    
+                    logs = allLogs.stream()
+                        .filter(l -> traceId.equals(getTraceId(l)))
+                        .collect(Collectors.toList());
+                }
+                
+                log.info("过滤后剩余 {} 条日志", logs.size());
+            } catch (Exception e) {
+                log.warn("备用方案失败: {}", e.getMessage());
             }
         }
 
@@ -153,6 +416,28 @@ public class TraceChainService {
         }
     }
 
+    /**
+     * 从日志中提取 traceId，检查多个可能的字段名
+     */
+    private String getTraceId(LogEntry entry) {
+        if (entry == null) return null;
+        // 优先使用 trace 字段
+        if (entry.getTrace() != null && !entry.getTrace().isBlank()) {
+            return entry.getTrace();
+        }
+        // 检查其他可能的 trace 字段
+        if (entry.getFields() != null) {
+            String[] traceFieldNames = {"traceId", "trace_id", "requestId", "request_id", "spanId", "span_id"};
+            for (String fieldName : traceFieldNames) {
+                String value = entry.getFields().get(fieldName);
+                if (value != null && !value.isBlank()) {
+                    return value;
+                }
+            }
+        }
+        return null;
+    }
+
     private long parseTimeRange(String timeRange) {
         if (timeRange == null) return 3600;
         return switch (timeRange) {
@@ -190,12 +475,41 @@ public class TraceChainService {
 
     private long parseTimestamp(String timeStr) {
         if (timeStr == null || timeStr.isBlank()) return 0;
+        
+        // Try parsing as Unix timestamp first
         try {
             long ts = Long.parseLong(timeStr);
             return ts < 10000000000L ? ts * 1000 : ts;
         } catch (NumberFormatException e) {
-            return 0;
+            // Not a numeric timestamp, try date-time format
         }
+        
+        // Try parsing as date-time string (yyyy-MM-dd HH:mm:ss.SSS or similar)
+        try {
+            // Remove trailing .000 if present (milliseconds with all zeros)
+            String cleaned = timeStr.replaceAll("\\.0+$", "");
+            
+            // Try various date-time formats
+            java.time.format.DateTimeFormatter[] formatters = {
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
+            };
+            
+            for (java.time.format.DateTimeFormatter formatter : formatters) {
+                try {
+                    java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(cleaned, formatter);
+                    return ldt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                } catch (Exception ignored) {
+                    // Try next formatter
+                }
+            }
+        } catch (Exception e) {
+            log.debug("解析时间失败: {}", timeStr);
+        }
+        
+        return 0;
     }
 
     private String formatTimestamp(long timestamp) {

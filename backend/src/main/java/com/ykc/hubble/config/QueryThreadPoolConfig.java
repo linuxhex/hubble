@@ -30,11 +30,11 @@ public class QueryThreadPoolConfig {
         SlsConfig.ThreadPoolConfig config = slsConfig.getThreadPool();
         
         return new ThreadPoolExecutor(
-                config.getCoreSize(),
-                config.getMaxSize(),
+                config.getCoreSize() != null ? config.getCoreSize() : 4,
+                config.getMaxSize() != null ? config.getMaxSize() : 8,
                 60L,
                 TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(config.getQueueCapacity()),
+                new LinkedBlockingQueue<>(config.getQueueCapacity() != null ? config.getQueueCapacity() : 100),
                 r -> {
                     Thread thread = new Thread(r);
                     thread.setName("sls-query-" + thread.getId());

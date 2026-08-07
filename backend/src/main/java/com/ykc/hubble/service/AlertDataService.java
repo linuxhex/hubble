@@ -34,6 +34,8 @@ public class AlertDataService {
     private final SnapshotCache snapshotCache;
     private final SlsQueryClient slsQueryClient;
     private final MonitorProperties monitorProperties;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final java.util.concurrent.Executor queryExecutor;
 
     // 异常大盘分钟级时间线缓存：key=timeRange, value=[data, timestamp]
     private final Map<String, TimelineCacheEntry> timelineCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -41,16 +43,18 @@ public class AlertDataService {
 
     @jakarta.annotation.PostConstruct
     public void initTimelineCache() {
-        log.info("初始化异常大盘时间线缓存...");
-        for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
-            try {
-                Map<String, Object> data = loadMinuteHealthTimeline(range);
-                timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
-                log.info("缓存 {} 时间线完成", range);
-            } catch (Exception e) {
-                log.warn("初始化缓存 {} 失败: {}", range, e.getMessage());
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            log.info("异步初始化异常大盘时间线缓存...");
+            for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
+                try {
+                    Map<String, Object> data = loadMinuteHealthTimeline(range);
+                    timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+                    log.info("缓存 {} 时间线完成", range);
+                } catch (Exception e) {
+                    log.warn("初始化缓存 {} 失败: {}", range, e.getMessage());
+                }
             }
-        }
+        }, queryExecutor);
     }
 
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60 * 1000) // 每 1 分钟刷新
@@ -345,14 +349,20 @@ public class AlertDataService {
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
         List<String> serviceNames = new ArrayList<>();
-        // 直接采样发现服务名（analytics SQL 无法正确 GROUP BY __tag__ 字段）
+        // 分页采样发现服务名（SLS 每次最多返回 100 条，需要分页）
         try {
-            List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 500);
-            for (LogEntry entry : sample) {
-                String svc = entry.getContainerName();
-                if (svc != null && !svc.isBlank() && !svc.startsWith("event-trac") && !serviceNames.contains(svc)) {
-                    serviceNames.add(svc);
+            int pageSize = 100;
+            int maxPages = 50;
+            for (int page = 0; page < maxPages; page++) {
+                List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, page * pageSize, pageSize);
+                if (sample == null || sample.isEmpty()) break;
+                for (LogEntry entry : sample) {
+                    String svc = entry.getContainerName();
+                    if (svc != null && !svc.isBlank() && !svc.startsWith("event-trac") && !serviceNames.contains(svc)) {
+                        serviceNames.add(svc);
+                    }
                 }
+                if (sample.size() < pageSize) break;
             }
             log.info("采样发现 {} 个服务", serviceNames.size());
         } catch (Exception e) {

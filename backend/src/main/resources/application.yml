@@ -9,9 +9,13 @@ spring:
 
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:hubble;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    url: jdbc:h2:mem:hubble;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;LOCK_TIMEOUT=5000
     username: sa
     password:
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 5000
   sql:
     init:
       mode: always

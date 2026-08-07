@@ -113,17 +113,27 @@ const initChart = (trendData) => {
   chart.setOption(option)
 }
 
-const fetchGatewayData = async () => {
+const fetchOverview = async () => {
   try {
-    const [overviewRes, trendRes, hotApisRes] = await Promise.all([
-      getGatewayOverview({ timeRange: timeRange.value }).catch(() => ({ data: null })),
+    const res = await getGatewayOverview({ timeRange: timeRange.value }).catch(() => ({ data: null }))
+    if (res?.data) overview.value = res.data
+  } catch (e) { console.error('获取概览数据失败:', e) }
+}
+
+const fetchTrendAndHotApis = async () => {
+  try {
+    const [trendRes, hotApisRes] = await Promise.all([
       getGatewayTrend({ timeRange: timeRange.value }).catch(() => ({ data: null })),
       getGatewayHotApis({ timeRange: timeRange.value }).catch(() => ({ data: null }))
     ])
-    if (overviewRes?.data) overview.value = overviewRes.data
     initChart(trendRes?.data || {})
     hotApis.value = hotApisRes?.data || []
-  } catch (e) { console.error('获取网关数据失败:', e) }
+  } catch (e) { console.error('获取趋势/热门数据失败:', e) }
+}
+
+const fetchGatewayData = async () => {
+  await fetchOverview()
+  fetchTrendAndHotApis()
 }
 
 // ===== 刷新 =====

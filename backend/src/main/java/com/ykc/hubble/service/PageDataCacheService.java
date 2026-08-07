@@ -1,0 +1,229 @@
+package com.ykc.hubble.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ykc.hubble.entity.PageDataCache;
+import com.ykc.hubble.mapper.PageDataCacheMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * 页面数据缓存服务：提供缓存的读取、写入、清理功能
+ * 缓存数据存储在数据库中，保留1天，超过1天自动清理
+ *
+ * @author Hubble Team
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PageDataCacheService {
+
+    private final PageDataCacheMapper pageDataCacheMapper;
+    private final ObjectMapper objectMapper;
+
+    /**
+     * 缓存保留时间：1天
+     */
+    private static final int CACHE_RETENTION_HOURS = 24;
+
+    /**
+     * 读取缓存数据
+     *
+     * @param pageKey 页面标识
+     * @param dataKey 数据标识
+     * @param clazz   数据类型
+     * @return 缓存的数据，如果不存在或已过期则返回 null
+     */
+    public <T> T get(String pageKey, String dataKey, Class<T> clazz) {
+        try {
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey)
+                   .eq(PageDataCache::getDataKey, dataKey)
+                   .gt(PageDataCache::getExpiresAt, LocalDateTime.now());
+
+            PageDataCache cache = pageDataCacheMapper.selectOne(wrapper);
+            if (cache == null || cache.getDataContent() == null) {
+                return null;
+            }
+
+            log.debug("缓存命中: pageKey={}, dataKey={}", pageKey, dataKey);
+            return objectMapper.readValue(cache.getDataContent(), clazz);
+        } catch (Exception e) {
+            log.warn("读取缓存失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 读取缓存数据（使用 TypeReference，支持泛型类型如 List）
+     *
+     * @param pageKey       页面标识
+     * @param dataKey       数据标识
+     * @param typeReference 类型引用
+     * @return 缓存的数据，如果不存在或已过期则返回 null
+     */
+    public <T> T get(String pageKey, String dataKey, TypeReference<T> typeReference) {
+        try {
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey)
+                   .eq(PageDataCache::getDataKey, dataKey)
+                   .gt(PageDataCache::getExpiresAt, LocalDateTime.now());
+
+            PageDataCache cache = pageDataCacheMapper.selectOne(wrapper);
+            if (cache == null || cache.getDataContent() == null) {
+                return null;
+            }
+
+            log.debug("缓存命中(TypeReference): pageKey={}, dataKey={}", pageKey, dataKey);
+            return objectMapper.readValue(cache.getDataContent(), typeReference);
+        } catch (Exception e) {
+            log.warn("读取缓存失败(TypeReference): pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 读取缓存的原始 JSON 字符串
+     *
+     * @param pageKey 页面标识
+     * @param dataKey 数据标识
+     * @return 缓存的 JSON 字符串，如果不存在或已过期则返回 null
+     */
+    public String getRaw(String pageKey, String dataKey) {
+        try {
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey)
+                   .eq(PageDataCache::getDataKey, dataKey)
+                   .gt(PageDataCache::getExpiresAt, LocalDateTime.now());
+
+            PageDataCache cache = pageDataCacheMapper.selectOne(wrapper);
+            if (cache == null || cache.getDataContent() == null) {
+                return null;
+            }
+
+            log.debug("缓存命中(Raw): pageKey={}, dataKey={}", pageKey, dataKey);
+            return cache.getDataContent();
+        } catch (Exception e) {
+            log.warn("读取缓存失败(Raw): pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 读取缓存数据（List类型）
+     *
+     * @param pageKey     页面标识
+     * @param dataKey     数据标识
+     * @param elementClass 列表元素类型
+     * @return 缓存的数据列表，如果不存在或已过期则返回 null
+     */
+    public <T> List<T> getList(String pageKey, String dataKey, Class<T> elementClass) {
+        try {
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey)
+                   .eq(PageDataCache::getDataKey, dataKey)
+                   .gt(PageDataCache::getExpiresAt, LocalDateTime.now());
+
+            PageDataCache cache = pageDataCacheMapper.selectOne(wrapper);
+            if (cache == null || cache.getDataContent() == null) {
+                return null;
+            }
+
+            log.debug("缓存命中(List): pageKey={}, dataKey={}", pageKey, dataKey);
+            var listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, elementClass);
+            return objectMapper.readValue(cache.getDataContent(), listType);
+        } catch (Exception e) {
+            log.warn("读取缓存失败(List): pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 保存缓存数据
+     *
+     * @param pageKey 页面标识
+     * @param dataKey 数据标识
+     * @param data    要缓存的数据
+     */
+    public void save(String pageKey, String dataKey, Object data) {
+        try {
+            String jsonContent = objectMapper.writeValueAsString(data);
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime expiresAt = now.plusHours(CACHE_RETENTION_HOURS);
+
+            // 检查是否已存在
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey)
+                   .eq(PageDataCache::getDataKey, dataKey);
+
+            PageDataCache existing = pageDataCacheMapper.selectOne(wrapper);
+            if (existing != null) {
+                // 更新已有缓存
+                existing.setDataContent(jsonContent);
+                existing.setCreatedAt(now);
+                existing.setExpiresAt(expiresAt);
+                pageDataCacheMapper.updateById(existing);
+                log.debug("缓存更新: pageKey={}, dataKey={}", pageKey, dataKey);
+            } else {
+                // 插入新缓存
+                PageDataCache cache = new PageDataCache();
+                cache.setPageKey(pageKey);
+                cache.setDataKey(dataKey);
+                cache.setDataContent(jsonContent);
+                cache.setCreatedAt(now);
+                cache.setExpiresAt(expiresAt);
+                pageDataCacheMapper.insert(cache);
+                log.debug("缓存保存: pageKey={}, dataKey={}", pageKey, dataKey);
+            }
+        } catch (JsonProcessingException e) {
+            log.error("序列化缓存数据失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+        } catch (Exception e) {
+            log.error("保存缓存失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+        }
+    }
+
+    /**
+     * 清理过期缓存数据
+     *
+     * @return 清理的记录数
+     */
+    public int cleanExpired() {
+        try {
+            int deleted = pageDataCacheMapper.deleteExpired();
+            if (deleted > 0) {
+                log.info("清理过期缓存: {} 条", deleted);
+            }
+            return deleted;
+        } catch (Exception e) {
+            log.error("清理过期缓存失败: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 删除指定页面的缓存
+     *
+     * @param pageKey 页面标识
+     * @param dataKey 数据标识（可选，为null时删除该页面所有缓存）
+     */
+    public void evict(String pageKey, String dataKey) {
+        try {
+            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PageDataCache::getPageKey, pageKey);
+            if (dataKey != null) {
+                wrapper.eq(PageDataCache::getDataKey, dataKey);
+            }
+            int deleted = pageDataCacheMapper.delete(wrapper);
+            log.info("删除缓存: pageKey={}, dataKey={}, 删除 {} 条", pageKey, dataKey, deleted);
+        } catch (Exception e) {
+            log.error("删除缓存失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+        }
+    }
+}

@@ -33,6 +33,7 @@ public class ErrorAnalysisService {
     private final SlsKeywordService slsKeywordService;
     private final SlsQueryClient slsQueryClient;
     private final MonitorProperties monitorProperties;
+    private final PageDataCacheService pageDataCacheService;
 
     /**
      * 从日志 message 提取 Java 异常类名（如 NullPointerException）
@@ -144,6 +145,23 @@ public class ErrorAnalysisService {
      * 直接查询 SLS ERROR 日志，按分钟分组，每分钟返回 top 5 错误类型。
      */
     public List<ErrorTypeVO> queryDirectErrors(String timeRange, int limit) {
+        String pageKey = "error_analysis_direct";
+        String dataKey = timeRange + "_" + limit;
+        
+        // 检查数据库缓存
+        List<ErrorTypeVO> dbCached = pageDataCacheService.getList(pageKey, dataKey, ErrorTypeVO.class);
+        if (dbCached != null) {
+            log.info("返回直接错误查询数据库缓存: timeRange={}, size={}", timeRange, dbCached.size());
+            return dbCached;
+        }
+        
+        // 缓存未命中，查询并缓存
+        List<ErrorTypeVO> result = loadDirectErrors(timeRange, limit);
+        pageDataCacheService.save(pageKey, dataKey, result);
+        return result;
+    }
+    
+    private List<ErrorTypeVO> loadDirectErrors(String timeRange, int limit) {
         long now = System.currentTimeMillis() / 1000;
         long from = now - TimeRanges.toSeconds(timeRange);
         String logstore = monitorProperties.getDefaultQueryLogstore();

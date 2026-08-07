@@ -23,3 +23,15 @@ CREATE TABLE IF NOT EXISTS sys_dict (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );
+CREATE TABLE IF NOT EXISTS page_data_cache (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  page_key VARCHAR(100) NOT NULL,
+  data_key VARCHAR(200) NOT NULL,
+  data_content TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_page_data_cache_page_key ON page_data_cache(page_key);
+CREATE INDEX IF NOT EXISTS idx_page_data_cache_expires_at ON page_data_cache(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_page_data_cache_keys ON page_data_cache(page_key, data_key);

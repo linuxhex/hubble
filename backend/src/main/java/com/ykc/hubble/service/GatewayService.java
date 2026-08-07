@@ -10,6 +10,7 @@ import com.ykc.hubble.vo.ApiDegradationVO;
 import com.ykc.hubble.vo.GatewayHotApiVO;
 import com.ykc.hubble.vo.GatewayOverviewVO;
 import com.ykc.hubble.vo.GatewayTrendVO;
+import com.ykc.hubble.vo.OverviewSnapshotPoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,10 +21,10 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,14 +36,31 @@ public class GatewayService {
     private final ArmsClient armsClient;
     private final MonitorProperties monitorProperties;
     private final SlsConfig slsConfig;
+    private final OverviewSnapshotCache overviewSnapshotCache;
+    private final PageDataCacheService pageDataCacheService;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final Executor queryExecutor;
 
     // 接口劣化缓存：key=compareMode, value=[data, timestamp]
     private final Map<String, CacheEntry> degradationCache = new java.util.concurrent.ConcurrentHashMap<>();
+    // P60排名内存缓存：key=compareMode, value=[data, timestamp]
+    private final Map<String, CacheEntry> p60RankingCache = new java.util.concurrent.ConcurrentHashMap<>();
+    // 趋势数据内存缓存：key=timeRange
+    private final Map<String, TrendCacheEntry> trendCache = new java.util.concurrent.ConcurrentHashMap<>();
+    // 热门接口内存缓存：key=timeRange
+    private final Map<String, HotApisCacheEntry> hotApisCache = new java.util.concurrent.ConcurrentHashMap<>();
+    // 正在加载中的任务标识，防止重复计算
+    private final Set<String> loadingKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final long CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
     
     // 概览数据缓存：key=timeRange, value=[data, timestamp]
     private final Map<String, OverviewCacheEntry> overviewCache = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long OVERVIEW_CACHE_TTL_MS = 60 * 1000; // 1 分钟
+    /**
+     * 估算的平均服务链路长度：每个外部请求在微服务链路中经过的服务数。
+     * 用于将全量 ControllerLog 数折算为外部请求数。
+     */
+    private static final double ESTIMATED_CHAIN_LENGTH = 20.0;
     
     private static class OverviewCacheEntry {
         final GatewayOverviewVO data;
@@ -58,16 +76,23 @@ public class GatewayService {
 
     @jakarta.annotation.PostConstruct
     public void initCache() {
-        log.info("初始化接口劣化缓存...");
-        for (String mode : Arrays.asList("day", "week", "month")) {
-            try {
-                List<ApiDegradationVO> data = loadDegradation(mode);
-                degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                log.info("缓存 {} 模式完成，{} 条数据", mode, data.size());
-            } catch (Exception e) {
-                log.warn("初始化缓存 {} 失败: {}", mode, e.getMessage());
+        CompletableFuture.runAsync(() -> {
+            log.info("异步初始化接口劣化缓存...");
+            for (String mode : Arrays.asList("day", "week", "month")) {
+                try {
+                    List<ApiDegradationVO> data = loadDegradation(mode);
+                    if (data.isEmpty()) {
+                        log.info("初始化 {} 模式返回空数据，跳过缓存", mode);
+                        continue;
+                    }
+                    degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_degradation", mode, data);
+                    log.info("缓存 {} 模式完成，{} 条数据", mode, data.size());
+                } catch (Exception e) {
+                    log.warn("初始化缓存 {} 失败: {}", mode, e.getMessage());
+                }
             }
-        }
+        }, queryExecutor);
     }
 
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 5 * 60 * 1000) // 每 5 分钟刷新
@@ -76,7 +101,15 @@ public class GatewayService {
         for (String mode : Arrays.asList("day", "week", "month")) {
             try {
                 List<ApiDegradationVO> data = loadDegradation(mode);
+                if (data.isEmpty()) {
+                    CacheEntry existing = degradationCache.get(mode);
+                    if (existing != null && !existing.data.isEmpty()) {
+                        log.info("刷新 {} 返回空数据，保留已有缓存 {} 条", mode, existing.data.size());
+                        continue;
+                    }
+                }
                 degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                pageDataCacheService.save("gateway_degradation", mode, data);
                 log.debug("刷新 {} 缓存完成，{} 条", mode, data.size());
             } catch (Exception e) {
                 log.warn("刷新缓存 {} 失败: {}", mode, e.getMessage());
@@ -96,39 +129,124 @@ public class GatewayService {
         }
     }
 
+    private static class TrendCacheEntry {
+        final GatewayTrendVO data;
+        final long timestamp;
+        TrendCacheEntry(GatewayTrendVO data, long timestamp) {
+            this.data = data;
+            this.timestamp = timestamp;
+        }
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_TTL_MS;
+        }
+    }
+
+    private static class HotApisCacheEntry {
+        final List<GatewayHotApiVO> data;
+        final long timestamp;
+        HotApisCacheEntry(List<GatewayHotApiVO> data, long timestamp) {
+            this.data = data;
+            this.timestamp = timestamp;
+        }
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_TTL_MS;
+        }
+    }
+
     public GatewayOverviewVO overview(String timeRange) {
-        // 先检查缓存，有则立即返回
+        // 先检查内存缓存，有则立即返回
         OverviewCacheEntry cached = overviewCache.get(timeRange);
         if (cached != null) {
             // 如果缓存未过期，直接返回
             if (!cached.isExpired()) {
-                log.debug("返回概览缓存数据: timeRange={}, age={}ms", timeRange, System.currentTimeMillis() - cached.timestamp);
+                log.debug("返回概览内存缓存数据: timeRange={}, age={}ms", timeRange, System.currentTimeMillis() - cached.timestamp);
                 return cached.data;
             }
-            // 缓存已过期，后台异步更新
+        }
+        
+        // 内存缓存过期或不存在，检查数据库缓存
+        String pageKey = "gateway_overview";
+        String dataKey = timeRange;
+        GatewayOverviewVO dbCached = pageDataCacheService.get(pageKey, dataKey, GatewayOverviewVO.class);
+        if (dbCached != null) {
+            log.info("返回概览数据库缓存数据: timeRange={}", timeRange);
+            // 更新内存缓存
+            overviewCache.put(timeRange, new OverviewCacheEntry(dbCached, System.currentTimeMillis()));
+            // 异步刷新数据库缓存
+            CompletableFuture.runAsync(() -> {
+                try {
+                    GatewayOverviewVO freshData = queryOverviewData(timeRange);
+                    if (freshData.getTotalRequests() == 0 && dbCached.getTotalRequests() > 0) {
+                        log.info("概览后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
+                    overviewCache.put(timeRange, new OverviewCacheEntry(freshData, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, freshData);
+                    log.info("后台刷新概览数据库缓存: timeRange={}", timeRange);
+                } catch (Exception e) {
+                    log.warn("后台刷新概览数据库缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
+        }
+        
+        // 内存缓存存在但过期，后台异步更新，返回旧数据
+        if (cached != null) {
             log.debug("概览缓存已过期，后台更新: timeRange={}", timeRange);
             CompletableFuture.runAsync(() -> {
                 try {
                     GatewayOverviewVO freshData = queryOverviewData(timeRange);
+                    if (freshData.getTotalRequests() == 0 && cached.data.getTotalRequests() > 0) {
+                        log.info("概览后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
                     overviewCache.put(timeRange, new OverviewCacheEntry(freshData, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, freshData);
                     log.info("概览缓存已更新: timeRange={}", timeRange);
                 } catch (Exception e) {
                     log.warn("后台更新概览缓存失败: {}", e.getMessage());
                 }
-            });
+            }, queryExecutor);
             // 返回旧的缓存数据
             return cached.data;
         }
         
-        // 没有缓存，同步查询并缓存
+        // 没有缓存，先从快照缓存中获取历史数据立即返回
+        try {
+            OverviewSnapshotPoint snapshot = overviewSnapshotCache.latest(timeRange);
+            if (snapshot != null) {
+                GatewayOverviewVO vo = new GatewayOverviewVO();
+                vo.setTotalRequests(snapshot.getTotalRequests());
+                vo.setAvgResponseTime(snapshot.getAvgResponseTime());
+                vo.setQps(snapshot.getQps());
+                vo.setErrorRate(snapshot.getErrorRate());
+                overviewCache.put(timeRange, new OverviewCacheEntry(vo, System.currentTimeMillis()));
+                pageDataCacheService.save(pageKey, dataKey, vo);
+                log.info("使用快照数据返回概览: timeRange={}, totalRequests={}", timeRange, snapshot.getTotalRequests());
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        GatewayOverviewVO freshData = queryOverviewData(timeRange);
+                        overviewCache.put(timeRange, new OverviewCacheEntry(freshData, System.currentTimeMillis()));
+                        pageDataCacheService.save(pageKey, dataKey, freshData);
+                    } catch (Exception ex) {
+                        log.warn("后台刷新概览数据失败: {}", ex.getMessage());
+                    }
+                }, queryExecutor);
+                return vo;
+            }
+        } catch (Exception e) {
+            log.warn("读取快照数据失败: {}", e.getMessage());
+        }
+
+        // 快照也没有，同步查询并缓存
         try {
             GatewayOverviewVO data = queryOverviewData(timeRange);
             overviewCache.put(timeRange, new OverviewCacheEntry(data, System.currentTimeMillis()));
+            pageDataCacheService.save(pageKey, dataKey, data);
             log.info("概览数据已缓存: timeRange={}", timeRange);
             return data;
         } catch (Exception e) {
             log.error("查询概览数据失败: {}", e.getMessage(), e);
-            // 返回空数据
             GatewayOverviewVO empty = new GatewayOverviewVO();
             empty.setTotalRequests(0);
             empty.setQps(0.0);
@@ -181,8 +299,9 @@ public class GatewayService {
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
-                long totalRequests = 0;
                 long errorCount = 0;
+                double qpsRateSum = 0;
+                int bucketCount = 0;
                 
                 for (var itemObj : response.getData().getItems()) {
                     if (itemObj instanceof Map) {
@@ -191,11 +310,17 @@ public class GatewayService {
                         @SuppressWarnings("unchecked")
                         Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
                         if (measures != null) {
-                            totalRequests += ((Number) measures.getOrDefault("count", 0L)).longValue();
-                            errorCount += ((Number) measures.getOrDefault("error", 0L)).longValue();
+                            double rate = ((Number) measures.getOrDefault("count", 0L)).doubleValue();
+                            long err = ((Number) measures.getOrDefault("error", 0L)).longValue();
+                            qpsRateSum += rate;
+                            errorCount += err;
+                            bucketCount++;
                         }
                     }
                 }
+                
+                double avgQps = bucketCount > 0 ? qpsRateSum / bucketCount : 0;
+                long totalRequests = Math.round(avgQps * seconds);
                 
                 // 2. 查询平均响应时间（使用较粗的粒度）
                 double avgTime = 0;
@@ -234,8 +359,8 @@ public class GatewayService {
                 
                 GatewayOverviewVO vo = new GatewayOverviewVO();
                 vo.setTotalRequests(totalRequests);
-                vo.setQps(seconds > 0 ? (double) totalRequests / seconds : 0);
-                vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
+                vo.setQps(Math.round(avgQps * 100.0) / 100.0);
+                vo.setErrorRate(qpsRateSum == 0 ? 0 : errorCount * 100.0 / qpsRateSum);
                 vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
 
                 // 趋势计算（与上一周期对比）
@@ -249,8 +374,9 @@ public class GatewayService {
                     intervalInSec
                 );
                 
-                long prevTotal = 0;
+                double prevQpsRateSum = 0;
                 long prevErrors = 0;
+                int prevBucketCount = 0;
                 
                 if (prevResponse != null && prevResponse.getData() != null && prevResponse.getData().getItems() != null) {
                     for (var itemObj : prevResponse.getData().getItems()) {
@@ -260,12 +386,15 @@ public class GatewayService {
                             @SuppressWarnings("unchecked")
                             Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
                             if (measures != null) {
-                                prevTotal += ((Number) measures.getOrDefault("count", 0L)).longValue();
+                                prevQpsRateSum += ((Number) measures.getOrDefault("count", 0L)).doubleValue();
                                 prevErrors += ((Number) measures.getOrDefault("error", 0L)).longValue();
+                                prevBucketCount++;
                             }
                         }
                     }
                 }
+                double prevQps = prevBucketCount > 0 ? prevQpsRateSum / prevBucketCount : 0;
+                long prevTotal = Math.round(prevQps * seconds);
                 
                 // 查询上期 RT
                 double prevAvg = 0;
@@ -302,12 +431,10 @@ public class GatewayService {
                     log.warn("查询上期 RT 失败: {}", e.getMessage());
                 }
                 
-                double prevQps = prevTotal / seconds;
-                
                 vo.setTotalTrend(prevTotal > 0 ? (totalRequests - prevTotal) * 100.0 / prevTotal : 0);
                 vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
-                vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
-                vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
+                vo.setErrorTrend(qpsRateSum == 0 ? 0 : (errorCount - prevErrors) * 100.0 / Math.max(errorCount, 1));
+                vo.setQpsTrend(prevQps > 0 ? (avgQps - prevQps) * 100.0 / prevQps : 0);
                 
                 log.info("从 ARMS 获取概览数据成功: totalRequests={}, qps={}, avgRt={}", totalRequests, vo.getQps(), avgTime);
                 return vo;
@@ -326,26 +453,44 @@ public class GatewayService {
         long errorCount = 0;
         
         try {
-            String countQuery = "* | SELECT COUNT(*) as total";
+            String requestFilter = "ControllerLog and apiUrl";
+            String countQuery = requestFilter + " | SELECT COUNT(*) as total";
             List<Map<String, String>> countResult = slsQueryClient.queryAnalytics(logstore, countQuery, from, now, 1);
             if (!countResult.isEmpty()) {
                 totalRequests = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
             }
             
-            String errorQuery = "* | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            String errorQuery = requestFilter + " | SELECT COUNT(*) as total WHERE level = 'ERROR'";
             List<Map<String, String>> errorResult = slsQueryClient.queryAnalytics(logstore, errorQuery, from, now, 1);
             if (!errorResult.isEmpty()) {
                 errorCount = Long.parseLong(errorResult.get(0).getOrDefault("total", "0"));
             }
         } catch (Exception e) {
             log.warn("SLS 分析查询失败，使用 GetHistograms 降级: {}", e.getMessage());
-            totalRequests = slsQueryClient.countLogstore(logstore, "*", from, now);
-            errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
+            totalRequests = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl", from, now);
+            errorCount = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl and ERROR", from, now);
+        }
+
+        // 全量 ControllerLog 包含微服务链路中每个服务的日志，需除以链路长度折算外部请求数
+        long externalTotalRequests = Math.round(totalRequests / ESTIMATED_CHAIN_LENGTH);
+
+        // 查询最近1分钟的请求数来计算当前QPS
+        double currentQps = 0;
+        try {
+            String qpsQuery = "ControllerLog and apiUrl | SELECT COUNT(*) as total";
+            List<Map<String, String>> qpsResult = slsQueryClient.queryAnalytics(logstore, qpsQuery, now - 60, now, 1);
+            if (!qpsResult.isEmpty()) {
+                long lastMinuteCount = Long.parseLong(qpsResult.get(0).getOrDefault("total", "0"));
+                currentQps = lastMinuteCount / 60.0 / ESTIMATED_CHAIN_LENGTH;
+            }
+        } catch (Exception e) {
+            log.warn("SLS 查询当前QPS失败: {}", e.getMessage());
+            currentQps = seconds > 0 ? (double) externalTotalRequests / seconds : 0;
         }
 
         GatewayOverviewVO vo = new GatewayOverviewVO();
-        vo.setTotalRequests(totalRequests);
-        vo.setQps(seconds > 0 ? (double) totalRequests / seconds : 0);
+        vo.setTotalRequests(externalTotalRequests);
+        vo.setQps(currentQps);
         vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
 
         // 采样部分日志计算平均响应时间（取最近的日志）
@@ -362,22 +507,25 @@ public class GatewayService {
         long prevErrors = 0;
         
         try {
-            String prevCountQuery = "* | SELECT COUNT(*) as total";
+            String requestFilter = "ControllerLog and apiUrl";
+            String prevCountQuery = requestFilter + " | SELECT COUNT(*) as total";
             List<Map<String, String>> prevCountResult = slsQueryClient.queryAnalytics(logstore, prevCountQuery, prevFrom, from, 1);
             if (!prevCountResult.isEmpty()) {
                 prevTotal = Long.parseLong(prevCountResult.get(0).getOrDefault("total", "0"));
             }
             
-            String prevErrorQuery = "* | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            String prevErrorQuery = requestFilter + " | SELECT COUNT(*) as total WHERE level = 'ERROR'";
             List<Map<String, String>> prevErrorResult = slsQueryClient.queryAnalytics(logstore, prevErrorQuery, prevFrom, from, 1);
             if (!prevErrorResult.isEmpty()) {
                 prevErrors = Long.parseLong(prevErrorResult.get(0).getOrDefault("total", "0"));
             }
         } catch (Exception e) {
             log.warn("SLS 上期分析查询失败: {}", e.getMessage());
-            prevTotal = slsQueryClient.countLogstore(logstore, "*", prevFrom, from);
-            prevErrors = slsQueryClient.countLogstore(logstore, "level: ERROR", prevFrom, from);
+            prevTotal = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl", prevFrom, from);
+            prevErrors = slsQueryClient.countLogstore(logstore, "(ControllerLog and apiUrl) and ERROR", prevFrom, from);
         }
+        
+        long externalPrevTotal = Math.round(prevTotal / ESTIMATED_CHAIN_LENGTH);
         
         List<LogEntry> prevSampleLogs = queryLogs(logstore, "*", prevFrom, from, 0, 100);
         double prevAvg = prevSampleLogs.stream()
@@ -385,17 +533,92 @@ public class GatewayService {
                 .average()
                 .orElse(0);
         
-        double prevQps = prevTotal / seconds;
-        vo.setTotalTrend(prevTotal > 0 ? (totalRequests - prevTotal) * 100.0 / prevTotal : 0);
+        double prevQps = seconds > 0 ? (double) externalPrevTotal / seconds : 0;
+        vo.setTotalTrend(externalPrevTotal > 0 ? (externalTotalRequests - externalPrevTotal) * 100.0 / externalPrevTotal : 0);
         vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
         vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
         vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
         
-        log.info("SLS 概览数据: totalRequests={}, errorCount={}, avgRt={}", totalRequests, errorCount, avgTime);
+        log.info("SLS 概览数据: rawTotal={}, externalTotal={}, qps={}, errorRate={}%, avgRt={}", totalRequests, externalTotalRequests, String.format("%.1f", currentQps), String.format("%.2f", vo.getErrorRate()), avgTime);
         return vo;
     }
 
     public GatewayTrendVO trend(String timeRange) {
+        String key = timeRange != null ? timeRange : "1h";
+        TrendCacheEntry entry = trendCache.get(key);
+
+        if (entry != null && !entry.isExpired()) {
+            log.debug("返回趋势内存缓存: timeRange={}", key);
+            return entry.data;
+        }
+
+        String pageKey = "gateway_trend";
+        String dataKey = key;
+        GatewayTrendVO dbCached = pageDataCacheService.get(pageKey, dataKey, GatewayTrendVO.class);
+        if (dbCached != null) {
+            log.info("返回趋势数据库缓存: timeRange={}", key);
+            trendCache.put(key, new TrendCacheEntry(dbCached, System.currentTimeMillis()));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    GatewayTrendVO data = loadTrend(timeRange);
+                    if ((data.getTimestamps() == null || data.getTimestamps().isEmpty()) && dbCached.getTimestamps() != null && !dbCached.getTimestamps().isEmpty()) {
+                        log.info("趋势后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
+                    trendCache.put(key, new TrendCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新趋势缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
+        }
+
+        if (entry != null) {
+            log.info("趋势内存缓存过期，返回旧数据并后台刷新: timeRange={}", key);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    GatewayTrendVO data = loadTrend(timeRange);
+                    if ((data.getTimestamps() == null || data.getTimestamps().isEmpty()) && entry.data.getTimestamps() != null && !entry.data.getTimestamps().isEmpty()) {
+                        log.info("趋势后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
+                    trendCache.put(key, new TrendCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新趋势缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return entry.data;
+        }
+
+        String loadingKey = "trend_" + key;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("趋势数据无缓存，后台加载: timeRange={}", key);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    GatewayTrendVO result = loadTrend(timeRange);
+                    trendCache.put(key, new TrendCacheEntry(result, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, result);
+                    log.info("趋势数据后台加载完成: timeRange={}", key);
+                } catch (Exception e) {
+                    log.warn("趋势数据后台加载失败: timeRange={}, error={}", key, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
+                }
+            }, queryExecutor);
+        } else {
+            log.info("趋势数据正在加载中，跳过重复请求: timeRange={}", key);
+        }
+        GatewayTrendVO empty = new GatewayTrendVO();
+        empty.setTimestamps(new ArrayList<>());
+        empty.setInfoCounts(new ArrayList<>());
+        empty.setWarnCounts(new ArrayList<>());
+        empty.setErrorCounts(new ArrayList<>());
+        return empty;
+    }
+
+    private GatewayTrendVO loadTrend(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
         long seconds = parseTimeRange(timeRange);
         long from = now - seconds;
@@ -554,6 +777,76 @@ public class GatewayService {
     }
 
     public List<GatewayHotApiVO> hotApis(String timeRange) {
+        String tr = timeRange != null ? timeRange : "1h";
+        HotApisCacheEntry entry = hotApisCache.get(tr);
+
+        if (entry != null && !entry.isExpired()) {
+            log.debug("返回热门接口内存缓存: timeRange={}, size={}", tr, entry.data.size());
+            return entry.data;
+        }
+
+        String pageKey = "gateway_hot_apis";
+        String dataKey = tr;
+        List<GatewayHotApiVO> dbCached = pageDataCacheService.getList(pageKey, dataKey, GatewayHotApiVO.class);
+        if (dbCached != null) {
+            log.info("返回热门接口数据库缓存: timeRange={}, size={}", tr, dbCached.size());
+            hotApisCache.put(tr, new HotApisCacheEntry(dbCached, System.currentTimeMillis()));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<GatewayHotApiVO> data = loadHotApis(timeRange);
+                    if (data.isEmpty() && !dbCached.isEmpty()) {
+                        log.info("热门接口后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
+                    hotApisCache.put(tr, new HotApisCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新热门接口缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
+        }
+
+        if (entry != null) {
+            log.info("热门接口内存缓存过期，返回旧数据并后台刷新: timeRange={}", tr);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<GatewayHotApiVO> data = loadHotApis(timeRange);
+                    if (data.isEmpty() && !entry.data.isEmpty()) {
+                        log.info("热门接口后台刷新返回空数据，保留已有缓存: timeRange={}", timeRange);
+                        return;
+                    }
+                    hotApisCache.put(tr, new HotApisCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新热门接口缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return entry.data;
+        }
+
+        String loadingKey = "hotapis_" + tr;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("热门接口无缓存，后台加载: timeRange={}", tr);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<GatewayHotApiVO> result = loadHotApis(timeRange);
+                    hotApisCache.put(tr, new HotApisCacheEntry(result, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, result);
+                    log.info("热门接口后台加载完成: timeRange={}, size={}", tr, result.size());
+                } catch (Exception e) {
+                    log.warn("热门接口后台加载失败: timeRange={}, error={}", tr, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
+                }
+            }, queryExecutor);
+        } else {
+            log.info("热门接口正在加载中，跳过重复请求: timeRange={}", tr);
+        }
+        return Collections.emptyList();
+    }
+
+    private List<GatewayHotApiVO> loadHotApis(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
         long seconds = parseTimeRange(timeRange);
         long from = now - seconds;
@@ -602,6 +895,8 @@ public class GatewayService {
                 }
                 
                 if (!apiStats.isEmpty()) {
+                    Map<String, Double> realtimeQps = queryRealtimeQpsFromArms(now);
+
                     List<GatewayHotApiVO> result = apiStats.entrySet().stream()
                         .map(entry -> {
                             GatewayHotApiVO api = new GatewayHotApiVO();
@@ -612,12 +907,13 @@ public class GatewayService {
                             double totalRt = entry.getValue()[1];
                             long errorCount = entry.getValue()[2];
                             
-                            api.setQps(seconds > 0 ? (double) count / seconds : 0);
+                            api.setQps(realtimeQps.getOrDefault(entry.getKey(), seconds > 0 ? (double) count / seconds : 0));
                             api.setAvgTime(Math.round(count > 0 ? totalRt / count : 0) + "ms");
                             api.setErrorRate(String.format("%.1f%%", count > 0 ? errorCount * 100.0 / count : 0));
                             
                             return api;
                         })
+                        .filter(api -> api.getQps() >= 1.0)
                         .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
                         .limit(10)
                         .collect(Collectors.toList());
@@ -633,65 +929,221 @@ public class GatewayService {
         // ARMS 失败时降级到 SLS
         return hotApisFromSls(timeRange, now, seconds, from, logstore);
     }
+
+    private Map<String, Double> queryRealtimeQpsFromArms(long now) {
+        Map<String, Double> qpsMap = new HashMap<>();
+        try {
+            long fromMs = (now - 60) * 1000;
+            long toMs = now * 1000;
+            var response = armsClient.queryMetrics(
+                "appstat.transaction",
+                Arrays.asList("count"),
+                fromMs,
+                toMs,
+                null,
+                60
+            );
+            if (response != null && response.getData() != null && response.getData().getItems() != null) {
+                for (var itemObj : response.getData().getItems()) {
+                    if (itemObj instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> item = (Map<Object, Object>) itemObj;
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
+                        @SuppressWarnings("unchecked")
+                        Map<Object, Object> tags = (Map<Object, Object>) item.get("tags");
+                        if (measures != null && tags != null) {
+                            String apiPath = String.valueOf(tags.getOrDefault("api", "unknown"));
+                            long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
+                            qpsMap.merge(apiPath, count / 60.0, Double::sum);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询实时QPS失败: {}", e.getMessage());
+        }
+        return qpsMap;
+    }
     
     private List<GatewayHotApiVO> hotApisFromSls(String timeRange, long now, long seconds, long from, String logstore) {
-        // 使用采样方法，但先获取总数以正确计算QPS
         try {
-            // 1. 使用分析查询获取总日志数
-            long totalCountTemp = 0;
+            // 获取概览QPS用于缩放
+            double overviewQps = 0;
             try {
-                String countQuery = "* | SELECT COUNT(*) as total";
-                List<Map<String, String>> countResult = slsQueryClient.queryAnalytics(logstore, countQuery, from, now, 1);
-                if (!countResult.isEmpty()) {
-                    totalCountTemp = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
+                GatewayOverviewVO overviewData = overview(timeRange);
+                if (overviewData != null) {
+                    overviewQps = overviewData.getQps();
                 }
             } catch (Exception e) {
-                log.warn("获取总日志数失败: {}", e.getMessage());
+                log.warn("获取概览QPS失败: {}", e.getMessage());
             }
-            final long totalCount = totalCountTemp;
-            log.info("SLS 热门接口：总日志数={}", totalCount);
             
-            // 2. 采样1000条日志按服务分组
-            List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 1000);
-            log.info("SLS 热门接口采样 {} 条日志", sampleLogs.size());
+            // 从多个核心服务查询热门接口
+            List<GatewayHotApiVO> allApis = queryMultipleServicesHotApis(logstore, now, overviewQps);
+            if (!allApis.isEmpty()) {
+                log.info("从多个服务获取到 {} 个热门接口", allApis.size());
+                return allApis;
+            }
             
-            // 3. 按服务分组统计样本中的数量
-            Map<String, Long> serviceCounts = sampleLogs.stream()
-                .filter(log -> log.getContainerName() != null && !log.getContainerName().isBlank())
-                .collect(Collectors.groupingBy(LogEntry::getContainerName, Collectors.counting()));
-            
-            // 4. 根据样本比例估算实际数量并计算QPS
-            long sampleSize = sampleLogs.size();
-            return serviceCounts.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit(10)
+            // 降级：从所有日志查询
+            long fiveMinAgo = now - 300;
+            List<LogEntry> recentLogs = queryLogs(logstore, "cost or useTime or duration or 耗时 or ms or rt or elapsed", fiveMinAgo, now, 0, 10000);
+            log.info("SLS 热门接口：查询到 {} 条含耗时信息的日志（最近5分钟）", recentLogs.size());
+
+            if (recentLogs.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            // 提取 API 路径并按路径分组
+            Map<String, Long> apiCounts = new HashMap<>();
+            for (LogEntry entry : recentLogs) {
+                String apiPath = extractUrl(entry.getMessage());
+                if (apiPath == null || apiPath.isBlank()) continue;
+                if (!isHttpApiPath(apiPath)) continue;
+                
+                apiPath = normalizeApiPath(apiPath);
+                apiCounts.merge(apiPath, 1L, Long::sum);
+            }
+
+            log.info("SLS 热门接口：提取到 {} 个 API 路径", apiCounts.size());
+
+            // 计算实时 QPS（最近5分钟的请求数 / 300秒）
+            return apiCounts.entrySet().stream()
                 .map(entry -> {
+                    double qps = entry.getValue() / 300.0;
+
                     GatewayHotApiVO api = new GatewayHotApiVO();
-                    api.setPath("/" + entry.getKey());
+                    api.setPath(entry.getKey());
                     api.setMethod("GET");
-                    
-                    // 根据样本比例估算实际数量
-                    long estimatedCount = (long) ((double) entry.getValue() / sampleSize * totalCount);
-                    api.setQps(seconds > 0 ? (double) estimatedCount / seconds : 0);
+                    api.setQps(qps);
                     api.setAvgTime("-");
                     api.setErrorRate("-");
                     return api;
                 })
+                .filter(api -> api.getQps() >= 0.001)
+                .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
+                .limit(20)
                 .collect(Collectors.toList());
         } catch (Exception e) {
             log.error("查询热门接口失败", e);
             return new ArrayList<>();
         }
     }
+    
+    /**
+     * 从多个核心服务查询热门接口
+     */
+    private List<GatewayHotApiVO> queryMultipleServicesHotApis(String logstore, long now, double overviewQps) {
+        List<GatewayHotApiVO> result = new ArrayList<>();
+        long fiveMinAgo = now - 300;
+        
+        // 核心服务列表：网关、订单、财务、活动、base等
+        String[] coreServices = {
+            "guan-zhong", "guan-zhong-prod",  // 网关
+            "order-server", "order-server-prod",  // 订单
+            "finance-server", "finance-server-prod",  // 财务
+            "activity-server", "activity-server-prod",  // 活动
+            "base-server", "base-server-prod",  // base
+            "charge-server", "charge-server-prod",  // 充电
+            "external-server", "external-server-prod",  // 外部
+            "omp-server", "omp-gateway", "omp-admin",  // OMP
+            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query"  // 大数据
+        };
+        
+        Map<String, Long> globalApiCounts = new HashMap<>();
+        int totalSampleSize = 0;
+        
+        for (String serviceName : coreServices) {
+            try {
+                String query = "__tag__:_container_name_: " + serviceName;
+                
+                // 查询样本日志提取API路径
+                List<LogEntry> logs = queryLogs(logstore, query, fiveMinAgo, now, 0, 1000);
+                log.info("服务 {} 查询到 {} 条样本日志", serviceName, logs.size());
+                
+                if (logs.isEmpty()) continue;
+                
+                totalSampleSize += logs.size();
+                
+                // 提取 API 路径并统计分布
+                for (LogEntry entry : logs) {
+                    String apiPath = extractUrl(entry.getMessage());
+                    if (apiPath == null || apiPath.isBlank()) continue;
+                    if (!isHttpApiPath(apiPath)) continue;
+                    
+                    apiPath = normalizeApiPath(apiPath);
+                    globalApiCounts.merge(apiPath, 1L, Long::sum);
+                }
+                
+                log.info("服务 {} 提取到 {} 个 API", serviceName, globalApiCounts.size());
+            } catch (Exception e) {
+                log.warn("查询服务 {} 失败: {}", serviceName, e.getMessage());
+            }
+        }
+        
+        if (totalSampleSize == 0 || globalApiCounts.isEmpty()) {
+            return result;
+        }
+        
+        // 根据样本分布和概览QPS估算每个API的QPS
+        for (Map.Entry<String, Long> entry : globalApiCounts.entrySet()) {
+            // 该API在所有样本中的占比
+            double proportion = (double) entry.getValue() / totalSampleSize;
+            // 估算QPS = 占比 * 概览QPS
+            double qps = proportion * overviewQps;
+            
+            GatewayHotApiVO api = new GatewayHotApiVO();
+            api.setPath(entry.getKey());
+            api.setMethod("GET");
+            api.setQps(qps);
+            api.setAvgTime("-");
+            api.setErrorRate("-");
+            result.add(api);
+        }
+        
+        // 按 QPS 排序并返回 top 20
+        return result.stream()
+            .filter(api -> api.getQps() >= 0.001)
+            .sorted((a, b) -> Double.compare(b.getQps(), a.getQps()))
+            .limit(20)
+            .collect(Collectors.toList());
+    }
 
     public List<ApiDegradationVO> degradation(String compareMode) {
         String mode = compareMode != null ? compareMode.toLowerCase() : "day";
         CacheEntry entry = degradationCache.get(mode);
 
-        // 如果有缓存且未过期，直接返回
+        // 如果有内存缓存且未过期，直接返回
         if (entry != null && !entry.isExpired()) {
-            log.debug("返回缓存数据: mode={}, size={}", mode, entry.data.size());
+            log.debug("返回内存缓存数据: mode={}, size={}", mode, entry.data.size());
             return entry.data;
+        }
+
+        // 检查数据库缓存
+        String pageKey = "gateway_degradation";
+        String dataKey = mode;
+        List<ApiDegradationVO> dbCached = pageDataCacheService.getList(pageKey, dataKey, ApiDegradationVO.class);
+        if (dbCached != null && !dbCached.isEmpty()) {
+            log.info("返回数据库缓存数据: mode={}, size={}", mode, dbCached.size());
+            // 更新内存缓存
+            degradationCache.put(mode, new CacheEntry(dbCached, System.currentTimeMillis()));
+            // 异步刷新数据库缓存
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadDegradation(mode);
+                    if (data.isEmpty() && !dbCached.isEmpty()) {
+                        log.info("后台刷新返回空数据，保留已有缓存: mode={}", mode);
+                        return;
+                    }
+                    degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                    log.info("后台刷新数据库缓存: mode={}, size={}", mode, data.size());
+                } catch (Exception e) {
+                    log.error("后台刷新失败: mode={}, error={}", mode, e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
         }
 
         // 如果缓存过期或不存在，触发后台刷新，但先返回旧缓存（如果有）
@@ -700,24 +1152,42 @@ public class GatewayService {
             CompletableFuture.runAsync(() -> {
                 try {
                     List<ApiDegradationVO> data = loadDegradation(mode);
+                    if (data.isEmpty() && !entry.data.isEmpty()) {
+                        log.info("后台刷新返回空数据，保留已有缓存: mode={}", mode);
+                        return;
+                    }
                     degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
                     log.info("后台刷新完成: mode={}, size={}", mode, data.size());
                 } catch (Exception e) {
                     log.error("后台刷新失败: mode={}, error={}", mode, e.getMessage());
                 }
-            });
+            }, queryExecutor);
             return entry.data; // 返回旧缓存
         }
 
-        // 首次加载，同步等待
-        try {
-            List<ApiDegradationVO> data = loadDegradation(mode);
-            degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-            return data;
-        } catch (Exception e) {
-            log.error("首次加载失败: mode={}, error={}", mode, e.getMessage());
-            return Collections.emptyList();
+        // 首次无缓存：后台加载，立即返回空数据
+        String loadingKey = "degradation_" + mode;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("劣化对比无缓存，后台加载: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadDegradation(mode);
+                    if (!data.isEmpty()) {
+                        degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                        pageDataCacheService.save(pageKey, dataKey, data);
+                    }
+                    log.info("劣化对比后台加载完成: mode={}, size={}", mode, data.size());
+                } catch (Exception e) {
+                    log.warn("劣化对比后台加载失败: mode={}, error={}", mode, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
+                }
+            }, queryExecutor);
+        } else {
+            log.info("劣化对比正在加载中，跳过重复请求: mode={}", mode);
         }
+        return Collections.emptyList();
     }
 
     private List<ApiDegradationVO> loadDegradation(String compareMode) {
@@ -728,18 +1198,17 @@ public class GatewayService {
 
         switch (compareMode != null ? compareMode.toLowerCase() : "day") {
             case "week": {
-                LocalDate thisWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-                long duration = ChronoUnit.DAYS.between(
-                        today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1), today) * 86400;
-                currentRange = new long[]{thisWeekStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                // 滚动3天对比：最近3天 vs 之前3天
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 3 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 6 * 86400, nowSec - 3 * 86400};
                 break;
             }
             case "month": {
-                LocalDate thisMonthStart = today.with(TemporalAdjusters.firstDayOfMonth());
-                long duration = ChronoUnit.DAYS.between(thisMonthStart.minusMonths(1), thisMonthStart) * 86400;
-                currentRange = new long[]{thisMonthStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                // 滚动30天对比：最近30天 vs 之前30天（避免SLS日志过期问题）
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 30 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 60 * 86400, nowSec - 30 * 86400};
                 break;
             }
             default: {
@@ -766,12 +1235,15 @@ public class GatewayService {
             previousApiStats = new HashMap<>();
         }
 
-        log.info("劣化对比: compareMode={}, currentApis={}, previousApis={}", compareMode, currentApiStats.size(), previousApiStats.size());
+        log.info("劣化对比: compareMode={}, currentRange=[{},{}], previousRange=[{},{}], currentApis={}, previousApis={}",
+            compareMode, currentRange[0], currentRange[1], previousRange[0], previousRange[1],
+            currentApiStats.size(), previousApiStats.size());
 
         Set<String> allApis = new HashSet<>(currentApiStats.keySet());
         allApis.addAll(previousApiStats.keySet());
 
         List<ApiDegradationVO> result = new ArrayList<>();
+        int filterNoData = 0, filterNoPrevCount = 0, filterNoPrevP60 = 0, filterNoDegradation = 0;
         for (String apiPath : allApis) {
             long[] cur = currentApiStats.get(apiPath);
             long[] prev = previousApiStats.get(apiPath);
@@ -781,17 +1253,18 @@ public class GatewayService {
             double previousP60 = prev != null ? prev[1] : 0;
 
             // 过滤：必须有足够的请求数（至少1次）且有RT数据
-            if (currentCount == 0 && previousCount == 0) continue;
-            if (currentCount < 1 && previousCount < 1) continue;
-            if (currentP60 == 0 && previousP60 == 0) continue;
+            if (currentCount == 0 && previousCount == 0) { filterNoData++; continue; }
+            if (currentCount < 1 && previousCount < 1) { filterNoData++; continue; }
+            if (currentP60 == 0 && previousP60 == 0) { filterNoData++; continue; }
             // 过滤：必须有上期数据（排除新增API，新增API不算劣化）
-            if (previousCount == 0 || previousP60 == 0) continue;
+            if (previousCount == 0) { filterNoPrevCount++; continue; }
+            if (previousP60 == 0) { filterNoPrevP60++; continue; }
 
             // 计算P60 RT变化率作为劣化幅度
             double rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
 
             // 过滤：只显示真正劣化的API（RT增加）
-            if (rtChangeRate <= 0) continue;
+            if (rtChangeRate <= 0) { filterNoDegradation++; continue; }
 
             ApiDegradationVO vo = new ApiDegradationVO();
             vo.setApiPath(apiPath);
@@ -809,10 +1282,86 @@ public class GatewayService {
         for (int i = 0; i < result.size(); i++) {
             result.get(i).setRank(i + 1);
         }
-        return result.size() > 200 ? result.subList(0, 200) : result;
+        
+        log.info("劣化过滤统计: total={}, 无数据={}, 无上期调用={}, 无上期P60={}, RT未增加={}, 最终结果={}",
+            allApis.size(), filterNoData, filterNoPrevCount, filterNoPrevP60, filterNoDegradation, result.size());
+        
+        return result.size() > 30 ? result.subList(0, 30) : result;
     }
 
     public List<ApiDegradationVO> p60Ranking(String compareMode) {
+        String mode = compareMode != null ? compareMode.toLowerCase() : "day";
+        CacheEntry entry = p60RankingCache.get(mode);
+
+        if (entry != null && !entry.isExpired()) {
+            log.debug("返回P60排名内存缓存: mode={}, size={}", mode, entry.data.size());
+            return entry.data;
+        }
+
+        String pageKey = "gateway_p60_ranking";
+        String dataKey = mode;
+
+        List<ApiDegradationVO> dbCached = pageDataCacheService.getList(pageKey, dataKey, ApiDegradationVO.class);
+        if (dbCached != null) {
+            log.info("返回P60排名数据库缓存: mode={}, size={}", mode, dbCached.size());
+            p60RankingCache.put(mode, new CacheEntry(dbCached, System.currentTimeMillis()));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadP60Ranking(compareMode);
+                    if (data.isEmpty() && !dbCached.isEmpty()) {
+                        log.info("P60排名后台刷新返回空数据，保留已有缓存: mode={}", compareMode);
+                        return;
+                    }
+                    p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新P60排名缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
+        }
+
+        if (entry != null) {
+            log.info("P60排名内存缓存过期，返回旧数据并后台刷新: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadP60Ranking(compareMode);
+                    if (data.isEmpty() && !entry.data.isEmpty()) {
+                        log.info("P60排名后台刷新返回空数据，保留已有缓存: mode={}", compareMode);
+                        return;
+                    }
+                    p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
+                } catch (Exception e) {
+                    log.warn("后台刷新P60排名缓存失败: {}", e.getMessage());
+                }
+            }, queryExecutor);
+            return entry.data;
+        }
+
+        // 首次无缓存：后台加载，立即返回空数据
+        String loadingKey = "p60_" + mode;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("P60排名无缓存，后台加载: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> result = loadP60Ranking(compareMode);
+                    p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, result);
+                    log.info("P60排名后台加载完成: mode={}, size={}", mode, result.size());
+                } catch (Exception e) {
+                    log.warn("P60排名后台加载失败: mode={}, error={}", mode, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
+                }
+            }, queryExecutor);
+        } else {
+            log.info("P60排名正在加载中，跳过重复请求: mode={}", mode);
+        }
+        return Collections.emptyList();
+    }
+    
+    private List<ApiDegradationVO> loadP60Ranking(String compareMode) {
         ZoneId zone = ZoneId.systemDefault();
         LocalDate today = LocalDate.now(zone);
         long[] currentRange;
@@ -820,18 +1369,17 @@ public class GatewayService {
 
         switch (compareMode != null ? compareMode.toLowerCase() : "day") {
             case "week": {
-                LocalDate thisWeekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-                long duration = ChronoUnit.DAYS.between(
-                        today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1), today) * 86400;
-                currentRange = new long[]{thisWeekStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                // 滚动3天对比：最近3天 vs 之前3天
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 3 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 6 * 86400, nowSec - 3 * 86400};
                 break;
             }
             case "month": {
-                LocalDate thisMonthStart = today.with(TemporalAdjusters.firstDayOfMonth());
-                long duration = ChronoUnit.DAYS.between(thisMonthStart.minusMonths(1), thisMonthStart) * 86400;
-                currentRange = new long[]{thisMonthStart.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - duration, currentRange[0]};
+                // 滚动30天对比：最近30天 vs 之前30天（避免SLS日志过期问题）
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 30 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 60 * 86400, nowSec - 30 * 86400};
                 break;
             }
             default: {
@@ -858,7 +1406,9 @@ public class GatewayService {
             previousApiStats = new HashMap<>();
         }
 
-        log.info("P60排名: compareMode={}, currentApis={}, previousApis={}", compareMode, currentApiStats.size(), previousApiStats.size());
+        log.info("P60排名: compareMode={}, currentRange=[{},{}], previousRange=[{},{}], currentApis={}, previousApis={}",
+            compareMode, currentRange[0], currentRange[1], previousRange[0], previousRange[1],
+            currentApiStats.size(), previousApiStats.size());
 
         List<ApiDegradationVO> result = new ArrayList<>();
         for (String apiPath : currentApiStats.keySet()) {
@@ -895,7 +1445,7 @@ public class GatewayService {
         for (int i = 0; i < result.size(); i++) {
             result.get(i).setRank(i + 1);
         }
-        return result.size() > 200 ? result.subList(0, 200) : result;
+        return result.size() > 30 ? result.subList(0, 30) : result;
     }
 
     private static final List<String> KNOWN_SERVICES = List.of(
@@ -907,7 +1457,11 @@ public class GatewayService {
             "payment-server", "foundation-c", "external-server", "new-base",
             "station-site-server", "reconciliation-server", "ctp_activity_server",
             "ctp_finance_server", "ctp-order-server", "CTP-BASE-SERVER", "gateway-service-ost",
-            "dmp-query-server"
+            "dmp-query-server",
+            // OMP相关
+            "omp-server", "omp-gateway", "omp-admin",
+            // 大数据相关
+            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query"
     );
 
     private Map<String, long[]> queryServiceStats(String logstore, long from, long to) {
@@ -1076,6 +1630,11 @@ public class GatewayService {
                     continue;
                 }
                 
+                // 过滤：只保留 HTTP API 路径（以 / 开头或包含 HTTP 方法+路径）
+                if (!isHttpApiPath(apiPath)) {
+                    continue;
+                }
+                
                 // 归一化 API 路径
                 apiPath = normalizeApiPath(apiPath);
                 String fullKey = serviceName + apiPath;
@@ -1117,34 +1676,50 @@ public class GatewayService {
     }
 
     /**
-     * 单次 SLS 查询所有日志，按 containerName + API路径 分组，计算 P60 RT
+     * 从 SLS 分页采样日志提取接口统计数据和 P60 RT
+     * SLS GetLogs API 每次最多返回 100 条，需要分页查询以覆盖更多接口
      */
     private Map<String, long[]> queryAllFromSls(String logstore, long from, long to) {
         Map<String, long[]> result = new HashMap<>();
         Map<String, List<Double>> apiRtValues = new HashMap<>();
 
         try {
-            String query = "cost or useTime or duration or 耗时 or ms or rt or elapsed";
-            List<LogEntry> logs = queryLogs(logstore, query, from, to, 0, 5000);
-            log.info("SLS 批量查询到 {} 条含耗时信息的日志", logs.size());
+            String query = "ControllerLog and (cost or useTime or duration or 耗时 or elapsed)";
+            int pageSize = 100;
+            int maxTotal = 5000;
+            int totalFetched = 0;
+            int pageCount = 0;
 
-            for (LogEntry entry : logs) {
-                String serviceName = entry.getContainerName();
-                if (serviceName == null || serviceName.isBlank()) continue;
-                if (serviceName.startsWith("event-trac") || serviceName.startsWith("EventTrac")) continue;
+            for (int offset = 0; offset < maxTotal; offset += pageSize) {
+                List<LogEntry> logs = queryLogs(logstore, query, from, to, offset, pageSize);
+                if (logs == null || logs.isEmpty()) break;
+                
+                totalFetched += logs.size();
+                pageCount++;
 
-                String apiPath = extractUrl(entry.getMessage());
-                if (apiPath == null || apiPath.isBlank()) continue;
+                for (LogEntry entry : logs) {
+                    String serviceName = entry.getContainerName();
+                    if (serviceName == null || serviceName.isBlank()) continue;
+                    if (serviceName.startsWith("event-trac") || serviceName.startsWith("EventTrac")) continue;
 
-                apiPath = normalizeApiPath(apiPath);
-                String fullKey = serviceName + apiPath;
+                    String apiPath = extractUrl(entry.getMessage());
+                    if (apiPath == null || apiPath.isBlank()) continue;
+                    if (!isHttpApiPath(apiPath)) continue;
 
-                double rt = extractDurationFromEntry(entry);
-                if (rt <= 0) continue;
+                    apiPath = normalizeApiPath(apiPath);
+                    String fullKey = serviceName + apiPath;
 
-                result.computeIfAbsent(fullKey, k -> new long[]{0, 0})[0]++;
-                apiRtValues.computeIfAbsent(fullKey, k -> new ArrayList<>()).add(rt);
+                    double rt = extractDurationFromEntry(entry);
+                    if (rt <= 0) continue;
+
+                    result.computeIfAbsent(fullKey, k -> new long[]{0, 0})[0]++;
+                    apiRtValues.computeIfAbsent(fullKey, k -> new ArrayList<>()).add(rt);
+                }
+
+                if (logs.size() < pageSize) break;
             }
+
+            log.info("SLS 分页采样: {} 页共 {} 条日志", pageCount, totalFetched);
 
             for (Map.Entry<String, List<Double>> entry : apiRtValues.entrySet()) {
                 List<Double> rtValues = entry.getValue();
@@ -1154,9 +1729,9 @@ public class GatewayService {
                 result.get(entry.getKey())[1] = Math.round(rtValues.get(p60Index));
             }
 
-            log.info("SLS 计算出 {} 个接口的 P60 数据", result.size());
+            log.info("SLS 采样计算出 {} 个接口的 P60 数据", result.size());
         } catch (Exception e) {
-            log.warn("SLS 批量查询失败: {}", e.getMessage());
+            log.warn("SLS 采样查询失败: {}", e.getMessage());
         }
         return result;
     }
@@ -1169,6 +1744,34 @@ public class GatewayService {
      * POST http://172.25.29.136:18000/bankAbilityCenterServer/payScore/queryOrder?userId=123
      *   -> /bankAbilityCenterServer/payScore/queryOrder
      */
+    /**
+     * 判断是否为 HTTP API 路径
+     * HTTP API 路径特征：以 / 开头，或包含 HTTP 方法+路径（如 "GET /api/users"）
+     */
+    private boolean isHttpApiPath(String path) {
+        if (path == null || path.isBlank()) {
+            return false;
+        }
+        
+        // 过滤掉明显不是 API 路径的内容
+        if (path.contains(";") || path.contains("=") || path.contains("HttpOnly") || 
+            path.contains("Secure") || path.contains("Path=") || path.contains("Domain=")) {
+            return false;
+        }
+        
+        // 以 / 开头的是 HTTP 路径
+        if (path.startsWith("/")) {
+            return true;
+        }
+        
+        // 包含 HTTP 方法+路径的格式（如 "GET /api/users"）
+        if (path.matches("^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\s+/.*")) {
+            return true;
+        }
+        
+        return false;
+    }
+
     private String normalizeApiPath(String path) {
         if (path == null) return null;
         
@@ -1307,9 +1910,15 @@ public class GatewayService {
     private long parseTimeRange(String timeRange) {
         if (timeRange == null || timeRange.isBlank()) return 86400;
         try {
-            String s = timeRange.toLowerCase().replace("h", "").replace("d", "");
-            if (timeRange.toLowerCase().contains("d")) return Long.parseLong(s) * 86400;
-            return Long.parseLong(s) * 3600;
+            String lower = timeRange.toLowerCase();
+            if (lower.contains("d")) {
+                return Long.parseLong(lower.replace("d", "")) * 86400;
+            } else if (lower.contains("h")) {
+                return Long.parseLong(lower.replace("h", "")) * 3600;
+            } else if (lower.contains("m")) {
+                return Long.parseLong(lower.replace("m", "")) * 60;
+            }
+            return Long.parseLong(lower);
         } catch (NumberFormatException e) {
             return 86400;
         }

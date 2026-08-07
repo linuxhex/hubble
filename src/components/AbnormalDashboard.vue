@@ -5,7 +5,7 @@
         <h2>异常大盘</h2>
       </div>
       <div class="filter-area">
-        <el-radio-group v-model="timeRange" size="small" @change="fetchData">
+        <el-radio-group v-model="timeRange" size="small" @change="onTimeRangeChange">
           <el-radio-button value="15m">15分钟</el-radio-button>
           <el-radio-button value="30m">30分钟</el-radio-button>
           <el-radio-button value="1h">1小时</el-radio-button>
@@ -52,7 +52,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMinuteTimeline } from '@/api/alert.js'
 
@@ -60,6 +60,19 @@ const router = useRouter()
 const timeSlots = ref([])
 const loading = ref(false)
 const timeRange = ref('15m')
+let refreshTimer = null
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  refreshTimer = setInterval(fetchData, 30000)
+}
+
+const stopAutoRefresh = () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
 
 const fetchData = async () => {
   loading.value = true
@@ -73,7 +86,7 @@ const fetchData = async () => {
     timeSlots.value = timeline
       .map(point => {
         const services = (point.services || [])
-          .slice(0, 10)
+          .slice(0, 8)
           .map(s => ({
             name: s.name,
             count: s.count,
@@ -110,7 +123,19 @@ const handleServiceClick = (serviceName) => {
   })
 }
 
-onMounted(() => { fetchData() })
+const onTimeRangeChange = () => {
+  fetchData()
+  startAutoRefresh()
+}
+
+onMounted(() => {
+  fetchData()
+  startAutoRefresh()
+})
+
+onUnmounted(() => {
+  stopAutoRefresh()
+})
 </script>
 
 <style scoped>

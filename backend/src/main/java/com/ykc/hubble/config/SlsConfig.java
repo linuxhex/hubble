@@ -44,6 +44,14 @@ public class SlsConfig {
      */
     private ThreadPoolConfig threadPool = new ThreadPoolConfig();
 
+    public ThreadPoolConfig getThreadPool() {
+        return threadPool;
+    }
+
+    public void setThreadPool(ThreadPoolConfig threadPool) {
+        this.threadPool = threadPool;
+    }
+
     @Data
     public static class QueryConfig {
         /**
@@ -72,16 +80,28 @@ public class SlsConfig {
         /**
          * 核心线程数
          */
-        private Integer coreSize = 4;
+        private Integer coreSize = 8;
 
         /**
          * 最大线程数
          */
-        private Integer maxSize = 8;
+        private Integer maxSize = 16;
 
         /**
          * 队列容量
          */
         private Integer queueCapacity = 100;
+
+        public Integer getCoreSize() {
+            return coreSize;
+        }
+
+        public Integer getMaxSize() {
+            return maxSize;
+        }
+
+        public Integer getQueueCapacity() {
+            return queueCapacity;
+        }
     }
 }

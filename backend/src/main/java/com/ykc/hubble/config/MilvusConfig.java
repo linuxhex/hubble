@@ -19,6 +19,8 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "milvus")
 public class MilvusConfig {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MilvusConfig.class);
+
     /**
      * 是否启用Milvus（默认启用）
      */
