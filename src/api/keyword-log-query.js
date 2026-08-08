@@ -4,7 +4,7 @@ import request from '@/utils/request'
  * 查询网关日志
  */
 export function queryGatewayLogs(data) {
-  return request.post('/gateway/logs/query', data)
+  return request.post('/gateway/logs/query', data, { timeout: 120000 })
 }
 
 /**

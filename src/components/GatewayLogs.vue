@@ -18,6 +18,20 @@
         <el-form-item label="链路ID" class="no-margin">
           <el-input v-model="searchForm.traceId" placeholder="请输入链路ID" size="small" style="width: 220px" />
         </el-form-item>
+        <el-form-item label="时间范围" class="no-margin">
+          <el-date-picker
+            v-model="timeRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            format="YYYY-MM-DD HH:mm:ss"
+            :shortcuts="timeRangeShortcuts"
+            size="small"
+            style="width: 340px"
+          />
+        </el-form-item>
         <el-form-item class="no-margin operation-buttons">
           <el-button type="primary" size="small" @click="handleQuery">查询</el-button>
           <el-button type="primary" size="small" @click="handleQueryAll">查全网</el-button>
@@ -267,6 +281,26 @@ const searchForm = reactive({
   keyword: ''
 })
 
+const getDefaultTimeRange = () => {
+  const end = new Date()
+  const start = new Date()
+  start.setTime(start.getTime() - 60 * 60 * 1000)
+  const fmt = (d) => {
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  }
+  return [fmt(start), fmt(end)]
+}
+
+const timeRange = ref(getDefaultTimeRange())
+
+const timeRangeShortcuts = [
+  { text: '近15分钟', value: () => { const e = new Date(); const s = new Date(e.getTime() - 15*60*1000); const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; return [fmt(s), fmt(e)] } },
+  { text: '近1小时', value: () => { const e = new Date(); const s = new Date(e.getTime() - 60*60*1000); const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; return [fmt(s), fmt(e)] } },
+  { text: '近6小时', value: () => { const e = new Date(); const s = new Date(e.getTime() - 6*60*60*1000); const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; return [fmt(s), fmt(e)] } },
+  { text: '近1天', value: () => { const e = new Date(); const s = new Date(e.getTime() - 24*60*60*1000); const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; return [fmt(s), fmt(e)] } }
+]
+
 const handleTraceClick = (row) => {
   router.push({
     path: '/gateway/trace',
@@ -288,6 +322,10 @@ const fetchLogs = async () => {
     const params = {
       page: 1,
       pageSize: 50
+    }
+    if (timeRange.value && timeRange.value.length === 2) {
+      params.startTime = timeRange.value[0]
+      params.endTime = timeRange.value[1]
     }
     if (searchForm.keyword) {
       // 如果同时有 appName 和 keyword，组合成完整的 SLS 查询
@@ -328,6 +366,7 @@ const handleQueryAll = () => {
   searchForm.userId = ''
   searchForm.traceId = ''
   searchForm.keyword = ''
+  timeRange.value = getDefaultTimeRange()
   fetchLogs()
 }
 

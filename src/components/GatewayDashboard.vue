@@ -99,13 +99,16 @@ const initChart = (trendData) => {
   if (!chartRef.value) return
   const option = {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '3%', containLabel: true },
+    grid: { left: '5%', right: '5%', bottom: '5%', top: '15%', containLabel: true },
     xAxis: { type: 'category', data: trendData?.timestamps || [], axisLabel: { interval: 2 } },
-    yAxis: { type: 'value' },
+    yAxis: [
+      { type: 'value', name: 'INFO', position: 'left', axisLabel: { formatter: (v) => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v } },
+      { type: 'value', name: 'WARN/ERROR', position: 'right', axisLabel: { formatter: (v) => v >= 10000 ? (v / 10000).toFixed(0) + 'w' : v } }
+    ],
     series: [
-      { name: 'INFO', type: 'line', smooth: true, data: trendData?.infoCounts || [], itemStyle: { color: '#409EFF' }, areaStyle: { opacity: 0.1 } },
-      { name: 'WARN', type: 'line', smooth: true, data: trendData?.warnCounts || [], itemStyle: { color: '#E6A23C' }, areaStyle: { opacity: 0.1 } },
-      { name: 'ERROR', type: 'line', smooth: true, data: trendData?.errorCounts || [], itemStyle: { color: '#F56C6C' }, areaStyle: { opacity: 0.1 } }
+      { name: 'INFO', type: 'line', smooth: true, yAxisIndex: 0, data: trendData?.infoCounts || [], itemStyle: { color: '#409EFF' }, areaStyle: { opacity: 0.1 } },
+      { name: 'WARN', type: 'line', smooth: true, yAxisIndex: 1, data: trendData?.warnCounts || [], itemStyle: { color: '#E6A23C' }, areaStyle: { opacity: 0.1 } },
+      { name: 'ERROR', type: 'line', smooth: true, yAxisIndex: 1, data: trendData?.errorCounts || [], itemStyle: { color: '#F56C6C' }, areaStyle: { opacity: 0.1 } }
     ]
   }
   if (chart) chart.dispose()
@@ -194,7 +197,7 @@ onBeforeUnmount(() => { stopPolling(); window.removeEventListener('resize', () =
 .dot.info { background-color: #409EFF; }
 .dot.warn { background-color: #E6A23C; }
 .dot.error { background-color: #F56C6C; }
-.chart-container { height: 200px; width: 100%; }
+.chart-container { height: 300px; width: 100%; }
 
 .hot-apis { margin-top: 8px; }
 </style>

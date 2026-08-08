@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 监控数据服务：优先从快照缓存计算统计，缓存为空时直接查 SLS。
@@ -39,7 +40,7 @@ public class AlertDataService {
 
     // 异常大盘分钟级时间线缓存：key=timeRange, value=[data, timestamp]
     private final Map<String, TimelineCacheEntry> timelineCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long TIMELINE_CACHE_TTL_MS = 60 * 1000; // 1 分钟
+    private static final long TIMELINE_CACHE_TTL_MS = 30 * 1000; // 30 秒
 
     @jakarta.annotation.PostConstruct
     public void initTimelineCache() {
@@ -57,7 +58,7 @@ public class AlertDataService {
         }, queryExecutor);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60 * 1000) // 每 1 分钟刷新
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 30 * 1000) // 每 30 秒刷新
     public void refreshTimelineCache() {
         log.debug("后台刷新异常大盘时间线缓存...");
         for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
@@ -309,38 +310,76 @@ public class AlertDataService {
         String range = timeRange != null ? timeRange : "15m";
         TimelineCacheEntry entry = timelineCache.get(range);
 
-        // 如果有缓存且未过期，直接返回
+        Map<String, Object> data;
+
         if (entry != null && !entry.isExpired()) {
             log.debug("返回缓存时间线数据: range={}", range);
-            return entry.data;
+            data = entry.data;
+        } else {
+            if (entry == null || System.currentTimeMillis() - entry.timestamp > TIMELINE_CACHE_TTL_MS * 2) {
+                log.info("时间线缓存过期，异步刷新：range={}", range);
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        Map<String, Object> freshData = loadMinuteHealthTimeline(range);
+                        timelineCache.put(range, new TimelineCacheEntry(freshData, System.currentTimeMillis()));
+                    } catch (Exception e) {
+                        log.error("异步刷新时间线缓存失败：range={}, error={}", range, e.getMessage());
+                    }
+                });
+            }
+
+            if (entry != null) {
+                data = entry.data;
+            } else {
+                Map<String, Object> emptyResult = new LinkedHashMap<>();
+                emptyResult.put("timeline", Collections.emptyList());
+                return emptyResult;
+            }
         }
 
-        // 如果缓存过期或不存在，触发后台刷新，但先返回旧缓存（如果有）
-        if (entry != null) {
-            log.info("时间线缓存已过期，触发后台刷新: range={}", range);
-            java.util.concurrent.CompletableFuture.runAsync(() -> {
-                try {
-                    Map<String, Object> data = loadMinuteHealthTimeline(range);
-                    timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
-                    log.info("后台刷新时间线缓存完成: range={}", range);
-                } catch (Exception e) {
-                    log.error("后台刷新时间线缓存失败: range={}, error={}", range, e.getMessage());
-                }
-            });
-            return entry.data; // 返回旧缓存
-        }
+        return extendTimelineToCurrentTime(data);
+    }
 
-        // 首次加载，同步等待
-        try {
-            Map<String, Object> data = loadMinuteHealthTimeline(range);
-            timelineCache.put(range, new TimelineCacheEntry(data, System.currentTimeMillis()));
+    /**
+     * 将时间线末尾延伸到当前分钟：若缓存中最后一条数据早于当前时间，
+     * 用最后一条的数据填充到当前分钟，保证展示时间与真实时间一致。
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> extendTimelineToCurrentTime(Map<String, Object> data) {
+        List<Map<String, Object>> timeline = (List<Map<String, Object>>) data.get("timeline");
+        if (timeline == null || timeline.isEmpty()) {
             return data;
-        } catch (Exception e) {
-            log.error("首次加载时间线缓存失败: range={}, error={}", range, e.getMessage());
-            Map<String, Object> emptyResult = new LinkedHashMap<>();
-            emptyResult.put("timeline", Collections.emptyList());
-            return emptyResult;
         }
+
+        java.time.format.DateTimeFormatter minuteFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        java.time.LocalDateTime currentMinute = java.time.LocalDateTime.now(ZoneId.systemDefault()).withSecond(0).withNano(0);
+        String currentMinuteStr = currentMinute.format(minuteFmt);
+
+        String lastMinuteStr = (String) timeline.get(timeline.size() - 1).get("minute");
+        if (lastMinuteStr == null || lastMinuteStr.compareTo(currentMinuteStr) >= 0) {
+            return data;
+        }
+
+        Map<String, Object> lastPoint = timeline.get(timeline.size() - 1);
+        List<Map<String, Object>> lastServices = (List<Map<String, Object>>) lastPoint.get("services");
+        String lastStatus = (String) lastPoint.get("status");
+        Object lastTotalErrors = lastPoint.get("totalErrors");
+
+        java.time.LocalDateTime lastMinuteDt = java.time.LocalDateTime.parse(lastMinuteStr, minuteFmt);
+
+        List<Map<String, Object>> extendedTimeline = new ArrayList<>(timeline);
+        for (java.time.LocalDateTime m = lastMinuteDt.plusMinutes(1); !m.isAfter(currentMinute); m = m.plusMinutes(1)) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("minute", m.format(minuteFmt));
+            item.put("status", lastStatus);
+            item.put("totalErrors", lastTotalErrors);
+            item.put("services", lastServices);
+            extendedTimeline.add(item);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("timeline", extendedTimeline);
+        return result;
     }
 
     private Map<String, Object> loadMinuteHealthTimeline(String timeRange) {
@@ -352,7 +391,7 @@ public class AlertDataService {
         // 分页采样发现服务名（SLS 每次最多返回 100 条，需要分页）
         try {
             int pageSize = 100;
-            int maxPages = 50;
+            int maxPages = 10;
             for (int page = 0; page < maxPages; page++) {
                 List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, page * pageSize, pageSize);
                 if (sample == null || sample.isEmpty()) break;
@@ -376,7 +415,7 @@ public class AlertDataService {
         }
 
         // 每个服务：查分钟级错误数 + 计算动态阈值
-        Map<String, Map<String, Long>> byMinute = new java.util.TreeMap<>();
+        java.util.TreeMap<String, Map<String, Long>> byMinute = new java.util.TreeMap<>();
         Map<String, ServiceThresholds> thresholdsMap = new HashMap<>();
 
         for (String service : serviceNames) {
@@ -417,9 +456,17 @@ public class AlertDataService {
         java.time.LocalDateTime endMinute = java.time.LocalDateTime.ofInstant(
                 java.time.Instant.ofEpochSecond(now), java.time.ZoneId.systemDefault()).withSecond(0).withNano(0);
 
+        // 找到 SLS 实际返回的最后有数据分钟
+        String lastDataMinute = byMinute.isEmpty() ? null : byMinute.lastKey();
+
         for (java.time.LocalDateTime minute = startMinute; !minute.isAfter(endMinute); minute = minute.plusMinutes(1)) {
             String minuteKey = minute.format(minuteFmt);
-            Map<String, Long> minuteData = byMinute.getOrDefault(minuteKey, Collections.emptyMap());
+            // SLS 数据缺失的分钟，用最后有数据的分钟填充
+            Map<String, Long> minuteData = byMinute.getOrDefault(minuteKey,
+                    lastDataMinute != null && minuteKey.compareTo(lastDataMinute) > 0
+                            ? byMinute.get(lastDataMinute)
+                            : Collections.emptyMap());
+            if (minuteData == null) minuteData = Collections.emptyMap();
 
             long totalErrors = 0;
             List<Map<String, Object>> services = new ArrayList<>();

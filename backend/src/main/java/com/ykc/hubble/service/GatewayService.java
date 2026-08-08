@@ -77,21 +77,91 @@ public class GatewayService {
     @jakarta.annotation.PostConstruct
     public void initCache() {
         CompletableFuture.runAsync(() -> {
-            log.info("异步初始化接口劣化缓存...");
+            log.info("异步初始化所有网关页面缓存...");
+            long start = System.currentTimeMillis();
+            
+            // 1. 初始化接口劣化缓存
             for (String mode : Arrays.asList("day", "week", "month")) {
                 try {
                     List<ApiDegradationVO> data = loadDegradation(mode);
                     if (data.isEmpty()) {
-                        log.info("初始化 {} 模式返回空数据，跳过缓存", mode);
+                        log.info("初始化劣化 {} 模式返回空数据，跳过缓存", mode);
                         continue;
                     }
                     degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
                     pageDataCacheService.save("gateway_degradation", mode, data);
-                    log.info("缓存 {} 模式完成，{} 条数据", mode, data.size());
+                    log.info("缓存劣化 {} 模式完成，{} 条数据", mode, data.size());
                 } catch (Exception e) {
-                    log.warn("初始化缓存 {} 失败: {}", mode, e.getMessage());
+                    log.warn("初始化劣化缓存 {} 失败: {}", mode, e.getMessage());
                 }
             }
+            
+            // 2. 初始化 P60 排名缓存
+            for (String mode : Arrays.asList("day", "week", "month")) {
+                try {
+                    List<ApiDegradationVO> data = loadP60Ranking(mode);
+                    if (data.isEmpty()) {
+                        log.info("初始化 P60 {} 模式返回空数据，跳过缓存", mode);
+                        continue;
+                    }
+                    p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_p60_ranking", mode, data);
+                    log.info("缓存 P60 {} 模式完成，{} 条数据", mode, data.size());
+                } catch (Exception e) {
+                    log.warn("初始化 P60 缓存 {} 失败: {}", mode, e.getMessage());
+                }
+            }
+            
+            // 3. 初始化趋势缓存
+            for (String range : Arrays.asList("1h", "24h", "7d")) {
+                try {
+                    GatewayTrendVO data = loadTrend(range);
+                    if (data.getTimestamps() == null || data.getTimestamps().isEmpty()) {
+                        log.info("初始化趋势 {} 返回空数据，跳过缓存", range);
+                        continue;
+                    }
+                    trendCache.put(range, new TrendCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_trend", range, data);
+                    log.info("缓存趋势 {} 完成", range);
+                } catch (Exception e) {
+                    log.warn("初始化趋势缓存 {} 失败: {}", range, e.getMessage());
+                }
+            }
+            
+            // 4. 初始化热门接口缓存
+            for (String range : Arrays.asList("1h", "24h")) {
+                try {
+                    List<GatewayHotApiVO> data = loadHotApis(range);
+                    if (data.isEmpty()) {
+                        log.info("初始化热门接口 {} 返回空数据，跳过缓存", range);
+                        continue;
+                    }
+                    hotApisCache.put(range, new HotApisCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_hot_apis", range, data);
+                    log.info("缓存热门接口 {} 完成，{} 条", range, data.size());
+                } catch (Exception e) {
+                    log.warn("初始化热门接口缓存 {} 失败: {}", range, e.getMessage());
+                }
+            }
+            
+            // 5. 初始化概览缓存
+            for (String range : Arrays.asList("24h", "7d", "30d")) {
+                try {
+                    GatewayOverviewVO data = queryOverviewData(range);
+                    if (data.getTotalRequests() == 0) {
+                        log.info("初始化概览 {} 返回空数据，跳过缓存", range);
+                        continue;
+                    }
+                    overviewCache.put(range, new OverviewCacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_overview", range, data);
+                    log.info("缓存概览 {} 完成", range);
+                } catch (Exception e) {
+                    log.warn("初始化概览缓存 {} 失败: {}", range, e.getMessage());
+                }
+            }
+            
+            long elapsed = System.currentTimeMillis() - start;
+            log.info("所有网关页面缓存异步初始化完成，耗时 {}ms", elapsed);
         }, queryExecutor);
     }
 
@@ -360,8 +430,29 @@ public class GatewayService {
                 GatewayOverviewVO vo = new GatewayOverviewVO();
                 vo.setTotalRequests(totalRequests);
                 vo.setQps(Math.round(avgQps * 100.0) / 100.0);
-                vo.setErrorRate(qpsRateSum == 0 ? 0 : errorCount * 100.0 / qpsRateSum);
                 vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
+
+                long slsErrorCount = 0;
+                long slsAllTotal = 0;
+                try {
+                    String slsErrorQuery = "level: ERROR | SELECT COUNT(*) as total";
+                    var slsErrorResult = slsQueryClient.queryAnalytics(logstore, slsErrorQuery, from, now, 1);
+                    if (!slsErrorResult.isEmpty()) {
+                        slsErrorCount = Long.parseLong(slsErrorResult.get(0).getOrDefault("total", "0"));
+                    }
+                    String slsTotalQuery = "* | SELECT COUNT(*) as total";
+                    var slsTotalResult = slsQueryClient.queryAnalytics(logstore, slsTotalQuery, from, now, 1);
+                    if (!slsTotalResult.isEmpty()) {
+                        slsAllTotal = Long.parseLong(slsTotalResult.get(0).getOrDefault("total", "0"));
+                    }
+                } catch (Exception e) {
+                    log.warn("SLS 补充 ERROR 数失败: {}", e.getMessage());
+                }
+                long effectiveErrorCount = Math.max(errorCount, slsErrorCount);
+                vo.setErrorRate(slsAllTotal == 0 ? (qpsRateSum == 0 ? 0 : effectiveErrorCount * 100.0 / qpsRateSum)
+                        : effectiveErrorCount * 100.0 / slsAllTotal);
+                log.info("概览错误率: armsError={}, slsError={}, slsTotal={}, effectiveError={}, errorRate={}", 
+                    errorCount, slsErrorCount, slsAllTotal, effectiveErrorCount, vo.getErrorRate());
 
                 // 趋势计算（与上一周期对比）
                 long prevFrom = from - seconds;
@@ -448,9 +539,9 @@ public class GatewayService {
     }
     
     private GatewayOverviewVO overviewFromSls(String timeRange, long now, long seconds, long from, String logstore) {
-        // 使用分析查询获取准确的统计数据
         long totalRequests = 0;
         long errorCount = 0;
+        long allLogsTotal = 0;
         
         try {
             String requestFilter = "ControllerLog and apiUrl";
@@ -460,7 +551,13 @@ public class GatewayService {
                 totalRequests = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
             }
             
-            String errorQuery = requestFilter + " | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            String allLogsQuery = "* | SELECT COUNT(*) as total";
+            List<Map<String, String>> allLogsResult = slsQueryClient.queryAnalytics(logstore, allLogsQuery, from, now, 1);
+            if (!allLogsResult.isEmpty()) {
+                allLogsTotal = Long.parseLong(allLogsResult.get(0).getOrDefault("total", "0"));
+            }
+            
+            String errorQuery = "level: ERROR | SELECT COUNT(*) as total";
             List<Map<String, String>> errorResult = slsQueryClient.queryAnalytics(logstore, errorQuery, from, now, 1);
             if (!errorResult.isEmpty()) {
                 errorCount = Long.parseLong(errorResult.get(0).getOrDefault("total", "0"));
@@ -468,7 +565,8 @@ public class GatewayService {
         } catch (Exception e) {
             log.warn("SLS 分析查询失败，使用 GetHistograms 降级: {}", e.getMessage());
             totalRequests = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl", from, now);
-            errorCount = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl and ERROR", from, now);
+            errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
+            allLogsTotal = slsQueryClient.countLogstore(logstore, "*", from, now);
         }
 
         // 全量 ControllerLog 包含微服务链路中每个服务的日志，需除以链路长度折算外部请求数
@@ -491,7 +589,7 @@ public class GatewayService {
         GatewayOverviewVO vo = new GatewayOverviewVO();
         vo.setTotalRequests(externalTotalRequests);
         vo.setQps(currentQps);
-        vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
+        vo.setErrorRate(allLogsTotal == 0 ? 0 : errorCount * 100.0 / allLogsTotal);
 
         // 采样部分日志计算平均响应时间（取最近的日志）
         List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 100);
@@ -514,7 +612,7 @@ public class GatewayService {
                 prevTotal = Long.parseLong(prevCountResult.get(0).getOrDefault("total", "0"));
             }
             
-            String prevErrorQuery = requestFilter + " | SELECT COUNT(*) as total WHERE level = 'ERROR'";
+            String prevErrorQuery = "level: ERROR | SELECT COUNT(*) as total";
             List<Map<String, String>> prevErrorResult = slsQueryClient.queryAnalytics(logstore, prevErrorQuery, prevFrom, from, 1);
             if (!prevErrorResult.isEmpty()) {
                 prevErrors = Long.parseLong(prevErrorResult.get(0).getOrDefault("total", "0"));
@@ -624,23 +722,20 @@ public class GatewayService {
         long from = now - seconds;
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        // 优先从 ARMS 获取数据
+        // 优先从 ARMS 获取时间轴和总量，再从 SLS 补充 WARN/ERROR 日志级别数据
         try {
             long fromMs = from * 1000;
             long toMs = now * 1000;
             
-            // 根据时间范围确定时间粒度
-            // ARMS 只支持特定的间隔值：60, 300, 900, 3600, 86400
             int intervalInSec;
-            if (seconds <= 3600) { // 1小时内，按小时分组
+            if (seconds <= 3600) {
                 intervalInSec = 3600;
-            } else if (seconds <= 86400) { // 24小时内，按小时分组
+            } else if (seconds <= 86400) {
                 intervalInSec = 3600;
-            } else { // 超过24小时，按天分组
+            } else {
                 intervalInSec = 86400;
             }
             
-            // 查询接口调用统计，按时间分组
             var response = armsClient.queryMetrics(
                 "appstat.transaction",
                 Arrays.asList("count", "error"),
@@ -651,7 +746,6 @@ public class GatewayService {
             );
             
             if (response != null && response.getData() != null && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
-                // ARMS 返回的数据已经按时间分组
                 Map<String, long[]> bucketMap = new LinkedHashMap<>();
                 DateTimeFormatter fmt = seconds <= 86400 
                     ? DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
@@ -667,26 +761,62 @@ public class GatewayService {
                         if (measures != null && timestamp != null) {
                             String label = fmt.format(Instant.ofEpochMilli(timestamp));
                             long count = ((Number) measures.getOrDefault("count", 0L)).longValue();
-                            long error = ((Number) measures.getOrDefault("error", 0L)).longValue();
-                            long info = count - error;
-                            bucketMap.put(label, new long[]{info, 0, error}); // info, warn, error
+                            bucketMap.put(label, new long[]{count, 0, 0}); // total, warn, error
                         }
                     }
                 }
-                
+
+                String timeBucketExpr = seconds <= 86400
+                    ? "date_format(__time__ - __time__ % 3600, '%H:%i')"
+                    : "date_format(__time__ - __time__ % 86400, '%m-%d')";
+
+                try {
+                    String errorQuery = "level: ERROR | SELECT " + timeBucketExpr + " as time_bucket, COUNT(*) as cnt GROUP BY time_bucket ORDER BY time_bucket";
+                    List<Map<String, String>> errorResults = slsQueryClient.queryAnalytics(logstore, errorQuery, from, now, 1000);
+                    for (Map<String, String> row : errorResults) {
+                        String tb = row.getOrDefault("time_bucket", "");
+                        long cnt = Long.parseLong(row.getOrDefault("cnt", "0"));
+                        long[] bucket = bucketMap.get(tb);
+                        if (bucket != null) {
+                            bucket[2] = cnt;
+                        }
+                    }
+
+                    String warnQuery = "level: WARN | SELECT " + timeBucketExpr + " as time_bucket, COUNT(*) as cnt GROUP BY time_bucket ORDER BY time_bucket";
+                    List<Map<String, String>> warnResults = slsQueryClient.queryAnalytics(logstore, warnQuery, from, now, 1000);
+                    for (Map<String, String> row : warnResults) {
+                        String tb = row.getOrDefault("time_bucket", "");
+                        long cnt = Long.parseLong(row.getOrDefault("cnt", "0"));
+                        long[] bucket = bucketMap.get(tb);
+                        if (bucket != null) {
+                            bucket[1] = cnt;
+                        }
+                    }
+                    log.info("SLS 补充 WARN/ERROR 趋势: error={} 点, warn={} 点", errorResults.size(), warnResults.size());
+                } catch (Exception e) {
+                    log.warn("SLS 补充 WARN/ERROR 失败: {}", e.getMessage());
+                }
+
                 GatewayTrendVO vo = new GatewayTrendVO();
-                vo.setTimestamps(new ArrayList<>(bucketMap.keySet()));
+                vo.setTimestamps(new ArrayList<>());
                 vo.setInfoCounts(new ArrayList<>());
                 vo.setWarnCounts(new ArrayList<>());
                 vo.setErrorCounts(new ArrayList<>());
                 
-                for (long[] counts : bucketMap.values()) {
-                    vo.getInfoCounts().add(counts[0]);
-                    vo.getWarnCounts().add(counts[1]);
-                    vo.getErrorCounts().add(counts[2]);
+                for (Map.Entry<String, long[]> entry : bucketMap.entrySet()) {
+                    long[] counts = entry.getValue();
+                    long total = counts[0];
+                    long warn = counts[1];
+                    long error = counts[2];
+                    long info = Math.max(0, total - warn - error);
+
+                    vo.getTimestamps().add(entry.getKey());
+                    vo.getInfoCounts().add(info);
+                    vo.getWarnCounts().add(warn);
+                    vo.getErrorCounts().add(error);
                 }
                 
-                log.info("从 ARMS 获取趋势数据成功: buckets={}", bucketMap.size());
+                log.info("从 ARMS+SLS 获取趋势数据成功: buckets={}", bucketMap.size());
                 return vo;
             }
         } catch (Exception e) {
@@ -698,72 +828,70 @@ public class GatewayService {
     }
     
     private GatewayTrendVO trendFromSls(String timeRange, long now, long seconds, long from, String logstore) {
-        // 根据时间范围确定时间粒度
         String timeUnit;
-        int bucketSeconds;
-        if (seconds <= 3600) { // 1小时内，按分钟分组
+        if (seconds <= 3600) {
             timeUnit = "minute";
-            bucketSeconds = 60;
-        } else if (seconds <= 86400) { // 24小时内，按小时分组
+        } else if (seconds <= 86400) {
             timeUnit = "hour";
-            bucketSeconds = 3600;
-        } else { // 超过24小时，按天分组
+        } else {
             timeUnit = "day";
-            bucketSeconds = 86400;
         }
 
-        // 使用分析查询按时间分组统计
-        // 先统计所有日志，再尝试按 level 分类
-        String query = String.format(
-            "* | SELECT " +
-            "  CASE " +
-            "    WHEN '%s' = 'minute' THEN date_format(__time__ - __time__ %% 60, '%%H:%%i') " +
-            "    WHEN '%s' = 'hour' THEN date_format(__time__ - __time__ %% 3600, '%%H:%%i') " +
-            "    ELSE date_format(__time__ - __time__ %% 86400, '%%m-%%d') " +
-            "  END as time_bucket, " +
-            "  COUNT(*) as total_count, " +
-            "  SUM(CASE WHEN level = 'ERROR' THEN 1 ELSE 0 END) as error_count, " +
-            "  SUM(CASE WHEN level = 'WARN' THEN 1 ELSE 0 END) as warn_count " +
-            "GROUP BY time_bucket " +
-            "ORDER BY time_bucket",
-            timeUnit, timeUnit
-        );
+        String timeBucketExpr = switch (timeUnit) {
+            case "minute" -> "date_format(__time__ - __time__ % 60, '%H:%i')";
+            case "hour" -> "date_format(__time__ - __time__ % 3600, '%H:%i')";
+            default -> "date_format(__time__ - __time__ % 86400, '%m-%d')";
+        };
 
         try {
-            List<Map<String, String>> results = slsQueryClient.queryAnalytics(logstore, query, from, now, 1000);
-            log.info("SLS 趋势查询返回 {} 条数据, timeUnit={}", results.size(), timeUnit);
-            
-            if (!results.isEmpty()) {
-                log.info("SLS 趋势第一条数据: {}", results.get(0));
-            }
-            
-            // 构建时间序列数据
             Map<String, long[]> bucketMap = new LinkedHashMap<>();
-            for (Map<String, String> row : results) {
-                String timeBucket = row.getOrDefault("time_bucket", "");
-                long totalCount = Long.parseLong(row.getOrDefault("total_count", "0"));
-                long errorCount = Long.parseLong(row.getOrDefault("error_count", "0"));
-                long warnCount = Long.parseLong(row.getOrDefault("warn_count", "0"));
-                // info = total - error - warn
-                long infoCount = totalCount - errorCount - warnCount;
-                if (infoCount < 0) infoCount = 0;
-                bucketMap.put(timeBucket, new long[]{infoCount, warnCount, errorCount});
+
+            String totalQuery = "* | SELECT " + timeBucketExpr + " as time_bucket, COUNT(*) as cnt GROUP BY time_bucket ORDER BY time_bucket";
+            List<Map<String, String>> totalResults = slsQueryClient.queryAnalytics(logstore, totalQuery, from, now, 1000);
+            for (Map<String, String> row : totalResults) {
+                String tb = row.getOrDefault("time_bucket", "");
+                long total = Long.parseLong(row.getOrDefault("cnt", "0"));
+                bucketMap.computeIfAbsent(tb, k -> new long[3])[0] = total;
             }
-            
-            log.info("SLS 趋势构建 {} 个时间点", bucketMap.size());
+
+            String errorQuery = "level: ERROR | SELECT " + timeBucketExpr + " as time_bucket, COUNT(*) as cnt GROUP BY time_bucket ORDER BY time_bucket";
+            List<Map<String, String>> errorResults = slsQueryClient.queryAnalytics(logstore, errorQuery, from, now, 1000);
+            for (Map<String, String> row : errorResults) {
+                String tb = row.getOrDefault("time_bucket", "");
+                long cnt = Long.parseLong(row.getOrDefault("cnt", "0"));
+                bucketMap.computeIfAbsent(tb, k -> new long[3])[2] = cnt;
+            }
+
+            String warnQuery = "level: WARN | SELECT " + timeBucketExpr + " as time_bucket, COUNT(*) as cnt GROUP BY time_bucket ORDER BY time_bucket";
+            List<Map<String, String>> warnResults = slsQueryClient.queryAnalytics(logstore, warnQuery, from, now, 1000);
+            for (Map<String, String> row : warnResults) {
+                String tb = row.getOrDefault("time_bucket", "");
+                long cnt = Long.parseLong(row.getOrDefault("cnt", "0"));
+                bucketMap.computeIfAbsent(tb, k -> new long[3])[1] = cnt;
+            }
+
+            log.info("SLS 趋势查询: total={}, error={}, warn={} 个时间点, timeUnit={}",
+                    totalResults.size(), errorResults.size(), warnResults.size(), timeUnit);
 
             GatewayTrendVO vo = new GatewayTrendVO();
-            vo.setTimestamps(new ArrayList<>(bucketMap.keySet()));
+            vo.setTimestamps(new ArrayList<>());
             vo.setInfoCounts(new ArrayList<>());
             vo.setWarnCounts(new ArrayList<>());
             vo.setErrorCounts(new ArrayList<>());
-            
-            for (long[] counts : bucketMap.values()) {
-                vo.getInfoCounts().add(counts[0]);
-                vo.getWarnCounts().add(counts[1]);
-                vo.getErrorCounts().add(counts[2]);
+
+            for (Map.Entry<String, long[]> entry : bucketMap.entrySet()) {
+                long[] counts = entry.getValue();
+                long total = counts[0];
+                long warn = counts[1];
+                long error = counts[2];
+                long info = Math.max(0, total - error - warn);
+
+                vo.getTimestamps().add(entry.getKey());
+                vo.getInfoCounts().add(info);
+                vo.getWarnCounts().add(warn);
+                vo.getErrorCounts().add(error);
             }
-            
+
             return vo;
         } catch (Exception e) {
             log.error("查询趋势数据失败", e);
@@ -995,8 +1123,11 @@ public class GatewayService {
                 return new ArrayList<>();
             }
 
-            // 提取 API 路径并按路径分组
+            // 提取 API 路径并按路径分组，同时收集 RT 和错误信息
             Map<String, Long> apiCounts = new HashMap<>();
+            Map<String, List<Double>> apiRtValues = new HashMap<>();
+            Map<String, Long> apiErrorCounts = new HashMap<>();
+            
             for (LogEntry entry : recentLogs) {
                 String apiPath = extractUrl(entry.getMessage());
                 if (apiPath == null || apiPath.isBlank()) continue;
@@ -1004,21 +1135,52 @@ public class GatewayService {
                 
                 apiPath = normalizeApiPath(apiPath);
                 apiCounts.merge(apiPath, 1L, Long::sum);
+                
+                // 提取 RT
+                double rt = extractDurationFromEntry(entry);
+                if (rt > 0) {
+                    apiRtValues.computeIfAbsent(apiPath, k -> new ArrayList<>()).add(rt);
+                }
+                
+                // 检查是否为 ERROR 级别
+                String level = entry.getLevel();
+                if (level != null && level.equalsIgnoreCase("ERROR")) {
+                    apiErrorCounts.merge(apiPath, 1L, Long::sum);
+                }
             }
 
-            log.info("SLS 热门接口：提取到 {} 个 API 路径", apiCounts.size());
+            log.info("SLS 热门接口：提取到 {} 个 API 路径，{} 个有 RT 数据，{} 个有错误", 
+                apiCounts.size(), apiRtValues.size(), apiErrorCounts.size());
 
-            // 计算实时 QPS（最近5分钟的请求数 / 300秒）
+            // 计算实时 QPS、平均 RT 和错误率
             return apiCounts.entrySet().stream()
                 .map(entry -> {
-                    double qps = entry.getValue() / 300.0;
+                    String apiPath = entry.getKey();
+                    long count = entry.getValue();
+                    double qps = count / 300.0;
+                    
+                    // 计算平均 RT
+                    String avgTime = "-";
+                    List<Double> rtValues = apiRtValues.get(apiPath);
+                    if (rtValues != null && !rtValues.isEmpty()) {
+                        double avgRt = rtValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                        avgTime = String.valueOf(Math.round(avgRt));
+                    }
+                    
+                    // 计算错误率
+                    String errorRate = "-";
+                    Long errorCount = apiErrorCounts.get(apiPath);
+                    if (errorCount != null && count > 0) {
+                        double rate = errorCount * 100.0 / count;
+                        errorRate = String.format("%.2f%%", rate);
+                    }
 
                     GatewayHotApiVO api = new GatewayHotApiVO();
-                    api.setPath(entry.getKey());
+                    api.setPath(apiPath);
                     api.setMethod("GET");
                     api.setQps(qps);
-                    api.setAvgTime("-");
-                    api.setErrorRate("-");
+                    api.setAvgTime(avgTime);
+                    api.setErrorRate(errorRate);
                     return api;
                 })
                 .filter(api -> api.getQps() >= 0.001)
@@ -1052,6 +1214,8 @@ public class GatewayService {
         };
         
         Map<String, Long> globalApiCounts = new HashMap<>();
+        Map<String, List<Double>> apiRtValues = new HashMap<>();
+        Map<String, Long> apiErrorCounts = new HashMap<>();
         int totalSampleSize = 0;
         
         for (String serviceName : coreServices) {
@@ -1066,7 +1230,7 @@ public class GatewayService {
                 
                 totalSampleSize += logs.size();
                 
-                // 提取 API 路径并统计分布
+                // 提取 API 路径并统计分布，同时收集 RT 和错误信息
                 for (LogEntry entry : logs) {
                     String apiPath = extractUrl(entry.getMessage());
                     if (apiPath == null || apiPath.isBlank()) continue;
@@ -1074,6 +1238,18 @@ public class GatewayService {
                     
                     apiPath = normalizeApiPath(apiPath);
                     globalApiCounts.merge(apiPath, 1L, Long::sum);
+                    
+                    // 提取 RT
+                    double rt = extractDurationFromEntry(entry);
+                    if (rt > 0) {
+                        apiRtValues.computeIfAbsent(apiPath, k -> new ArrayList<>()).add(rt);
+                    }
+                    
+                    // 检查是否为 ERROR 级别
+                    String level = entry.getLevel();
+                    if (level != null && level.equalsIgnoreCase("ERROR")) {
+                        apiErrorCounts.merge(apiPath, 1L, Long::sum);
+                    }
                 }
                 
                 log.info("服务 {} 提取到 {} 个 API", serviceName, globalApiCounts.size());
@@ -1086,19 +1262,37 @@ public class GatewayService {
             return result;
         }
         
-        // 根据样本分布和概览QPS估算每个API的QPS
+        // 根据样本分布和概览QPS估算每个API的QPS，并计算 avgTime 和 errorRate
         for (Map.Entry<String, Long> entry : globalApiCounts.entrySet()) {
+            String apiPath = entry.getKey();
+            long count = entry.getValue();
             // 该API在所有样本中的占比
-            double proportion = (double) entry.getValue() / totalSampleSize;
+            double proportion = (double) count / totalSampleSize;
             // 估算QPS = 占比 * 概览QPS
             double qps = proportion * overviewQps;
             
+            // 计算平均 RT
+            String avgTime = "-";
+            List<Double> rtValues = apiRtValues.get(apiPath);
+            if (rtValues != null && !rtValues.isEmpty()) {
+                double avgRt = rtValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                avgTime = String.valueOf(Math.round(avgRt));
+            }
+            
+            // 计算错误率
+            String errorRate = "-";
+            Long errorCount = apiErrorCounts.get(apiPath);
+            if (errorCount != null && count > 0) {
+                double rate = errorCount * 100.0 / count;
+                errorRate = String.format("%.2f%%", rate);
+            }
+            
             GatewayHotApiVO api = new GatewayHotApiVO();
-            api.setPath(entry.getKey());
+            api.setPath(apiPath);
             api.setMethod("GET");
             api.setQps(qps);
-            api.setAvgTime("-");
-            api.setErrorRate("-");
+            api.setAvgTime(avgTime);
+            api.setErrorRate(errorRate);
             result.add(api);
         }
         
@@ -1252,12 +1446,11 @@ public class GatewayService {
             double currentP60 = cur != null ? cur[1] : 0;
             double previousP60 = prev != null ? prev[1] : 0;
 
-            // 过滤：必须有足够的请求数（至少1次）且有RT数据
-            if (currentCount == 0 && previousCount == 0) { filterNoData++; continue; }
-            if (currentCount < 1 && previousCount < 1) { filterNoData++; continue; }
+            // 过滤：必须有足够的请求数（至少10次）且有RT数据，否则P60无统计意义
+            if (currentCount < 10 && previousCount < 10) { filterNoData++; continue; }
             if (currentP60 == 0 && previousP60 == 0) { filterNoData++; continue; }
             // 过滤：必须有上期数据（排除新增API，新增API不算劣化）
-            if (previousCount == 0) { filterNoPrevCount++; continue; }
+            if (previousCount < 10) { filterNoPrevCount++; continue; }
             if (previousP60 == 0) { filterNoPrevP60++; continue; }
 
             // 计算P60 RT变化率作为劣化幅度
@@ -1419,8 +1612,8 @@ public class GatewayService {
             double currentP60 = cur != null ? cur[1] : 0;
             double previousP60 = prev != null ? prev[1] : 0;
 
-            // 过滤：必须有请求数且有RT数据
-            if (currentCount == 0) continue;
+            // 过滤：至少10次请求且有RT数据，否则P60无统计意义
+            if (currentCount < 10) continue;
             if (currentP60 == 0) continue;
 
             // 计算劣化幅度（用于显示）

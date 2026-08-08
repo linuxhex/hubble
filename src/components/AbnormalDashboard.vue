@@ -128,13 +128,24 @@ const onTimeRangeChange = () => {
   startAutoRefresh()
 }
 
+const handleVisibility = () => {
+  if (document.visibilityState === 'visible') {
+    fetchData()
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+}
+
 onMounted(() => {
   fetchData()
   startAutoRefresh()
+  document.addEventListener('visibilitychange', handleVisibility)
 })
 
 onUnmounted(() => {
   stopAutoRefresh()
+  document.removeEventListener('visibilitychange', handleVisibility)
 })
 </script>
 
