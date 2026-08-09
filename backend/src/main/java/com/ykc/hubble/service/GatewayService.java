@@ -1360,24 +1360,24 @@ public class GatewayService {
             return entry.data; // 返回旧缓存
         }
 
-        // 首次无缓存：后台加载，立即返回空数据
+        // 首次无缓存：同步加载数据（异步加载会导致用户长时间看到空数据）
         String loadingKey = "degradation_" + mode;
         if (loadingKeys.add(loadingKey)) {
-            log.info("劣化对比无缓存，后台加载: mode={}", mode);
-            CompletableFuture.runAsync(() -> {
-                try {
-                    List<ApiDegradationVO> data = loadDegradation(mode);
-                    if (!data.isEmpty()) {
-                        degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                        pageDataCacheService.save(pageKey, dataKey, data);
-                    }
-                    log.info("劣化对比后台加载完成: mode={}, size={}", mode, data.size());
-                } catch (Exception e) {
-                    log.warn("劣化对比后台加载失败: mode={}, error={}", mode, e.getMessage());
-                } finally {
-                    loadingKeys.remove(loadingKey);
+            log.info("劣化对比无缓存，同步加载: mode={}", mode);
+            try {
+                List<ApiDegradationVO> data = loadDegradation(mode);
+                if (!data.isEmpty()) {
+                    degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data);
                 }
-            }, queryExecutor);
+                log.info("劣化对比同步加载完成: mode={}, size={}", mode, data.size());
+                return data;
+            } catch (Exception e) {
+                log.warn("劣化对比同步加载失败: mode={}, error={}", mode, e.getMessage());
+                return Collections.emptyList();
+            } finally {
+                loadingKeys.remove(loadingKey);
+            }
         } else {
             log.info("劣化对比正在加载中，跳过重复请求: mode={}", mode);
         }
@@ -1532,22 +1532,22 @@ public class GatewayService {
             return entry.data;
         }
 
-        // 首次无缓存：后台加载，立即返回空数据
+        // 首次无缓存：同步加载数据（异步加载会导致用户长时间看到空数据）
         String loadingKey = "p60_" + mode;
         if (loadingKeys.add(loadingKey)) {
-            log.info("P60排名无缓存，后台加载: mode={}", mode);
-            CompletableFuture.runAsync(() -> {
-                try {
-                    List<ApiDegradationVO> result = loadP60Ranking(compareMode);
-                    p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result);
-                    log.info("P60排名后台加载完成: mode={}, size={}", mode, result.size());
-                } catch (Exception e) {
-                    log.warn("P60排名后台加载失败: mode={}, error={}", mode, e.getMessage());
-                } finally {
-                    loadingKeys.remove(loadingKey);
-                }
-            }, queryExecutor);
+            log.info("P60排名无缓存，同步加载: mode={}", mode);
+            try {
+                List<ApiDegradationVO> result = loadP60Ranking(compareMode);
+                p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
+                pageDataCacheService.save(pageKey, dataKey, result);
+                log.info("P60排名同步加载完成: mode={}, size={}", mode, result.size());
+                return result;
+            } catch (Exception e) {
+                log.warn("P60排名同步加载失败: mode={}, error={}", mode, e.getMessage());
+                return Collections.emptyList();
+            } finally {
+                loadingKeys.remove(loadingKey);
+            }
         } else {
             log.info("P60排名正在加载中，跳过重复请求: mode={}", mode);
         }
