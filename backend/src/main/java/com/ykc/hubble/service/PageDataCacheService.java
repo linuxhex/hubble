@@ -153,10 +153,22 @@ public class PageDataCacheService {
      * @param data    要缓存的数据
      */
     public void save(String pageKey, String dataKey, Object data) {
+        save(pageKey, dataKey, data, CACHE_RETENTION_HOURS * 60);
+    }
+
+    /**
+     * 保存缓存数据（自定义过期时间）
+     *
+     * @param pageKey      页面标识
+     * @param dataKey      数据标识
+     * @param data         要缓存的数据
+     * @param ttlMinutes   缓存有效时间（分钟）
+     */
+    public void save(String pageKey, String dataKey, Object data, int ttlMinutes) {
         try {
             String jsonContent = objectMapper.writeValueAsString(data);
             LocalDateTime now = LocalDateTime.now();
-            LocalDateTime expiresAt = now.plusHours(CACHE_RETENTION_HOURS);
+            LocalDateTime expiresAt = now.plusMinutes(ttlMinutes);
 
             // 检查是否已存在
             LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();

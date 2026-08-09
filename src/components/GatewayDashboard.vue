@@ -87,7 +87,7 @@ import { getGatewayOverview, getGatewayTrend, getGatewayHotApis } from '@/api/ga
 const overview = ref({ totalRequests: 0, avgResponseTime: 0, errorRate: 0, qps: 0, totalTrend: 0, avgTrend: 0, errorTrend: 0, qpsTrend: 0 })
 const hotApis = ref([])
 const chartRef = ref(null)
-const timeRange = ref('1h')
+const timeRange = ref('24h')
 let chart = null
 
 const formatNumber = (num) => num == null ? '0' : Number(num).toLocaleString()

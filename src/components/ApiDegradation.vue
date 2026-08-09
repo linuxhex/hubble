@@ -25,7 +25,7 @@ const fetchData = async () => {
   try {
     let res
     if (compareMode.value === 'p60') {
-      res = await getP60Ranking({ compareMode: compareMode.value })
+      res = await getP60Ranking({ compareMode: 'day' })
     } else {
       res = await getApiDegradation({ compareMode: compareMode.value })
     }

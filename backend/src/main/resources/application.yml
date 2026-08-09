@@ -48,8 +48,8 @@ aliyun:
       global-timeout-seconds: 15
       retry-times: 3
     thread-pool:
-      core-size: 4
-      max-size: 8
+      core-size: 8
+      max-size: 16
       queue-capacity: 100
   arms:
     access-key-id: ${ARMS_AK_ID:${ALIYUN_SLS_ACCESS_KEY_ID:}}
