@@ -121,7 +121,7 @@ public class GatewayService {
                         continue;
                     }
                     trendCache.put(range, new TrendCacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save("gateway_trend", range, data, 30);
+                    pageDataCacheService.save("gateway_trend", range, data, 5);
                     log.info("缓存趋势 {} 完成", range);
                 } catch (Exception e) {
                     log.warn("初始化趋势缓存 {} 失败: {}", range, e.getMessage());
@@ -666,7 +666,7 @@ public class GatewayService {
                         return;
                     }
                     trendCache.put(key, new TrendCacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新趋势缓存失败: {}", e.getMessage());
                 }
@@ -684,7 +684,7 @@ public class GatewayService {
                         return;
                     }
                     trendCache.put(key, new TrendCacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新趋势缓存失败: {}", e.getMessage());
                 }
@@ -699,7 +699,7 @@ public class GatewayService {
                 try {
                     GatewayTrendVO result = loadTrend(timeRange);
                     trendCache.put(key, new TrendCacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result, 30);
+                    pageDataCacheService.save(pageKey, dataKey, result, 5);
                     log.info("趋势数据后台加载完成: timeRange={}", key);
                 } catch (Exception e) {
                     log.warn("趋势数据后台加载失败: timeRange={}, error={}", key, e.getMessage());
@@ -968,7 +968,7 @@ public class GatewayService {
                         return;
                     }
                     hotApisCache.put(tr, new HotApisCacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新热门接口缓存失败: {}", e.getMessage());
                 }
@@ -986,7 +986,7 @@ public class GatewayService {
                         return;
                     }
                     hotApisCache.put(tr, new HotApisCacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新热门接口缓存失败: {}", e.getMessage());
                 }
@@ -1001,7 +1001,7 @@ public class GatewayService {
                 try {
                     List<GatewayHotApiVO> result = loadHotApis(timeRange);
                     hotApisCache.put(tr, new HotApisCacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result, 30);
+                    pageDataCacheService.save(pageKey, dataKey, result, 5);
                     log.info("热门接口后台加载完成: timeRange={}, size={}", tr, result.size());
                 } catch (Exception e) {
                     log.warn("热门接口后台加载失败: timeRange={}, error={}", tr, e.getMessage());
@@ -1372,7 +1372,7 @@ public class GatewayService {
                         return;
                     }
                     degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                     log.info("后台刷新数据库缓存: mode={}, size={}", mode, data.size());
                 } catch (Exception e) {
                     log.error("后台刷新失败: mode={}, error={}", mode, e.getMessage());
@@ -1392,7 +1392,7 @@ public class GatewayService {
                         return;
                     }
                     degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                     log.info("后台刷新完成: mode={}, size={}", mode, data.size());
                 } catch (Exception e) {
                     log.error("后台刷新失败: mode={}, error={}", mode, e.getMessage());
@@ -1408,7 +1408,7 @@ public class GatewayService {
                 List<ApiDegradationVO> data = loadDegradation(mode);
                 if (!data.isEmpty()) {
                     degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                     log.info("劣化对比异步加载完成: mode={}, size={}", mode, data.size());
                 } else {
                     log.info("劣化对比异步加载返回空数据: mode={}", mode);
@@ -1542,7 +1542,7 @@ public class GatewayService {
                         return;
                     }
                     p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新P60排名缓存失败: {}", e.getMessage());
                 }
@@ -1560,7 +1560,7 @@ public class GatewayService {
                         return;
                     }
                     p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 30);
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
                 } catch (Exception e) {
                     log.warn("后台刷新P60排名缓存失败: {}", e.getMessage());
                 }
@@ -1575,7 +1575,7 @@ public class GatewayService {
                 List<ApiDegradationVO> result = loadP60Ranking(compareMode);
                 if (!result.isEmpty()) {
                     p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result, 30);
+                    pageDataCacheService.save(pageKey, dataKey, result, 5);
                     log.info("P60排名异步加载完成: mode={}, size={}", mode, result.size());
                 }
             } catch (Exception e) {
