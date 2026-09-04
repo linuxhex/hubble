@@ -282,18 +282,18 @@ onUnmounted(() => {
 
 /* 预警 - 粉色背景 */
 .service-item.warn-bg {
-  background-color: #ffccc7;
+  background-color: #ffadd2;
   border-radius: 2px;
   padding: 3px 4px;
   margin: 0 -4px;
 }
 
 .service-item.warn-bg .service-name {
-  color: #cf1322;
+  color: #eb2f96;
 }
 
 .service-item.warn-bg .service-count {
-  color: #cf1322;
+  color: #eb2f96;
 }
 
 .no-service {

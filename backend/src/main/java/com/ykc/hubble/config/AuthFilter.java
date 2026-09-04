@@ -54,7 +54,10 @@ public class AuthFilter extends OncePerRequestFilter {
             "/error-analysis/query",
 
             // 网关大盘和日志搜索接口
-            "/gateway/"
+            "/gateway/",
+
+            // 中间件监控接口（无需用户认证）
+            "/middleware/"
     };
 
     @Override

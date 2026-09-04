@@ -20,6 +20,7 @@ import TrendDashboard from '../components/TrendDashboard.vue'
 import SecondChart from '../components/SecondChart.vue'
 import ApiDegradation from '../components/ApiDegradation.vue'
 import TrafficSurgeDashboard from '../components/TrafficSurgeDashboard.vue'
+import MiddlewareDashboard from '../components/MiddlewareDashboard.vue'
 
 const PUBLIC_PATHS = ['/login', '/unauthorized']
 
@@ -131,6 +132,11 @@ const routes = [
     path: '/traffic-surge',
     name: 'TrafficSurgeDashboard',
     component: TrafficSurgeDashboard
+  },
+  {
+    path: '/middleware',
+    name: 'MiddlewareDashboard',
+    component: MiddlewareDashboard
   }
 ]
 

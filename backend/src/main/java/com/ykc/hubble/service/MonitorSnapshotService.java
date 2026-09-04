@@ -46,6 +46,10 @@ public class MonitorSnapshotService {
     private final Map<Long, Long> lastCollectAt = new ConcurrentHashMap<>();
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
     private final Map<Long, HealthEvaluator.Status> lastStatus = new ConcurrentHashMap<>();
+    // 红盘连续命中次数（防抖：连续 3 次红盘才告警）
+    private final Map<Long, Integer> consecutiveRedCount = new ConcurrentHashMap<>();
+    // 上次钉钉告警时间（防抖：同一监控项 3 小时内不重复告警）
+    private final Map<Long, Long> lastAlertTime = new ConcurrentHashMap<>();
 
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -183,13 +187,27 @@ public class MonitorSnapshotService {
             lastStatus.put(cfg.getId(), status);
 
             if (status == HealthEvaluator.Status.RED) {
-                // 红盘：SSE 广播 + 钉钉群告警
-                alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
-                sendDingTalkAlert(cfg, count, now, status, effectiveThreshold);
-            } else if (status == HealthEvaluator.Status.YELLOW
-                    && (prevStatus == null || prevStatus != HealthEvaluator.Status.YELLOW)) {
-                // 粉盘：仅 SSE 广播，不刷钉钉群
-                alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
+                // 红盘防抖：连续 3 次红盘才告警，且 3 小时内不重复
+                int consecutive = consecutiveRedCount.merge(cfg.getId(), 1, Integer::sum);
+                long nowMs = System.currentTimeMillis();
+                Long lastSent = lastAlertTime.get(cfg.getId());
+                long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时
+
+                if (consecutive >= 3 && (lastSent == null || nowMs - lastSent >= cooldownMs)) {
+                    // SSE 广播 + 钉钉群告警
+                    alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
+                    sendDingTalkAlert(cfg, count, now, status, effectiveThreshold);
+                    lastAlertTime.put(cfg.getId(), nowMs);
+                }
+            } else {
+                // 非红盘重置连续计数
+                consecutiveRedCount.put(cfg.getId(), 0);
+
+                if (status == HealthEvaluator.Status.YELLOW
+                        && (prevStatus == null || prevStatus != HealthEvaluator.Status.YELLOW)) {
+                    // 粉盘：仅 SSE 广播，不刷钉钉群
+                    alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
+                }
             }
         } catch (Exception e) {
             log.error("监控项[{}]采集失败，保留旧快照: {}", cfg.getId(), e.getMessage());
@@ -213,7 +231,7 @@ public class MonitorSnapshotService {
                                    HealthEvaluator.Status status, int effectiveThreshold) {
         try {
             boolean isRed = status == HealthEvaluator.Status.RED;
-            String statusColor = isRed ? "#FF4D4F" : "#FAAD14";
+            String statusColor = isRed ? "#FF4D4F" : "#FF85C0";
             String statusText = isRed ? "红盘" : "粉盘";
             String statusIcon = isRed ? "🔴" : "🟡";
 

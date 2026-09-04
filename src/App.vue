@@ -2,7 +2,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton, TrendCharts } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton, TrendCharts, Box } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -106,6 +106,10 @@ onUnmounted(() => {
           <el-menu-item index="/traffic-surge">
             <el-icon><TrendCharts /></el-icon>
             <span>流量暴涨</span>
+          </el-menu-item>
+          <el-menu-item index="/middleware">
+            <el-icon><Box /></el-icon>
+            <span>中间件</span>
           </el-menu-item>
           <el-menu-item index="/gateway/trace">
             <el-icon><Connection /></el-icon>

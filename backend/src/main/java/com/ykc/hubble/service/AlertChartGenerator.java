@@ -45,9 +45,9 @@ public class AlertChartGenerator {
     private static final Color LINE_COLOR = new Color(64, 158, 255);
     private static final Color AREA_COLOR = new Color(64, 158, 255, 40);
     private static final Color RED_LINE_COLOR = new Color(245, 108, 108);
-    private static final Color YELLOW_LINE_COLOR = new Color(230, 162, 60);
+    private static final Color YELLOW_LINE_COLOR = new Color(255, 133, 192);
     private static final Color RED_THRESHOLD_COLOR = new Color(245, 108, 108, 80);
-    private static final Color YELLOW_THRESHOLD_COLOR = new Color(230, 162, 60, 80);
+    private static final Color YELLOW_THRESHOLD_COLOR = new Color(255, 133, 192, 80);
 
     /**
      * 生成模拟大盘截图并返回 Base64 编码字符串（data URI 格式）
