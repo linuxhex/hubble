@@ -161,7 +161,7 @@ public class AlertChartGenerator {
             g.drawLine(x, yellowY, x + w, yellowY);
             g.setColor(YELLOW_LINE_COLOR);
             g.setFont(new Font("SansSerif", Font.PLAIN, 10));
-            g.drawString("黄盘 " + yellowThreshold, x + w + 2, yellowY + 4);
+            g.drawString("粉盘 " + yellowThreshold, x + w + 2, yellowY + 4);
         }
     }
 

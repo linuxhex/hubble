@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * @author Cloud Eyes Team
  */
 @Data
-@TableName("user")
+@TableName("sys_user")
 public class User {
 
     /**

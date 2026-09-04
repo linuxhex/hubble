@@ -38,7 +38,7 @@
           <div class="summary-desc">存在服务错误数 ≥ {{ minuteRedThreshold }}</div>
         </div>
         <div class="summary-card summary-yellow">
-          <div class="summary-label">黄盘分钟</div>
+          <div class="summary-label">粉盘分钟</div>
           <div class="summary-value">{{ yellowMinutes }}</div>
           <div class="summary-desc">存在服务错误数 ≥ {{ minuteYellowThreshold }}</div>
         </div>
@@ -189,7 +189,7 @@ const setChartRef = (el, configId) => { if (el) chartRefs.set(configId, el) }
 
 const statusLabel = (status) => {
   if (status === 'RED') return '红盘'
-  if (status === 'YELLOW') return '黄盘'
+  if (status === 'YELLOW') return '粉盘'
   return '正常'
 }
 

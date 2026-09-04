@@ -29,7 +29,7 @@
             <template #content>
               <div class="tooltip-content">
                 <div><b>{{ svc.name }}</b> - {{ svc.count }} 条错误</div>
-                <div>阈值: 红={{ svc.redThreshold }} 黄={{ svc.yellowThreshold }}</div>
+                <div>阈值: 红={{ svc.redThreshold }} 粉={{ svc.yellowThreshold }}</div>
                 <div style="color:#999;margin-top:4px">点击查看详情</div>
               </div>
             </template>

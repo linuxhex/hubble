@@ -19,6 +19,7 @@ import WidgetDashboard from '../components/WidgetDashboard.vue'
 import TrendDashboard from '../components/TrendDashboard.vue'
 import SecondChart from '../components/SecondChart.vue'
 import ApiDegradation from '../components/ApiDegradation.vue'
+import TrafficSurgeDashboard from '../components/TrafficSurgeDashboard.vue'
 
 const PUBLIC_PATHS = ['/login', '/unauthorized']
 
@@ -125,6 +126,11 @@ const routes = [
     path: '/degradation-ranking',
     name: 'ApiDegradation',
     component: ApiDegradation
+  },
+  {
+    path: '/traffic-surge',
+    name: 'TrafficSurgeDashboard',
+    component: TrafficSurgeDashboard
   }
 ]
 

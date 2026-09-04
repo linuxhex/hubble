@@ -19,3 +19,7 @@ export function getApiDegradation(params) {
 export function getP60Ranking(params) {
   return request.get('/gateway/p60-ranking', { params })
 }
+
+export function getApiTrafficSurge(params) {
+  return request.get('/gateway/traffic-surge', { params })
+}

@@ -40,7 +40,7 @@ public class MonitorProperties {
     private int minuteRedThreshold = 50;
 
     /**
-     * 分钟时间线黄盘阈值
+     * 分钟时间线粉盘阈值
      */
     private int minuteYellowThreshold = 20;
 

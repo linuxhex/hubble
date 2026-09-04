@@ -40,9 +40,16 @@ public class GatewayService {
     private final PageDataCacheService pageDataCacheService;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final Executor queryExecutor;
+    private final AlertPushService alertPushService;
+    private final com.ykc.hubble.client.DingTalkClient dingTalkClient;
+
+    // 已告警的接口（防抖）：key=apiPath, value=上次告警时间戳
+    private final Map<String, Long> trafficAlertLastSent = new java.util.concurrent.ConcurrentHashMap<>();
 
     // 接口劣化缓存：key=compareMode, value=[data, timestamp]
     private final Map<String, CacheEntry> degradationCache = new java.util.concurrent.ConcurrentHashMap<>();
+    // 流量涨幅缓存：key=compareMode, value=[data, timestamp]
+    private final Map<String, CacheEntry> trafficSurgeCache = new java.util.concurrent.ConcurrentHashMap<>();
     // P60排名内存缓存：key=compareMode, value=[data, timestamp]
     private final Map<String, CacheEntry> p60RankingCache = new java.util.concurrent.ConcurrentHashMap<>();
     // 趋势数据内存缓存：key=timeRange
@@ -1520,8 +1527,67 @@ public class GatewayService {
         
         log.info("劣化过滤统计: total={}, 无数据={}, 无上期调用={}, 无上期P60={}, RT未增加={}, 最终结果={}",
             allApis.size(), filterNoData, filterNoPrevCount, filterNoPrevP60, filterNoDegradation, result.size());
-        
+
+        // 劣化幅度超过 220% 告警
+        checkDegradationAlert(result);
+
         return result.size() > 30 ? result.subList(0, 30) : result;
+    }
+
+    /**
+     * 接口劣化告警：RT 劣化幅度 >220% 触发钉钉 + SSE，同一接口 10 分钟内不重复告警
+     */
+    private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
+        long now = System.currentTimeMillis();
+        long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时防抖
+        double degradationThreshold = 220.0;
+
+        for (ApiDegradationVO vo : degradationList) {
+            if (vo.getDegradationRate() < degradationThreshold) continue;
+
+            String apiPath = vo.getApiPath();
+            String alertKey = "degradation:" + apiPath;
+            Long lastSent = trafficAlertLastSent.get(alertKey);
+            if (lastSent != null && now - lastSent < cooldownMs) continue;
+
+            trafficAlertLastSent.put(alertKey, now);
+
+            log.warn("接口劣化告警: api={}, 劣化幅度={}%, 当前P60={}ms, 上期P60={}ms",
+                apiPath, vo.getDegradationRate(), vo.getCurrentAvgTime(), vo.getPreviousAvgTime());
+
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("type", "degradation_surge");
+                payload.put("apiPath", apiPath);
+                payload.put("degradationRate", vo.getDegradationRate());
+                payload.put("currentP60", vo.getCurrentAvgTime());
+                payload.put("previousP60", vo.getPreviousAvgTime());
+                payload.put("time", now);
+                alertPushService.pushAlert(payload);
+            } catch (Exception e) {
+                log.warn("接口劣化SSE推送失败: {}", e.getMessage());
+            }
+
+            try {
+                String timeStr = java.time.Instant.ofEpochMilli(now)
+                        .atZone(java.time.ZoneId.of("Asia/Shanghai"))
+                        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+                String dashboardUrl = monitorProperties.getDashboardUrl();
+                String detailUrl = dashboardUrl + "/#/degradation-ranking";
+                String title = "接口劣化告警";
+                StringBuilder md = new StringBuilder();
+                md.append("### 🔴 接口劣化告警\n\n");
+                md.append(String.format("> 接口：**%s**\n\n", apiPath));
+                md.append(String.format("> 当前P60耗时：**%.1f ms**\n\n", vo.getCurrentAvgTime()));
+                md.append(String.format("> 上期P60耗时：**%.1f ms**\n\n", vo.getPreviousAvgTime()));
+                md.append(String.format("> 劣化幅度：**%.1f%%**\n\n", vo.getDegradationRate()));
+                md.append(String.format("> 检测时间：%s\n\n", timeStr));
+                md.append(String.format("> [查看详情](%s)\n\n", detailUrl));
+                dingTalkClient.sendRobotActionCard(title, md.toString(), "查看详情", detailUrl, true);
+            } catch (Exception e) {
+                log.warn("接口劣化钉钉通知失败: {}", e.getMessage());
+            }
+        }
     }
 
     public List<ApiDegradationVO> p60Ranking(String compareMode) {
@@ -1590,7 +1656,232 @@ public class GatewayService {
         }, queryExecutor);
         return Collections.emptyList();
     }
-    
+
+    /**
+     * 流量涨幅排名：按请求数涨幅（currentCount/previousCount）降序排列。
+     * 复用 queryApiStats 获取当前/上期接口统计数据，核心计算改为流量涨幅而非 RT 劣化。
+     */
+    public List<ApiDegradationVO> trafficSurge(String compareMode) {
+        String mode = compareMode != null ? compareMode.toLowerCase() : "day";
+        CacheEntry entry = trafficSurgeCache.get(mode);
+
+        if (entry != null && !entry.isExpired()) {
+            log.debug("返回流量涨幅内存缓存: mode={}, size={}", mode, entry.data.size());
+            return entry.data;
+        }
+
+        String pageKey = "gateway_traffic_surge";
+        String dataKey = mode;
+
+        List<ApiDegradationVO> dbCached = pageDataCacheService.getList(pageKey, dataKey, ApiDegradationVO.class);
+        if (dbCached != null && !dbCached.isEmpty()) {
+            log.info("返回流量涨幅数据库缓存: mode={}, size={}", mode, dbCached.size());
+            trafficSurgeCache.put(mode, new CacheEntry(dbCached, System.currentTimeMillis()));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadTrafficSurge(mode);
+                    if (data.isEmpty() && !dbCached.isEmpty()) {
+                        log.info("流量涨幅后台刷新返回空数据，保留已有缓存: mode={}", mode);
+                        return;
+                    }
+                    trafficSurgeCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
+                } catch (Exception e) {
+                    log.warn("后台刷新流量涨幅缓存失败: mode={}, error={}", mode, e.getMessage());
+                }
+            }, queryExecutor);
+            return dbCached;
+        }
+
+        if (entry != null) {
+            log.info("流量涨幅内存缓存过期，返回旧数据并后台刷新: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadTrafficSurge(mode);
+                    if (data.isEmpty() && !entry.data.isEmpty()) {
+                        log.info("流量涨幅后台刷新返回空数据，保留已有缓存: mode={}", mode);
+                        return;
+                    }
+                    trafficSurgeCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, data, 5);
+                } catch (Exception e) {
+                    log.warn("后台刷新流量涨幅缓存失败: mode={}, error={}", mode, e.getMessage());
+                }
+            }, queryExecutor);
+            return entry.data;
+        }
+
+        log.info("流量涨幅无缓存，异步加载: mode={}", mode);
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<ApiDegradationVO> result = loadTrafficSurge(mode);
+                if (!result.isEmpty()) {
+                    trafficSurgeCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
+                    pageDataCacheService.save(pageKey, dataKey, result, 5);
+                    log.info("流量涨幅异步加载完成: mode={}, size={}", mode, result.size());
+                }
+            } catch (Exception e) {
+                log.warn("流量涨幅异步加载失败: mode={}, error={}", mode, e.getMessage());
+            }
+        }, queryExecutor);
+        return Collections.emptyList();
+    }
+
+    private List<ApiDegradationVO> loadTrafficSurge(String compareMode) {
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate today = LocalDate.now(zone);
+        long[] currentRange;
+        long[] previousRange;
+
+        switch (compareMode != null ? compareMode.toLowerCase() : "day") {
+            case "week": {
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 3 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 6 * 86400, nowSec - 3 * 86400};
+                break;
+            }
+            case "month": {
+                long nowSec = System.currentTimeMillis() / 1000;
+                currentRange = new long[]{nowSec - 30 * 86400, nowSec};
+                previousRange = new long[]{nowSec - 60 * 86400, nowSec - 30 * 86400};
+                break;
+            }
+            default: {
+                currentRange = new long[]{today.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
+                previousRange = new long[]{currentRange[0] - 86400, currentRange[0]};
+                break;
+            }
+        }
+
+        String logstore = monitorProperties.getDefaultQueryLogstore();
+
+        Map<String, long[]> currentApiStats;
+        Map<String, long[]> previousApiStats;
+        try {
+            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
+        } catch (Exception e) {
+            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            currentApiStats = new HashMap<>();
+        }
+        try {
+            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
+        } catch (Exception e) {
+            log.error("查询上期时段API失败: {}", e.getMessage(), e);
+            previousApiStats = new HashMap<>();
+        }
+
+        log.info("流量涨幅: compareMode={}, currentRange=[{},{}], previousRange=[{},{}], currentApis={}, previousApis={}",
+            compareMode, currentRange[0], currentRange[1], previousRange[0], previousRange[1],
+            currentApiStats.size(), previousApiStats.size());
+
+        List<ApiDegradationVO> result = new ArrayList<>();
+        for (String apiPath : currentApiStats.keySet()) {
+            long[] cur = currentApiStats.get(apiPath);
+            long[] prev = previousApiStats.get(apiPath);
+            long currentCount = cur != null ? cur[0] : 0;
+            long previousCount = prev != null ? prev[0] : 0;
+            double currentP60 = cur != null ? cur[1] : 0;
+            double previousP60 = prev != null ? prev[1] : 0;
+
+            // 过滤：当前和上期都需有足够请求数
+            if (currentCount < 10) continue;
+            if (previousCount < 10) continue;
+
+            // 计算流量涨幅
+            double surgeRate = (currentCount - previousCount) * 100.0 / previousCount;
+
+            // 只看涨的（surgeRate > 0）
+            if (surgeRate <= 0) continue;
+
+            // RT 变化率（用于辅助展示）
+            double rtChangeRate = 0;
+            if (previousP60 > 0) {
+                rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
+            }
+
+            ApiDegradationVO vo = new ApiDegradationVO();
+            vo.setApiPath(apiPath);
+            vo.setCurrentAvgTime(Math.round(currentP60 * 10.0) / 10.0);
+            vo.setPreviousAvgTime(Math.round(previousP60 * 10.0) / 10.0);
+            vo.setDegradationRate(Math.round(surgeRate * 10.0) / 10.0);
+            vo.setCurrentCount(currentCount);
+            vo.setPreviousCount(previousCount);
+            result.add(vo);
+        }
+
+        // 按流量涨幅降序排序
+        result.sort((a, b) -> Double.compare(b.getDegradationRate(), a.getDegradationRate()));
+
+        for (int i = 0; i < result.size(); i++) {
+            result.get(i).setRank(i + 1);
+        }
+
+        log.info("流量涨幅排名完成: 总接口={}, 涨幅>0的={}, 返回={}",
+            currentApiStats.size(), result.size(), Math.min(result.size(), 30));
+
+        // 流量暴涨告警检查：涨幅 >200% 且防抖
+        checkTrafficSurgeAlert(result);
+
+        return result.size() > 30 ? result.subList(0, 30) : result;
+    }
+
+    /**
+     * 流量暴涨告警：涨幅 >200%（3 倍以上）触发钉钉 + SSE，同一接口 10 分钟内不重复告警
+     */
+    private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList) {
+        long now = System.currentTimeMillis();
+        long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时防抖
+        double surgeThreshold = 200.0; // 涨幅 200% 以上触发
+
+        for (ApiDegradationVO vo : surgeList) {
+            if (vo.getDegradationRate() < surgeThreshold) continue;
+
+            String apiPath = vo.getApiPath();
+            Long lastSent = trafficAlertLastSent.get(apiPath);
+            if (lastSent != null && now - lastSent < cooldownMs) continue;
+
+            trafficAlertLastSent.put(apiPath, now);
+
+            log.warn("流量暴涨告警: api={}, 涨幅={}%, 当前={}, 上期={}",
+                apiPath, vo.getDegradationRate(), vo.getCurrentCount(), vo.getPreviousCount());
+
+            // SSE 广播
+            try {
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("type", "traffic_surge");
+                payload.put("apiPath", apiPath);
+                payload.put("surgeRate", vo.getDegradationRate());
+                payload.put("currentCount", vo.getCurrentCount());
+                payload.put("previousCount", vo.getPreviousCount());
+                payload.put("time", now);
+                alertPushService.pushAlert(payload);
+            } catch (Exception e) {
+                log.warn("流量暴涨SSE推送失败: {}", e.getMessage());
+            }
+
+            // 钉钉告警
+            try {
+                String timeStr = java.time.Instant.ofEpochMilli(now)
+                        .atZone(java.time.ZoneId.of("Asia/Shanghai"))
+                        .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+                String dashboardUrl = monitorProperties.getDashboardUrl();
+                String detailUrl = dashboardUrl + "/#/traffic-surge";
+                String title = "流量暴涨告警";
+                StringBuilder md = new StringBuilder();
+                md.append("### 🔴 流量暴涨告警\n\n");
+                md.append(String.format("> 接口：**%s**\n\n", apiPath));
+                md.append(String.format("> 当前请求数：**%d** 次\n\n", vo.getCurrentCount()));
+                md.append(String.format("> 上期请求数：**%d** 次\n\n", vo.getPreviousCount()));
+                md.append(String.format("> 涨幅：**%.1f%%**\n\n", vo.getDegradationRate()));
+                md.append(String.format("> 检测时间：%s\n\n", timeStr));
+                md.append(String.format("> [查看详情](%s)\n\n", detailUrl));
+                dingTalkClient.sendRobotActionCard(title, md.toString(), "查看详情", detailUrl, true);
+            } catch (Exception e) {
+                log.warn("流量暴涨钉钉通知失败: {}", e.getMessage());
+            }
+        }
+    }
+
     private List<ApiDegradationVO> loadP60Ranking(String compareMode) {
         ZoneId zone = ZoneId.systemDefault();
         LocalDate today = LocalDate.now(zone);

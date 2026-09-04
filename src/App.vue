@@ -2,7 +2,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton, TrendCharts } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +95,18 @@ onUnmounted(() => {
             <el-icon><DataLine /></el-icon>
             <span>概览</span>
           </el-menu-item>
+          <el-menu-item index="/abnormal">
+            <el-icon><Warning /></el-icon>
+            <span>异常大盘</span>
+          </el-menu-item>
+          <el-menu-item index="/degradation-ranking">
+            <el-icon><Sort /></el-icon>
+            <span>接口劣化</span>
+          </el-menu-item>
+          <el-menu-item index="/traffic-surge">
+            <el-icon><TrendCharts /></el-icon>
+            <span>流量暴涨</span>
+          </el-menu-item>
           <el-menu-item index="/gateway/trace">
             <el-icon><Connection /></el-icon>
             <span>链路详情</span>
@@ -106,14 +118,6 @@ onUnmounted(() => {
           <el-menu-item index="/gateway/logs">
             <el-icon><Document /></el-icon>
             <span>日志搜索</span>
-          </el-menu-item>
-          <el-menu-item index="/abnormal">
-            <el-icon><Warning /></el-icon>
-            <span>异常大盘</span>
-          </el-menu-item>
-          <el-menu-item index="/degradation-ranking">
-            <el-icon><Sort /></el-icon>
-            <span>接口劣化</span>
           </el-menu-item>
         </el-menu>
       </div>

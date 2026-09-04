@@ -213,55 +213,42 @@ public class AlertDataService {
     }
 
     /**
-     * 按服务维度查看健康状态：先发现服务名，再逐个精确统计错误数，动态计算阈值
+     * 按服务维度查看健康状态：基于 alert_config 配置项，使用动态阈值（基于历史数据）
      */
     public List<Map<String, Object>> serviceHealth(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
-        long from = now - TimeRanges.toSeconds(timeRange);
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        // 第一步：发现所有服务名（直接采样，analytics SQL 无法正确 GROUP BY __tag__ 字段）
-        List<String> serviceNames = new ArrayList<>();
-        try {
-            List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, 0, 500);
-            for (var entry : sample) {
-                String service = (entry.getContainerName() != null && !entry.getContainerName().isBlank())
-                        ? entry.getContainerName() : "unknown";
-                if (service.startsWith("event-trac")) continue;
-                if (!serviceNames.contains(service)) {
-                    serviceNames.add(service);
-                }
-            }
-            log.info("serviceHealth 采样发现 {} 个服务", serviceNames.size());
-        } catch (Exception e) {
-            log.warn("采样发现服务失败: {}", e.getMessage());
-        }
-
-        if (serviceNames.isEmpty()) {
+        List<AlertConfig> configs = alertConfigService.listEnabled();
+        if (configs.isEmpty()) {
             return new ArrayList<>();
         }
 
-        // 第二步：对每个服务精确查询错误总数（用 SLS analytics count）
-        Map<String, Long> serviceCounts = new LinkedHashMap<>();
-        long totalErrors = 0;
-        for (String service : serviceNames) {
-            long count = queryServiceErrorCount(logstore, service, from, now);
-            serviceCounts.put(service, count);
-            totalErrors += count;
-        }
-
-        // 第三步：动态计算阈值
-        // 基于平均错误数：红盘 = 平均值 * 2，黄盘 = 平均值 * 0.8
-        // 保证至少有一些服务能落在黄盘区间
-        double avgErrors = serviceNames.isEmpty() ? 0 : (double) totalErrors / serviceNames.size();
-        int redThreshold = Math.max((int) Math.ceil(avgErrors * 2), 3);
-        int yellowThreshold = Math.max((int) Math.ceil(avgErrors * 0.8), 1);
-
-        // 构建返回结果
         List<Map<String, Object>> result = new ArrayList<>();
-        for (Map.Entry<String, Long> entry : serviceCounts.entrySet()) {
-            String service = entry.getKey();
-            long count = entry.getValue();
+        for (AlertConfig cfg : configs) {
+            String serviceName = templateIdToServiceName(cfg.getKeywordTemplateId());
+            String keywords = templateIdToKeywords(cfg.getKeywordTemplateId());
+
+            int interval = cfg.getCollectionInterval() != null ? cfg.getCollectionInterval() : 60;
+            long from = now - interval;
+
+            // 查询当前错误数
+            long count = 0;
+            try {
+                String query = keywords + " | SELECT count(*) as cnt";
+                var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1);
+                if (!rows.isEmpty()) {
+                    try { count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0")); }
+                    catch (NumberFormatException ignored) {}
+                }
+            } catch (Exception e) {
+                log.warn("查询服务错误数失败: service={}, error={}", serviceName, e.getMessage());
+            }
+
+            // 计算动态阈值：基于过去 7 天同时段数据的平均值
+            int[] thresholds = calculateDynamicThreshold(logstore, keywords, interval, now);
+            int redThreshold = thresholds[0];
+            int yellowThreshold = thresholds[1];
 
             String status;
             if (count >= redThreshold) {
@@ -273,16 +260,103 @@ public class AlertDataService {
             }
 
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("serviceName", service);
+            item.put("serviceName", serviceName);
             item.put("errorCount", count);
             item.put("redThreshold", redThreshold);
             item.put("yellowThreshold", yellowThreshold);
             item.put("status", status);
+            item.put("configId", cfg.getId());
             result.add(item);
         }
 
         result.sort((a, b) -> Long.compare((Long) b.get("errorCount"), (Long) a.get("errorCount")));
         return result;
+    }
+
+    /**
+     * 计算动态阈值：查询过去 7 天同时段数据，基于均值 + 标准差动态计算。
+     * 红盘 = max(avg + 3σ, avg × 5)，即偏离均值 3 个标准差 或 5 倍均值（取更严者）
+     * 粉盘 = max(avg + 2σ, avg × 3)，即偏离均值 2 个标准差 或 3 倍均值（取更严者）
+     * σ 随数据波动自适应：波动大的服务阈值自动放宽，波动小的自动收紧，无需写死差值。
+     */
+    private int[] calculateDynamicThreshold(String logstore, String keywords, int interval, long now) {
+        java.util.List<Long> dailyCounts = new java.util.ArrayList<>();
+
+        // 查询过去 7 天同时段的数据
+        for (int day = 1; day <= 7; day++) {
+            long historicalNow = now - (day * 86400L);
+            long historicalFrom = historicalNow - interval;
+
+            try {
+                String query = keywords + " | SELECT count(*) as cnt";
+                var rows = slsQueryClient.queryAnalytics(logstore, query, historicalFrom, historicalNow, 1);
+                if (!rows.isEmpty()) {
+                    try {
+                        long count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0"));
+                        dailyCounts.add(count);
+                    } catch (NumberFormatException ignored) {}
+                }
+            } catch (Exception e) {
+                log.debug("查询历史数据失败: day={}, error={}", day, e.getMessage());
+            }
+        }
+
+        // 基于均值 + 标准差计算阈值
+        if (!dailyCounts.isEmpty()) {
+            int n = dailyCounts.size();
+            double avg = dailyCounts.stream().mapToLong(Long::longValue).sum() / (double) n;
+            double variance = dailyCounts.stream()
+                    .mapToDouble(c -> Math.pow(c - avg, 2))
+                    .sum() / n;
+            double stddev = Math.sqrt(variance);
+
+            int redThreshold = Math.max((int) Math.ceil(avg + 3 * stddev), Math.max((int) Math.ceil(avg * 5.0), 10));
+            int yellowThreshold = Math.max((int) Math.ceil(avg + 2 * stddev), Math.max((int) Math.ceil(avg * 3.0), 5));
+            return new int[]{redThreshold, yellowThreshold};
+        }
+
+        // 如果历史数据不可用，使用配置的默认阈值
+        return new int[]{100, 50};
+    }
+
+    private String templateIdToServiceName(String templateId) {
+        if (templateId == null) return "unknown";
+        if (templateId.contains("statistics-server")) return "statistics-server";
+        if (templateId.contains("statistics-tob")) return "statistics-tob";
+        if (templateId.contains("trade-order")) return "trade-order";
+        if (templateId.contains("device-maint")) return "device-maint";
+        if (templateId.contains("zdl-push")) return "zdl-push-server";
+        if (templateId.contains("tpl-stat")) return "statistics-server";
+        if (templateId.contains("tpl-tob")) return "statistics-tob";
+        if (templateId.contains("tpl-order")) return "trade-order";
+        if (templateId.contains("tpl-device")) return "device-maint";
+        if (templateId.contains("tpl-push")) return "zdl-push-server";
+        return templateId;
+    }
+
+    private String templateIdToKeywords(String templateId) {
+        if (templateId == null) return "level: ERROR";
+        if (templateId.contains("statistics-server"))
+            return "__tag__:_container_name_: statistics-server AND level: ERROR";
+        if (templateId.contains("statistics-tob"))
+            return "__tag__:_container_name_: statistics-tob AND level: ERROR";
+        if (templateId.contains("trade-order"))
+            return "__tag__:_container_name_: trade-order AND level: ERROR";
+        if (templateId.contains("device-maint"))
+            return "__tag__:_container_name_: device-maint AND level: ERROR";
+        if (templateId.contains("zdl-push"))
+            return "__tag__:_container_name_: zdl-push-server AND level: ERROR";
+        if (templateId.contains("tpl-stat"))
+            return "__tag__:_container_name_: statistics-server AND level: ERROR";
+        if (templateId.contains("tpl-tob"))
+            return "__tag__:_container_name_: statistics-tob AND level: ERROR";
+        if (templateId.contains("tpl-order"))
+            return "__tag__:_container_name_: trade-order AND level: ERROR";
+        if (templateId.contains("tpl-device"))
+            return "__tag__:_container_name_: device-maint AND level: ERROR";
+        if (templateId.contains("tpl-push"))
+            return "__tag__:_container_name_: zdl-push-server AND level: ERROR";
+        return "level: ERROR";
     }
 
     private long queryServiceErrorCount(String logstore, String serviceName, long from, long to) {
@@ -439,8 +513,8 @@ public class AlertDataService {
                 }
 
                 double avgPerMin = minuteCount > 0 ? (double) totalErrors / minuteCount : 0;
-                int redTh = Math.max((int) Math.ceil(avgPerMin * 3), 5);
-                int yellowTh = Math.max((int) Math.ceil(avgPerMin * 1.5), 2);
+                int redTh = Math.max((int) Math.ceil(avgPerMin * 6), 5);
+                int yellowTh = Math.max((int) Math.ceil(avgPerMin * 3), 2);
                 thresholdsMap.put(service, new ServiceThresholds(redTh, yellowTh));
 
             } catch (Exception e) {

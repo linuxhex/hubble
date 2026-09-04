@@ -63,7 +63,7 @@ public class AlertConfig {
     private Integer alertThreshold;
 
     /**
-     * 黄盘阈值比例（相对红盘阈值，如 0.5 表示达到红盘阈值的 50% 即触发黄盘）
+     * 粉盘阈值比例（相对红盘阈值，如 0.5 表示达到红盘阈值的 50% 即触发粉盘）
      */
     @TableField("yellow_threshold_ratio")
     private Double yellowThresholdRatio;

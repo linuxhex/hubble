@@ -65,6 +65,12 @@ const rateClass = (rate) => {
   return 'degradation-rate neutral'
 }
 
+const surgeClass = (rate) => {
+  if (rate >= 100) return 'degradation-rate bad'
+  if (rate >= 50) return 'degradation-rate warning'
+  return 'degradation-rate neutral'
+}
+
 // ===== 链路下钻 =====
 const drawerVisible = ref(false)
 const drawerTitle = ref('')
@@ -263,7 +269,7 @@ onBeforeUnmount(() => {
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && tableData.length === 0" description="暂无劣化接口，表现良好" />
+      <el-empty v-if="!loading && tableData.length === 0" :description="compareMode === 'surge' ? '暂无流量涨幅接口' : '暂无劣化接口，表现良好'" />
     </div>
 
     <!-- 下钻抽屉 -->
@@ -442,6 +448,9 @@ onBeforeUnmount(() => {
 .degradation-rate.bad { color: #f56c6c; }
 .degradation-rate.good { color: #67c23a; }
 .degradation-rate.neutral { color: #909399; }
+.degradation-rate.warning { color: #e6a23c; }
+
+.count-highlight { color: #f56c6c; font-weight: 600; }
 
 :deep(.clickable-row) { cursor: pointer; }
 :deep(.clickable-row:hover td) { background-color: #ecf5ff !important; }

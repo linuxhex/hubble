@@ -3,6 +3,8 @@ package com.ykc.hubble.controller;
 import com.ykc.hubble.common.Result;
 import com.ykc.hubble.entity.AlertConfig;
 import com.ykc.hubble.service.AlertConfigService;
+import com.ykc.hubble.service.HealthEvaluator;
+import com.ykc.hubble.service.MonitorSnapshotService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import java.util.Map;
 public class AlertConfigController {
 
     private final AlertConfigService alertConfigService;
+    private final MonitorSnapshotService monitorSnapshotService;
 
     @GetMapping("/query")
     @Operation(summary = "分页查询监控配置", description = "支持标题模糊与启用状态过滤")
@@ -73,6 +76,15 @@ public class AlertConfigController {
     @Operation(summary = "禁用监控配置")
     public Result<Void> disable(@PathVariable Long id) {
         alertConfigService.setEnabled(id, false);
+        return Result.success();
+    }
+
+    @PostMapping("/mgmt/test-alert/{id}")
+    @Operation(summary = "手动触发测试告警通知", description = "用于验证钉钉通知样式，level=red/yellow")
+    public Result<Void> testAlert(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "red") String level) {
+        monitorSnapshotService.triggerTestAlert(id, "red".equalsIgnoreCase(level));
         return Result.success();
     }
 }

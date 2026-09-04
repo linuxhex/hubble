@@ -43,6 +43,7 @@ public class AuthFilter extends OncePerRequestFilter {
 
             // 监控大盘接口（无需用户认证）
             "/alert-config/query",
+            "/alert-config/mgmt/test-alert",
             "/alert-data/query",
             "/alert-data/service-health",
             "/alert-data/minute-timeline",

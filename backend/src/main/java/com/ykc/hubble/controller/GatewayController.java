@@ -67,6 +67,12 @@ public class GatewayController {
         return Result.success(gatewayService.p60Ranking(compareMode));
     }
 
+    @GetMapping("/traffic-surge")
+    public Result<List<ApiDegradationVO>> trafficSurge(
+            @RequestParam(defaultValue = "day") String compareMode) {
+        return Result.success(gatewayService.trafficSurge(compareMode));
+    }
+
     private long parseTimeRange(String timeRange) {
         if (timeRange == null || timeRange.isBlank()) return 86400;
         try {

@@ -24,14 +24,20 @@ onMounted(async () => {
     } finally {
       loading.value = false
     }
+  } else {
+    redirectToDingTalk()
   }
 })
 
-function handleDingTalkLogin() {
+function redirectToDingTalk() {
   const appId = import.meta.env.VITE_DINGTALK_APP_ID || import.meta.env.VITE_DINGTALK_APP_KEY || ''
   const redirectUri = encodeURIComponent(window.location.origin + '/login')
   const oauthUrl = `https://login.dingtalk.com/oauth2/auth?client_id=${appId}&redirect_uri=${redirectUri}&response_type=code&scope=openid&prompt=consent`
   window.location.href = oauthUrl
+}
+
+function handleDingTalkLogin() {
+  redirectToDingTalk()
 }
 </script>
 
