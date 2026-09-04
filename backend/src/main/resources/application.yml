@@ -35,6 +35,16 @@ mybatis-plus:
       logic-not-delete-value: 0
   mapper-locations: classpath:mapper/*.xml
 
+# 运维大盘配置
+monitor:
+  scan-interval-seconds: 5
+  snapshot-retention: 1440
+  default-query-logstore: all
+  error-scan-lines: 200
+  minute-red-threshold: 50
+  minute-yellow-threshold: 20
+  dashboard-url: ${MONITOR_DASHBOARD_URL:http://localhost:5173}
+
 # 阿里云SLS配置
 aliyun:
   sls:
@@ -70,6 +80,8 @@ dingtalk:
   redirect-url: ${DINGTALK_REDIRECT_URL:http://localhost:8778/query}
   access-token-url: https://api.dingtalk.com/v1.0/oauth2/userAccessToken
   user-info-url: https://api.dingtalk.com/v1.0/contact/users/me
+  robot-webhook: ${DINGTALK_ROBOT_WEBHOOK:}
+  robot-secret: ${DINGTALK_ROBOT_SECRET:}
 
 # Milvus配置
 milvus:

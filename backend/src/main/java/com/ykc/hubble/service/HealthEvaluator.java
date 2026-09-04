@@ -26,19 +26,29 @@ public final class HealthEvaluator {
     }
 
     /**
-     * 根据当前命中量与阈值评估健康度
-     *
-     * @param count     当前日志命中量
-     * @param threshold 告警阈值；为空或非正时无法判定，视为正常
+     * 根据当前命中量与阈值评估健康度（默认黄盘比例 0.5）
      */
     public static Status evaluate(long count, Integer threshold) {
+        return evaluate(count, threshold, 0.5);
+    }
+
+    /**
+     * 根据当前命中量与阈值评估健康度
+     *
+     * @param count                当前日志命中量
+     * @param threshold            告警阈值；为空或非正时无法判定，视为正常
+     * @param yellowThresholdRatio 黄盘阈值比例（0~1），为空时使用默认 0.5
+     */
+    public static Status evaluate(long count, Integer threshold, Double yellowThresholdRatio) {
         if (threshold == null || threshold <= 0) {
             return Status.NORMAL;
         }
+        double ratio = (yellowThresholdRatio != null && yellowThresholdRatio > 0 && yellowThresholdRatio < 1)
+                ? yellowThresholdRatio : 0.5;
         if (count >= threshold) {
             return Status.RED;
         }
-        if (count >= threshold * 0.5) {
+        if (count >= threshold * ratio) {
             return Status.YELLOW;
         }
         return Status.NORMAL;

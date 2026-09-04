@@ -1,10 +1,17 @@
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 const isCollapse = ref(false)
+
+const isPublicPage = computed(() => {
+  return route.path === '/login' || route.path === '/unauthorized'
+})
 
 const toggleCollapse = () => {
   isCollapse.value = !isCollapse.value
@@ -48,6 +55,11 @@ const formatDate = (date) => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
+function handleLogout() {
+  authStore.logout()
+  router.replace('/login')
+}
+
 onMounted(() => {
   updateTime()
   timeTimer = setInterval(updateTime, 1000)
@@ -62,52 +74,55 @@ onUnmounted(() => {
 
 <template>
   <div class="app-container">
-    <!-- 左侧导航栏 -->
-    <div class="sidebar" :class="{ 'collapsed': isCollapse }">
-      <div class="logo">
-        <img v-if="!isCollapse" alt="Hubble" src="./assets/hubble-logo.svg" />
-        <img v-else alt="H" src="./assets/hubble-logo-small.svg" />
+    <!-- 公开页面（登录/未授权）不显示侧边栏 -->
+    <template v-if="!isPublicPage">
+      <!-- 左侧导航栏 -->
+      <div class="sidebar" :class="{ 'collapsed': isCollapse }">
+        <div class="logo">
+          <img v-if="!isCollapse" alt="Hubble" src="./assets/hubble-logo.svg" />
+          <img v-else alt="H" src="./assets/hubble-logo-small.svg" />
+        </div>
+        <el-menu
+          :default-active="activeIndex"
+          class="sidebar-menu"
+          background-color="#001529"
+          text-color="#fff"
+          :collapse="isCollapse"
+          router
+        >
+          <!-- 导航菜单 -->
+          <el-menu-item index="/gateway">
+            <el-icon><DataLine /></el-icon>
+            <span>概览</span>
+          </el-menu-item>
+          <el-menu-item index="/gateway/trace">
+            <el-icon><Connection /></el-icon>
+            <span>链路详情</span>
+          </el-menu-item>
+          <el-menu-item index="/user-behavior">
+            <el-icon><Timer /></el-icon>
+            <span>用户行为</span>
+          </el-menu-item>
+          <el-menu-item index="/gateway/logs">
+            <el-icon><Document /></el-icon>
+            <span>日志搜索</span>
+          </el-menu-item>
+          <el-menu-item index="/abnormal">
+            <el-icon><Warning /></el-icon>
+            <span>异常大盘</span>
+          </el-menu-item>
+          <el-menu-item index="/degradation-ranking">
+            <el-icon><Sort /></el-icon>
+            <span>接口劣化</span>
+          </el-menu-item>
+        </el-menu>
       </div>
-      <el-menu
-        :default-active="activeIndex"
-        class="sidebar-menu"
-        background-color="#001529"
-        text-color="#fff"
-        :collapse="isCollapse"
-        router
-      >
-        <!-- 导航菜单 -->
-        <el-menu-item index="/gateway">
-          <el-icon><DataLine /></el-icon>
-          <span>概览</span>
-        </el-menu-item>
-        <el-menu-item index="/gateway/trace">
-          <el-icon><Connection /></el-icon>
-          <span>链路详情</span>
-        </el-menu-item>
-        <el-menu-item index="/user-behavior">
-          <el-icon><Timer /></el-icon>
-          <span>用户行为</span>
-        </el-menu-item>
-        <el-menu-item index="/gateway/logs">
-          <el-icon><Document /></el-icon>
-          <span>日志搜索</span>
-        </el-menu-item>
-        <el-menu-item index="/abnormal">
-          <el-icon><Warning /></el-icon>
-          <span>异常大盘</span>
-        </el-menu-item>
-        <el-menu-item index="/degradation-ranking">
-          <el-icon><Sort /></el-icon>
-          <span>接口劣化</span>
-        </el-menu-item>
-      </el-menu>
-    </div>
+    </template>
 
     <!-- 主内容区 -->
-    <div class="main-content">
-      <!-- 顶部导航栏 -->
-      <div class="header">
+    <div class="main-content" :class="{ 'full-width': isPublicPage }">
+      <!-- 顶部导航栏（公开页面不显示） -->
+      <div v-if="!isPublicPage" class="header">
         <div class="header-left">
           <el-icon class="fold-icon" @click="toggleCollapse">
             <Fold v-if="!isCollapse" />
@@ -129,12 +144,31 @@ onUnmounted(() => {
             </el-button-group>
           </div>
           <el-icon class="notification-icon"><Bell /></el-icon>
-          <el-avatar size="small" />
+          <el-dropdown v-if="authStore.isLoggedIn" trigger="click">
+            <div class="user-info">
+              <el-avatar :size="28" :src="authStore.user?.avatar">
+                {{ authStore.user?.nickname?.charAt(0) || '' }}
+              </el-avatar>
+              <span class="user-name">{{ authStore.user?.nickname || '用户' }}</span>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled>
+                  {{ authStore.user?.phone || '' }}
+                </el-dropdown-item>
+                <el-dropdown-item divided @click="handleLogout">
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-avatar v-else size="small" />
         </div>
       </div>
 
       <!-- 内容区域 -->
-      <div class="content">
+      <div class="content" :class="{ 'full-height': isPublicPage }">
         <router-view />
       </div>
     </div>
@@ -347,5 +381,37 @@ html, body {
 .el-menu-item .el-icon {
   margin-right: 10px;
   font-size: 18px;
+}
+
+.main-content.full-width {
+  width: 100%;
+}
+
+.content.full-height {
+  height: 100%;
+  padding: 0;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.user-info:hover {
+  background-color: #f5f5f5;
+}
+
+.user-name {
+  font-size: 14px;
+  color: #333;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

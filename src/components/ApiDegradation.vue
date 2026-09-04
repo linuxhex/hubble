@@ -113,7 +113,7 @@ const openTraceChain = async (trace) => {
     chainNodes.value = data.nodes || []
     chainTotalLogs.value = data.totalLogs || 0
     await nextTick()
-    renderDurationChart()
+    setTimeout(() => renderDurationChart(), 150)
   } catch (e) {
     console.error('获取链路失败:', e)
     chainNodes.value = []
@@ -179,15 +179,21 @@ const handleVisibilityChange = () => {
   if (!document.hidden) fetchData()
 }
 
+const handleResize = () => {
+  if (durationChart) durationChart.resize()
+}
+
 onMounted(() => {
   fetchData()
   startAutoRefresh()
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('resize', handleResize)
   if (durationChart) durationChart.dispose()
 })
 </script>
@@ -310,10 +316,11 @@ onBeforeUnmount(() => {
 
           <div v-loading="chainLoading">
             <!-- 耗时柱状图 -->
-            <div ref="chartContainerRef" class="duration-chart"></div>
+            <div v-if="chainNodes.length > 0" ref="chartContainerRef" class="duration-chart"></div>
+            <el-empty v-else-if="!chainLoading" description="未找到该链路的日志数据" :image-size="60" />
 
             <!-- 链路流程图 -->
-            <div class="chain-flow">
+            <div v-if="chainNodes.length > 0" class="chain-flow">
               <div
                 v-for="(node, index) in chainNodes"
                 :key="index"

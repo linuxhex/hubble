@@ -38,5 +38,15 @@ public class DingtalkProperties {
      * 获取用户信息的URL
      */
     private String userInfoUrl = "https://api.dingtalk.com/v1.0/contact/users/me";
+
+    /**
+     * 机器人 Webhook 地址（告警通知用）
+     */
+    private String robotWebhook;
+
+    /**
+     * 机器人加签密钥
+     */
+    private String robotSecret;
 }
 

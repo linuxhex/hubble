@@ -14,15 +14,23 @@ import AlertConfigManagement from '../components/AlertConfigManagement.vue'
 import AlertOverview from '../components/AlertOverview.vue'
 import AlertDashboard from '../components/AlertDashboard.vue'
 import Unauthorized from '../components/Unauthorized.vue'
+import Login from '../components/Login.vue'
 import WidgetDashboard from '../components/WidgetDashboard.vue'
 import TrendDashboard from '../components/TrendDashboard.vue'
 import SecondChart from '../components/SecondChart.vue'
 import ApiDegradation from '../components/ApiDegradation.vue'
 
+const PUBLIC_PATHS = ['/login', '/unauthorized']
+
 const routes = [
   {
     path: '/',
     redirect: '/gateway'
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: Login
   },
   {
     path: '/monitor',
@@ -123,6 +131,21 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  if (PUBLIC_PATHS.includes(to.path)) {
+    next()
+    return
+  }
+
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+    return
+  }
+
+  next()
 })
 
 export default router

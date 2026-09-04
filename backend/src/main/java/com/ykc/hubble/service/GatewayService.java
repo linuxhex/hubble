@@ -1251,7 +1251,13 @@ public class GatewayService {
             "charge-server", "charge-server-prod",  // 充电
             "external-server", "external-server-prod",  // 外部
             "omp-server", "omp-gateway", "omp-admin",  // OMP
-            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query"  // 大数据
+            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query",  // 大数据
+            "device-server", "device-business", "device-coms-server",  // 设备
+            "payment-server", "pay-server",  // 支付
+            "clearing-server", "reconciliation-server",  // 清结算
+            "user-server", "auth-server",  // 用户
+            "notification-server", "messagePushServer",  // 消息
+            "dmp-query-server", "ctp-order-server", "ctp_activity_server", "ctp_finance_server"  // CTP/DMP
         };
         
         Map<String, Long> globalApiCounts = new HashMap<>();
@@ -1685,7 +1691,38 @@ public class GatewayService {
             // OMP相关
             "omp-server", "omp-gateway", "omp-admin",
             // 大数据相关
-            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query"
+            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query",
+            // 设备相关
+            "device-server", "device-gateway", "device-center", "device-monitor",
+            "device-iot-server", "device-data-server",
+            // 财务相关
+            "finance-server", "finance-core", "finance-gateway", "finance-report",
+            // 清结算相关
+            "clearing-server", "clearing-core", "settlement-server",
+            // 订单相关
+            "order-server", "order-core", "order-gateway",
+            // 活动相关
+            "activity-server", "activity-core", "activity-gateway",
+            // 充电相关
+            "charge-server", "charge-business-server", "charge-gateway",
+            // 用户相关
+            "user-server", "user-center", "auth-server",
+            // 基础服务
+            "base-server", "common-server", "config-server", "file-server",
+            // 报表相关
+            "report-server", "statistics-server",
+            // 库存/仓储
+            "inventory-server", "warehouse-server",
+            // 网关/中间件
+            "guan-zhong", "redis-server", "mq-consumer-server",
+            // 支付相关
+            "pay-server", "pay-gateway", "wallet-server",
+            // 营销相关
+            "marketing-server", "coupon-server", "promotion-server",
+            // 消息相关
+            "notification-server", "sms-server", "push-server", "im-server",
+            // 第三方对接
+            "third-party-server", "callback-server", "webhook-server"
     );
 
     private Map<String, long[]> queryServiceStats(String logstore, long from, long to) {

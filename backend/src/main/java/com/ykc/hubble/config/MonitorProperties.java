@@ -43,4 +43,9 @@ public class MonitorProperties {
      * 分钟时间线黄盘阈值
      */
     private int minuteYellowThreshold = 20;
+
+    /**
+     * 前端大盘地址（告警通知中附带看板链接）
+     */
+    private String dashboardUrl = "http://localhost:5173";
 }

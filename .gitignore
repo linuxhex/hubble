@@ -1,3 +1,7 @@
+# Environment / secret files
+.env
+config.local.sh
+
 # Logs
 logs
 *.log

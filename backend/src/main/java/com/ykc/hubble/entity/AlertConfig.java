@@ -57,10 +57,34 @@ public class AlertConfig {
     private Integer collectionInterval;
 
     /**
-     * 告警阈值（日志命中量达到该值视为告警）
+     * 告警阈值（日志命中量达到该值视为红盘告警）
      */
     @TableField("alert_threshold")
     private Integer alertThreshold;
+
+    /**
+     * 黄盘阈值比例（相对红盘阈值，如 0.5 表示达到红盘阈值的 50% 即触发黄盘）
+     */
+    @TableField("yellow_threshold_ratio")
+    private Double yellowThresholdRatio;
+
+    /**
+     * 高峰时段开始时间 HH:mm:ss（可选）
+     */
+    @TableField("peak_start_time")
+    private String peakStartTime;
+
+    /**
+     * 高峰时段结束时间 HH:mm:ss（可选）
+     */
+    @TableField("peak_end_time")
+    private String peakEndTime;
+
+    /**
+     * 高峰时段告警阈值（覆盖 alert_threshold，可选）
+     */
+    @TableField("peak_alert_threshold")
+    private Integer peakAlertThreshold;
 
     /**
      * 告警通知 webhook（钉钉机器人，选填）
