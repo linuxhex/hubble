@@ -37,4 +37,19 @@ public class MiddlewareController {
     public Result<List<Map<String, Object>>> mysqlInstances() {
         return Result.success(middlewareMonitorService.mysqlInstances());
     }
+
+    @GetMapping("/pod/cpu")
+    public Result<List<Map<String, Object>>> podCpuTop() {
+        return Result.success(middlewareMonitorService.podCpuTop());
+    }
+
+    @GetMapping("/pod/memory")
+    public Result<List<Map<String, Object>>> podMemoryTop() {
+        return Result.success(middlewareMonitorService.podMemoryTop());
+    }
+
+    @GetMapping("/node/overview")
+    public Result<List<Map<String, Object>>> nodeOverview() {
+        return Result.success(middlewareMonitorService.nodeOverview());
+    }
 }

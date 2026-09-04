@@ -3,6 +3,7 @@ package com.ykc.hubble.service;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesResponse;
 import com.aliyuncs.r_kvstore.model.v20150101.DescribeInstancesResponse;
 import com.ykc.hubble.client.CloudMonitorClient;
+import com.ykc.hubble.client.GrafanaClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,8 +22,18 @@ import java.util.*;
 public class MiddlewareMonitorService {
 
     private final CloudMonitorClient cloudMonitorClient;
+    private final GrafanaClient grafanaClient;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    // Grafana 查询缓存（避免频繁查询，2 分钟过期）
+    private List<Map<String, Object>> podCpuCache = null;
+    private long podCpuCacheTime = 0;
+    private List<Map<String, Object>> podMemCache = null;
+    private long podMemCacheTime = 0;
+    private List<Map<String, Object>> nodeCache = null;
+    private long nodeCacheTime = 0;
+    private static final long CACHE_TTL_MS = 2 * 60 * 1000; // 2 分钟
 
     /**
      * 查询 Redis 监控概览
@@ -132,6 +143,118 @@ public class MiddlewareMonitorService {
             }
         } catch (Exception e) {
             log.error("查询 MySQL 监控失败: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    /**
+     * 查询 Pod CPU Top10（从 Grafana/Prometheus），带 2 分钟缓存
+     */
+    public List<Map<String, Object>> podCpuTop() {
+        long now = System.currentTimeMillis();
+        if (podCpuCache != null && now - podCpuCacheTime < CACHE_TTL_MS) {
+            log.debug("Pod CPU 使用缓存（{} 条）", podCpuCache.size());
+            return podCpuCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            var results = grafanaClient.queryInstant(
+                    "topk(10, sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m])) by (pod))");
+            for (var item : results) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("pod", item.getOrDefault("pod", "unknown"));
+                row.put("cpu", item.getOrDefault("value", 0));
+                list.add(row);
+            }
+            podCpuCache = list;
+            podCpuCacheTime = now;
+            log.info("Pod CPU Top: {} 个（已缓存）", list.size());
+        } catch (Exception e) {
+            log.error("查询 Pod CPU 失败: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    /**
+     * 查询 Pod 内存 Top10（从 Grafana/Prometheus），带 2 分钟缓存
+     */
+    public List<Map<String, Object>> podMemoryTop() {
+        long now = System.currentTimeMillis();
+        if (podMemCache != null && now - podMemCacheTime < CACHE_TTL_MS) {
+            log.debug("Pod Memory 使用缓存（{} 条）", podMemCache.size());
+            return podMemCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            var results = grafanaClient.queryInstant(
+                    "topk(10, sum(container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) by (pod))");
+            for (var item : results) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("pod", item.getOrDefault("pod", "unknown"));
+                double bytes = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                row.put("memoryMB", Math.round(bytes / 1024 / 1024 * 10) / 10.0);
+                list.add(row);
+            }
+            podMemCache = list;
+            podMemCacheTime = now;
+            log.info("Pod Memory Top: {} 个（已缓存）", list.size());
+        } catch (Exception e) {
+            log.error("查询 Pod 内存失败: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    /**
+     * 查询 Node 节点资源使用率（CPU + 内存），带 2 分钟缓存
+     */
+    public List<Map<String, Object>> nodeOverview() {
+        long now = System.currentTimeMillis();
+        if (nodeCache != null && now - nodeCacheTime < CACHE_TTL_MS) {
+            log.debug("Node 使用缓存（{} 条）", nodeCache.size());
+            return nodeCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            String nodeDs = grafanaClient.getNodeDsUid();
+            // Node CPU
+            var cpuResults = grafanaClient.queryInstant(
+                    "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", nodeDs);
+            // Node Memory
+            var memResults = grafanaClient.queryInstant(
+                    "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100", nodeDs);
+
+            Map<String, Double> cpuMap = new HashMap<>();
+            for (var item : cpuResults) {
+                String node = String.valueOf(item.getOrDefault("instance", "unknown"));
+                double cpu = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                cpuMap.put(node, cpu);
+            }
+
+            Map<String, double[]> nodeMap = new LinkedHashMap<>();
+            for (var item : memResults) {
+                String node = String.valueOf(item.getOrDefault("instance", "unknown"));
+                double mem = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                nodeMap.put(node, new double[]{cpuMap.getOrDefault(node, 0.0), mem});
+            }
+
+            for (var entry : nodeMap.entrySet()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("node", entry.getKey());
+                row.put("cpuUsage", entry.getValue()[0]);
+                row.put("memoryUsage", entry.getValue()[1]);
+                list.add(row);
+            }
+            list.sort((a, b) -> Double.compare(
+                    ((Number) b.getOrDefault("cpuUsage", 0)).doubleValue(),
+                    ((Number) a.getOrDefault("cpuUsage", 0)).doubleValue()));
+            nodeCache = list;
+            nodeCacheTime = now;
+            log.info("Node 概览: {} 个节点（已缓存）", list.size());
+        } catch (Exception e) {
+            log.error("查询 Node 概览失败: {}", e.getMessage());
         }
         return list;
     }

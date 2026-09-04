@@ -15,3 +15,15 @@ export function getMysqlOverview() {
 export function getMysqlInstances() {
   return request.get('/middleware/mysql/instances')
 }
+
+export function getPodCpuTop() {
+  return request.get('/middleware/pod/cpu')
+}
+
+export function getPodMemoryTop() {
+  return request.get('/middleware/pod/memory')
+}
+
+export function getNodeOverview() {
+  return request.get('/middleware/node/overview')
+}

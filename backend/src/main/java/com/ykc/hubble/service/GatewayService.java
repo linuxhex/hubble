@@ -1415,25 +1415,33 @@ public class GatewayService {
         }
 
         // 首次无缓存：异步加载数据，返回空列表（前端自动刷新会获取数据）
-        log.info("劣化对比无缓存，异步加载: mode={}", mode);
-        CompletableFuture.runAsync(() -> {
-            try {
-                List<ApiDegradationVO> data = loadDegradation(mode);
-                if (!data.isEmpty()) {
-                    degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, data, 5);
-                    log.info("劣化对比异步加载完成: mode={}, size={}", mode, data.size());
-                } else {
-                    log.info("劣化对比异步加载返回空数据: mode={}", mode);
+        String loadingKey = "degradation_" + mode;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("劣化对比无缓存，异步加载: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> data = loadDegradation(mode);
+                    if (!data.isEmpty()) {
+                        degradationCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                        pageDataCacheService.save(pageKey, dataKey, data, 5);
+                        log.info("劣化对比异步加载完成: mode={}, size={}", mode, data.size());
+                    } else {
+                        log.info("劣化对比异步加载返回空数据: mode={}", mode);
+                    }
+                } catch (Exception e) {
+                    log.warn("劣化对比异步加载失败: mode={}, error={}", mode, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
                 }
-            } catch (Exception e) {
-                log.warn("劣化对比异步加载失败: mode={}, error={}", mode, e.getMessage());
-            }
-        }, queryExecutor);
+            }, queryExecutor);
+        } else {
+            log.info("劣化对比正在加载中，跳过重复请求: mode={}", mode);
+        }
         return Collections.emptyList();
     }
 
     private List<ApiDegradationVO> loadDegradation(String compareMode) {
+        long startTime = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
         LocalDate today = LocalDate.now(zone);
         long[] currentRange;
@@ -1465,18 +1473,24 @@ public class GatewayService {
 
         Map<String, long[]> currentApiStats;
         Map<String, long[]> previousApiStats;
+        long t1 = System.currentTimeMillis();
         try {
             currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
         } catch (Exception e) {
             log.error("查询当前时段API失败: {}", e.getMessage(), e);
             currentApiStats = new HashMap<>();
         }
+        long t2 = System.currentTimeMillis();
+        log.info("劣化对比: 当前时段查询完成, 耗时={}ms, apis={}", t2 - t1, currentApiStats.size());
+
         try {
             previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
         } catch (Exception e) {
             log.error("查询上期时段API失败: {}", e.getMessage(), e);
             previousApiStats = new HashMap<>();
         }
+        long t3 = System.currentTimeMillis();
+        log.info("劣化对比: 上期时段查询完成, 耗时={}ms, apis={}", t3 - t2, previousApiStats.size());
 
         log.info("劣化对比: compareMode={}, currentRange=[{},{}], previousRange=[{},{}], currentApis={}, previousApis={}",
             compareMode, currentRange[0], currentRange[1], previousRange[0], previousRange[1],
@@ -1531,15 +1545,16 @@ public class GatewayService {
         // 劣化幅度超过 220% 告警
         checkDegradationAlert(result);
 
+        log.info("劣化对比: 总耗时={}ms, 最终结果={}", System.currentTimeMillis() - startTime, result.size());
         return result.size() > 30 ? result.subList(0, 30) : result;
     }
 
     /**
-     * 接口劣化告警：RT 劣化幅度 >220% 触发钉钉 + SSE，同一接口 10 分钟内不重复告警
+     * 接口劣化告警：RT 劣化幅度 >220% 触发钉钉 + SSE，同一接口 24 小时内不重复告警
      */
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
-        long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时防抖
+        long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
         double degradationThreshold = 220.0;
 
         for (ApiDegradationVO vo : degradationList) {
@@ -1641,19 +1656,26 @@ public class GatewayService {
         }
 
         // 首次无缓存：异步加载数据
-        log.info("P60排名无缓存，异步加载: mode={}", mode);
-        CompletableFuture.runAsync(() -> {
-            try {
-                List<ApiDegradationVO> result = loadP60Ranking(compareMode);
-                if (!result.isEmpty()) {
-                    p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result, 5);
-                    log.info("P60排名异步加载完成: mode={}, size={}", mode, result.size());
+        String loadingKey = "p60_ranking_" + mode;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("P60排名无缓存，异步加载: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> result = loadP60Ranking(compareMode);
+                    if (!result.isEmpty()) {
+                        p60RankingCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
+                        pageDataCacheService.save(pageKey, dataKey, result, 5);
+                        log.info("P60排名异步加载完成: mode={}, size={}", mode, result.size());
+                    }
+                } catch (Exception e) {
+                    log.warn("P60排名异步加载失败: mode={}, error={}", mode, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
                 }
-            } catch (Exception e) {
-                log.warn("P60排名异步加载失败: mode={}, error={}", mode, e.getMessage());
-            }
-        }, queryExecutor);
+            }, queryExecutor);
+        } else {
+            log.info("P60排名正在加载中，跳过重复请求: mode={}", mode);
+        }
         return Collections.emptyList();
     }
 
@@ -1711,19 +1733,26 @@ public class GatewayService {
             return entry.data;
         }
 
-        log.info("流量涨幅无缓存，异步加载: mode={}", mode);
-        CompletableFuture.runAsync(() -> {
-            try {
-                List<ApiDegradationVO> result = loadTrafficSurge(mode);
-                if (!result.isEmpty()) {
-                    trafficSurgeCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
-                    pageDataCacheService.save(pageKey, dataKey, result, 5);
-                    log.info("流量涨幅异步加载完成: mode={}, size={}", mode, result.size());
+        String loadingKey = "traffic_surge_" + mode;
+        if (loadingKeys.add(loadingKey)) {
+            log.info("流量涨幅无缓存，异步加载: mode={}", mode);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    List<ApiDegradationVO> result = loadTrafficSurge(mode);
+                    if (!result.isEmpty()) {
+                        trafficSurgeCache.put(mode, new CacheEntry(result, System.currentTimeMillis()));
+                        pageDataCacheService.save(pageKey, dataKey, result, 5);
+                        log.info("流量涨幅异步加载完成: mode={}, size={}", mode, result.size());
+                    }
+                } catch (Exception e) {
+                    log.warn("流量涨幅异步加载失败: mode={}, error={}", mode, e.getMessage());
+                } finally {
+                    loadingKeys.remove(loadingKey);
                 }
-            } catch (Exception e) {
-                log.warn("流量涨幅异步加载失败: mode={}, error={}", mode, e.getMessage());
-            }
-        }, queryExecutor);
+            }, queryExecutor);
+        } else {
+            log.info("流量涨幅正在加载中，跳过重复请求: mode={}", mode);
+        }
         return Collections.emptyList();
     }
 
@@ -1826,11 +1855,11 @@ public class GatewayService {
     }
 
     /**
-     * 流量暴涨告警：涨幅 >200%（3 倍以上）触发钉钉 + SSE，同一接口 10 分钟内不重复告警
+     * 流量暴涨告警：涨幅 >200%（3 倍以上）触发钉钉 + SSE，同一接口 24 小时内不重复告警
      */
     private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList) {
         long now = System.currentTimeMillis();
-        long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时防抖
+        long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
         double surgeThreshold = 200.0; // 涨幅 200% 以上触发
 
         for (ApiDegradationVO vo : surgeList) {

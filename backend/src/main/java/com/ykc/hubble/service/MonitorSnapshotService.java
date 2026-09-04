@@ -187,11 +187,11 @@ public class MonitorSnapshotService {
             lastStatus.put(cfg.getId(), status);
 
             if (status == HealthEvaluator.Status.RED) {
-                // 红盘防抖：连续 3 次红盘才告警，且 3 小时内不重复
+                // 红盘防抖：连续 3 次红盘才告警，且 24 小时内不重复（同一监控项一天只告警一次）
                 int consecutive = consecutiveRedCount.merge(cfg.getId(), 1, Integer::sum);
                 long nowMs = System.currentTimeMillis();
                 Long lastSent = lastAlertTime.get(cfg.getId());
-                long cooldownMs = 3 * 60 * 60 * 1000; // 3 小时
+                long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时
 
                 if (consecutive >= 3 && (lastSent == null || nowMs - lastSent >= cooldownMs)) {
                     // SSE 广播 + 钉钉群告警
