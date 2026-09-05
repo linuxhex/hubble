@@ -132,6 +132,7 @@ public class DingTalkClient {
 
     /**
      * 发送 ActionCard 消息到钉钉群机器人（支持图片 + 按钮）
+     * 使用全局配置的 Webhook + Secret。
      *
      * @param title      卡片标题
      * @param markdown   Markdown 正文（可含图片）
@@ -145,8 +146,27 @@ public class DingTalkClient {
             log.debug("钉钉机器人 Webhook 未配置，跳过告警通知");
             return;
         }
+        sendRobotActionCard(webhook, dingtalkProperties.getRobotSecret(), title, markdown, btnTitle, btnUrl, singleTile);
+    }
+
+    /**
+     * 发送 ActionCard 消息到指定钉钉机器人（支持多机器人多群）。
+     *
+     * @param webhook    机器人 Webhook 地址
+     * @param secret     加签密钥（选填）
+     * @param title      卡片标题
+     * @param markdown   Markdown 正文
+     * @param btnTitle   按钮文案
+     * @param btnUrl     按钮链接
+     * @param singleTile true=整体跳转，false=独立跳转
+     */
+    public void sendRobotActionCard(String webhook, String secret, String title, String markdown, String btnTitle, String btnUrl, boolean singleTile) {
+        if (!StringUtils.hasText(webhook)) {
+            log.debug("钉钉机器人 Webhook 为空，跳过告警通知");
+            return;
+        }
         try {
-            String signedUrl = buildSignedWebhookUrl(webhook, dingtalkProperties.getRobotSecret());
+            String signedUrl = buildSignedWebhookUrl(webhook, secret);
 
             Map<String, Object> payload = new HashMap<>();
             if (singleTile) {

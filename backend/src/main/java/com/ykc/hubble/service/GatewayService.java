@@ -42,6 +42,7 @@ public class GatewayService {
     private final Executor queryExecutor;
     private final AlertPushService alertPushService;
     private final com.ykc.hubble.client.DingTalkClient dingTalkClient;
+    private final AlertThresholdService alertThresholdService;
 
     // 已告警的接口（防抖）：key=apiPath, value=上次告警时间戳
     private final Map<String, Long> trafficAlertLastSent = new java.util.concurrent.ConcurrentHashMap<>();
@@ -1560,8 +1561,9 @@ public class GatewayService {
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
         long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
-        double degradationThreshold = 220.0;
-        double minRtMs = 100.0; // 当前 P60 RT 必须超过 100ms 才告警，低 RT 接口劣化无实际影响
+        // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
+        double degradationThreshold = alertThresholdService.getDouble("degradation_threshold", 220.0);
+        double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 100.0);
 
         for (ApiDegradationVO vo : degradationList) {
             // 劣化幅度小不告警
@@ -1874,8 +1876,9 @@ public class GatewayService {
     private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList, long periodSeconds) {
         long now = System.currentTimeMillis();
         long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
-        double surgeThreshold = 200.0; // 涨幅 200% 以上触发
-        double minQps = 50.0; // QPS 必须大于 50 才告警，小流量接口涨幅大不告警
+        // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
+        double surgeThreshold = alertThresholdService.getDouble("traffic_surge_threshold", 200.0);
+        double minQps = alertThresholdService.getDouble("traffic_surge_min_qps", 50.0);
 
         for (ApiDegradationVO vo : surgeList) {
             // 涨幅未达 200% 不告警

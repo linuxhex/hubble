@@ -24,6 +24,10 @@ export function getAppActive(days = 30) {
   return request.get('/biz-analysis/app-active', { params: { days } })
 }
 
+export function getMauTrend() {
+  return request.get('/biz-analysis/mau-trend')
+}
+
 export function getYearlyComparison() {
   return request.get('/biz-analysis/yearly-comparison')
 }

@@ -17,11 +17,11 @@
         <div class="card-value">{{ formatNum(overview.chargedPower) }}</div>
       </div>
       <div class="summary-card">
-        <div class="card-label">桩总量</div>
+        <div class="card-label">枪总量</div>
         <div class="card-value">{{ formatNum(overview.totalGuns) }}</div>
       </div>
       <div class="summary-card">
-        <div class="card-label">充电中桩数</div>
+        <div class="card-label">充电中枪数</div>
         <div class="card-value highlight">{{ formatNum(overview.chargingGuns) }}</div>
       </div>
       <div class="summary-card">
@@ -91,8 +91,14 @@
 
     <!-- 5. 小程序活跃趋势 -->
     <div class="chart-section">
-      <div class="section-title">小程序活跃趋势（近 30 日）</div>
+      <div class="section-title">DAU 日活趋势（近 30 日）</div>
       <div ref="appActiveChartRef" class="chart-container"></div>
+    </div>
+
+    <!-- 5.5 MAU 月活趋势 -->
+    <div class="chart-section">
+      <div class="section-title">MAU 月活趋势（近 6 月）</div>
+      <div ref="mauChartRef" class="chart-container"></div>
     </div>
 
     <!-- 6. 充电最活跃用户排名 -->
@@ -117,7 +123,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getYearlyComparison } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
@@ -126,17 +132,20 @@ const dailyData = ref([])
 const scenario = ref({})
 const activeUsers = ref([])
 const appActiveData = ref([])
+const mauData = ref([])
 const yearlyData = ref({})
 
 const monthlyChartRef = ref(null)
 const yearlyChartRef = ref(null)
 const dailyChartRef = ref(null)
 const appActiveChartRef = ref(null)
+const mauChartRef = ref(null)
 
 let monthlyChart = null
 let yearlyChart = null
 let dailyChart = null
 let appActiveChart = null
+let mauChart = null
 
 const formatNum = (v) => {
   if (v == null) return '-'
@@ -253,11 +262,30 @@ const renderAppActiveChart = () => {
   })
 }
 
+const renderMauChart = () => {
+  if (!mauChartRef.value || mauData.value.length === 0) return
+  if (mauChart) mauChart.dispose()
+  mauChart = echarts.init(mauChartRef.value)
+  const months = mauData.value.map(d => d.month)
+  const mau = mauData.value.map(d => Number(d.mau || 0))
+  mauChart.setOption({
+    tooltip: { trigger: 'axis', formatter: (params) => {
+      const p = params[0]
+      return `${p.name}<br/>MAU: ${Number(p.value).toLocaleString()}`
+    }},
+    xAxis: { type: 'category', data: months },
+    yAxis: { type: 'value', name: '月活用户数', axisLabel: { formatter: (v) => (v / 10000).toFixed(0) + '万' } },
+    series: [
+      { name: 'MAU', type: 'bar', data: mau, itemStyle: { color: '#67C23A', borderRadius: [4, 4, 0, 0] }, barWidth: '40%' }
+    ]
+  })
+}
+
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, ycRes] = await Promise.all([
-      getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getYearlyComparison()
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes] = await Promise.all([
+      getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison()
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -265,6 +293,7 @@ const fetchAll = async () => {
     scenario.value = scRes.data || {}
     activeUsers.value = auRes.data || []
     appActiveData.value = aaRes.data || []
+    mauData.value = mauRes.data || []
     yearlyData.value = ycRes.data || {}
 
     await nextTick()
@@ -272,6 +301,7 @@ const fetchAll = async () => {
     renderYearlyChart()
     renderDailyChart()
     renderAppActiveChart()
+    renderMauChart()
   } catch (e) {
     console.error('经营分析加载失败:', e)
   } finally {
@@ -284,6 +314,7 @@ const handleResize = () => {
   yearlyChart?.resize()
   dailyChart?.resize()
   appActiveChart?.resize()
+  mauChart?.resize()
 }
 
 onMounted(() => {
@@ -297,6 +328,7 @@ onUnmounted(() => {
   yearlyChart?.dispose()
   dailyChart?.dispose()
   appActiveChart?.dispose()
+  mauChart?.dispose()
 })
 </script>
 

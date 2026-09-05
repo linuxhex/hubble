@@ -116,4 +116,10 @@ public class AlertConfig {
      */
     @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    /**
+     * 绑定的钉钉机器人 ID 列表（非 DB 列，用于多对多绑定）
+     */
+    @TableField(exist = false)
+    private java.util.List<Long> robotIds;
 }

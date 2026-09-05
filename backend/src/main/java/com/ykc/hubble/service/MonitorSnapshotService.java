@@ -42,6 +42,7 @@ public class MonitorSnapshotService {
     private final AlertPushService alertPushService;
     private final DingTalkClient dingTalkClient;
     private final AlertChartGenerator alertChartGenerator;
+    private final DingtalkRobotService dingtalkRobotService;
 
     private final Map<Long, Long> lastCollectAt = new ConcurrentHashMap<>();
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
@@ -281,8 +282,19 @@ public class MonitorSnapshotService {
             text.append(String.format("[🔍 查看详情 →](%s)", detailUrl));
 
             String cardTitle = String.format("%s %s - %s", statusIcon, serviceName, statusText);
-            dingTalkClient.sendRobotActionCard(cardTitle, text.toString(),
-                    "查看详情", detailUrl, true);
+            // 查告警规则绑定的机器人，逐个发送到对应群；无绑定时回退到全局机器人
+            List<com.ykc.hubble.entity.DingtalkRobot> robots = dingtalkRobotService.listByAlertConfigId(cfg.getId());
+            if (robots.isEmpty()) {
+                dingTalkClient.sendRobotActionCard(cardTitle, text.toString(),
+                        "查看详情", detailUrl, true);
+            } else {
+                for (com.ykc.hubble.entity.DingtalkRobot robot : robots) {
+                    if (robot.getEnabled() != null && robot.getEnabled() == 1) {
+                        dingTalkClient.sendRobotActionCard(robot.getWebhook(), robot.getSecret(),
+                                cardTitle, text.toString(), "查看详情", detailUrl, true);
+                    }
+                }
+            }
         } catch (Exception e) {
             log.error("监控项[{}]钉钉通知发送失败: {}", cfg.getId(), e.getMessage());
         }

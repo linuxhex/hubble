@@ -68,3 +68,33 @@ CREATE TABLE IF NOT EXISTS middleware_alert_config (
 );
 CREATE INDEX IF NOT EXISTS idx_middleware_alert_type ON middleware_alert_config(middleware_type);
 CREATE INDEX IF NOT EXISTS idx_middleware_alert_metric ON middleware_alert_config(metric_name);
+
+-- 钉钉机器人配置（支持多个机器人通知到多个群）
+CREATE TABLE IF NOT EXISTS dingtalk_robot (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(100) NOT NULL COMMENT '机器人名称',
+  webhook VARCHAR(500) NOT NULL COMMENT '钉钉机器人Webhook地址',
+  secret VARCHAR(200) COMMENT '加签密钥（选填）',
+  remark VARCHAR(200) COMMENT '备注（如通知到运维群）',
+  enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+
+-- 告警规则与机器人绑定（多对多：一条规则可通知多个群）
+CREATE TABLE IF NOT EXISTS alert_config_robot (
+  alert_config_id BIGINT NOT NULL,
+  robot_id BIGINT NOT NULL,
+  PRIMARY KEY (alert_config_id, robot_id)
+);
+
+-- 服务告警阈值配置（接口劣化/流量暴涨/红黄盘等阈值统一管理）
+CREATE TABLE IF NOT EXISTS alert_threshold_config (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  config_key VARCHAR(100) NOT NULL UNIQUE COMMENT '配置键',
+  config_value VARCHAR(200) NOT NULL COMMENT '配置值',
+  description VARCHAR(200) COMMENT '说明',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);

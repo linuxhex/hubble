@@ -27,6 +27,7 @@ public class AlertConfigService {
 
     private final AlertConfigMapper alertConfigMapper;
     private final SnapshotCache snapshotCache;
+    private final DingtalkRobotService dingtalkRobotService;
 
     /**
      * 分页查询监控项（支持标题模糊 + 启用状态过滤）
@@ -56,6 +57,8 @@ public class AlertConfigService {
         if (cfg == null) {
             throw new BusinessException(404, "监控配置不存在");
         }
+        // 回填绑定的机器人 ID 列表
+        cfg.setRobotIds(dingtalkRobotService.listRobotIdsByConfigId(id));
         return cfg;
     }
 
@@ -67,6 +70,10 @@ public class AlertConfigService {
         cfg.setId(null);
         cfg.setDeleted(0);
         alertConfigMapper.insert(cfg);
+        // 保存机器人绑定
+        if (cfg.getRobotIds() != null) {
+            dingtalkRobotService.saveBindings(cfg.getId(), cfg.getRobotIds());
+        }
         log.info("创建监控配置: id={}, title={}", cfg.getId(), cfg.getTitle());
         return cfg.getId();
     }
@@ -81,6 +88,10 @@ public class AlertConfigService {
         }
         cfg.setId(id);
         alertConfigMapper.updateById(cfg);
+        // 更新机器人绑定
+        if (cfg.getRobotIds() != null) {
+            dingtalkRobotService.saveBindings(id, cfg.getRobotIds());
+        }
     }
 
     /**

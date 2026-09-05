@@ -26,9 +26,8 @@ const activeIndex = computed(() => {
   if (route.path === '/gateway/logs') return '/gateway/logs'
   if (route.path === '/unauthorized') return '/unauthorized'
   if (route.path === '/widget-dashboard') return '/widget-dashboard'
-  if (route.path === '/trend-dashboard') return '/trend-dashboard'
-  if (route.path === '/second-chart') return '/second-chart'
   if (route.path === '/degradation-ranking') return '/degradation-ranking'
+  if (route.path === '/alert-config') return '/alert-config'
   if (route.path === '/biz-analysis') return '/biz-analysis'
   return '1'
 })
@@ -124,6 +123,10 @@ onUnmounted(() => {
           <el-menu-item index="/gateway/logs">
             <el-icon><Document /></el-icon>
             <span>日志搜索</span>
+          </el-menu-item>
+          <el-menu-item index="/alert-config">
+            <el-icon><Setting /></el-icon>
+            <span>告警配置</span>
           </el-menu-item>
           <el-menu-item v-if="authStore.user?.nickname === 'lianzi'" index="/biz-analysis">
             <el-icon><TrendCharts /></el-icon>

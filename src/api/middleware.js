@@ -84,6 +84,18 @@ export function getAlertConfigs(middlewareType) {
   return request.get('/middleware-alert/config/list', { params: { middlewareType } })
 }
 
+export function createMiddlewareAlertConfig(config) {
+  return request.post('/middleware-alert/config', config)
+}
+
+export function updateMiddlewareAlertConfig(id, config) {
+  return request.put(`/middleware-alert/config/${id}`, config)
+}
+
+export function deleteMiddlewareAlertConfig(id) {
+  return request.delete(`/middleware-alert/config/${id}`)
+}
+
 export function getLindormTopTables() {
   return request.get('/middleware/lindorm/top-tables')
 }

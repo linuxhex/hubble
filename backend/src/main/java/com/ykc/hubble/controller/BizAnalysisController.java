@@ -74,6 +74,13 @@ public class BizAnalysisController {
         return Result.success(bizAnalysisService.appActive(days));
     }
 
+    @GetMapping("/mau-trend")
+    @Operation(summary = "MAU 月活趋势（近 6 月）")
+    public Result<List<Map<String, Object>>> mauTrend(HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.mauTrend());
+    }
+
     @GetMapping("/yearly-comparison")
     @Operation(summary = "年度同比对比")
     public Result<Map<String, Object>> yearlyComparison(HttpServletRequest request) {

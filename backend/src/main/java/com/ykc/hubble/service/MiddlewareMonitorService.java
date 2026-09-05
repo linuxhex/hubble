@@ -161,10 +161,10 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getDBInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetric("acs_rds_dashboard", "Cluster_CpuUsage", dim, startTime, endTime));
-                    item.put("connections", queryLatestMetric("acs_rds_dashboard", "Cluster_ConnectionUsage", dim, startTime, endTime));
-                    item.put("iops", queryLatestMetric("acs_rds_dashboard", "Cluster_IOPSUsage", dim, startTime, endTime));
-                    item.put("diskUsage", queryLatestMetric("acs_rds_dashboard", "Cluster_DiskUsage", dim, startTime, endTime));
+                    item.put("cpuUsage", queryLatestMetric("acs_rds_dashboard", "CpuUsage", dim, startTime, endTime));
+                    item.put("connections", queryLatestMetric("acs_rds_dashboard", "ConnectionUsage", dim, startTime, endTime));
+                    item.put("iops", queryLatestMetric("acs_rds_dashboard", "IOPSUsage", dim, startTime, endTime));
+                    item.put("diskUsage", queryLatestMetric("acs_rds_dashboard", "DiskUsage", dim, startTime, endTime));
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -500,13 +500,25 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * 查询最新指标值（取最后一个数据点的 Average）
+     * 查询最新指标值：按时间戳分组取最新时刻的值。
+     * ShardingCommandQPS 等多序列指标（每个命令一条线）需在同一时间戳内求和才是真实总量。
      */
     private double queryLatestMetric(String namespace, String metric, String dimensions,
                                      String startTime, String endTime) {
         List<double[]> points = cloudMonitorClient.queryMetric(namespace, metric, dimensions, 60, startTime, endTime);
         if (points.isEmpty()) return 0;
-        return points.get(points.size() - 1)[1];
+
+        // 找最新时间戳
+        double maxTs = 0;
+        for (double[] p : points) {
+            if (p[0] > maxTs) maxTs = p[0];
+        }
+        // 同一时间戳内所有序列求和（QPS 类多序列指标需要汇总，单序列指标不受影响）
+        double sum = 0;
+        for (double[] p : points) {
+            if (p[0] == maxTs) sum += p[1];
+        }
+        return sum;
     }
 
     // ===== 开发环境模拟数据 =====

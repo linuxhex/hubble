@@ -59,6 +59,9 @@ public class AuthFilter extends OncePerRequestFilter {
             // 中间件监控接口（无需用户认证）
             "/middleware/",
 
+            // 中间件告警接口（无需用户认证）
+            "/middleware-alert/",
+
             // AI 对话 WebSocket（握手阶段放行，onOpen 内校验 JWT）
             "/ws/ai/chat"
     };
