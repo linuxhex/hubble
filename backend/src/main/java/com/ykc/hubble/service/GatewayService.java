@@ -168,6 +168,22 @@ public class GatewayService {
                 }
             }
             
+            // 6. 初始化流量涨幅缓存
+            for (String mode : Arrays.asList("day", "week")) {
+                try {
+                    List<ApiDegradationVO> data = loadTrafficSurge(mode);
+                    if (data.isEmpty()) {
+                        log.info("初始化流量涨幅 {} 模式返回空数据，跳过缓存", mode);
+                        continue;
+                    }
+                    trafficSurgeCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                    pageDataCacheService.save("gateway_traffic_surge", mode, data, 30);
+                    log.info("缓存流量涨幅 {} 完成，{} 条", mode, data.size());
+                } catch (Exception e) {
+                    log.warn("初始化流量涨幅缓存 {} 失败: {}", mode, e.getMessage());
+                }
+            }
+
             long elapsed = System.currentTimeMillis() - start;
             log.info("所有网关页面缓存异步初始化完成，耗时 {}ms", elapsed);
         }, queryExecutor);
@@ -193,6 +209,26 @@ public class GatewayService {
                 log.debug("刷新 {} 缓存完成，{} 条", mode, data.size());
             } catch (Exception e) {
                 log.warn("刷新缓存 {} 失败: {}", mode, e.getMessage());
+            }
+        }
+        // 刷新流量涨幅缓存
+        for (String mode : Arrays.asList("day", "week")) {
+            try {
+                List<ApiDegradationVO> data = loadTrafficSurge(mode);
+                if (data.isEmpty()) {
+                    CacheEntry existing = trafficSurgeCache.get(mode);
+                    if (existing != null && !existing.data.isEmpty()) {
+                        log.info("刷新流量涨幅 {} 返回空数据，保留已有缓存 {} 条", mode, existing.data.size());
+                        continue;
+                    }
+                }
+                trafficSurgeCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                if (!data.isEmpty()) {
+                    pageDataCacheService.save("gateway_traffic_surge", mode, data, 30);
+                }
+                log.debug("刷新流量涨幅 {} 缓存完成，{} 条", mode, data.size());
+            } catch (Exception e) {
+                log.warn("刷新流量涨幅缓存 {} 失败: {}", mode, e.getMessage());
             }
         }
     }
@@ -1514,11 +1550,12 @@ public class GatewayService {
             double currentP60 = cur != null ? cur[1] : 0;
             double previousP60 = prev != null ? prev[1] : 0;
 
-            // 过滤：必须有足够的请求数（至少10次）且有RT数据，否则P60无统计意义
-            if (currentCount < 10 && previousCount < 10) { filterNoData++; continue; }
+            // 过滤：必须有足够的请求数且有RT数据，否则P60无统计意义
+            int minReq = (int) alertThresholdService.getDouble("min_request_count", 10.0);
+            if (currentCount < minReq && previousCount < minReq) { filterNoData++; continue; }
             if (currentP60 == 0 && previousP60 == 0) { filterNoData++; continue; }
             // 过滤：必须有上期数据（排除新增API，新增API不算劣化）
-            if (previousCount < 10) { filterNoPrevCount++; continue; }
+            if (previousCount < minReq) { filterNoPrevCount++; continue; }
             if (previousP60 == 0) { filterNoPrevP60++; continue; }
 
             // 计算P60 RT变化率作为劣化幅度
@@ -1560,7 +1597,7 @@ public class GatewayService {
      */
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
-        long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
+        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000); // 防抖，同一接口冷却期内只告警一次
         // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
         double degradationThreshold = alertThresholdService.getDouble("degradation_threshold", 220.0);
         double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 300.0);
@@ -1828,8 +1865,9 @@ public class GatewayService {
             double previousP60 = prev != null ? prev[1] : 0;
 
             // 过滤：当前和上期都需有足够请求数
-            if (currentCount < 10) continue;
-            if (previousCount < 10) continue;
+            int minReq = (int) alertThresholdService.getDouble("min_request_count", 10.0);
+            if (currentCount < minReq) continue;
+            if (previousCount < minReq) continue;
 
             // 计算流量涨幅
             double surgeRate = (currentCount - previousCount) * 100.0 / previousCount;
@@ -1875,7 +1913,7 @@ public class GatewayService {
      */
     private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList, long periodSeconds) {
         long now = System.currentTimeMillis();
-        long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
+        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000); // 防抖，同一接口冷却期内只告警一次
         // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
         double surgeThreshold = alertThresholdService.getDouble("traffic_surge_threshold", 200.0);
         double minQps = alertThresholdService.getDouble("traffic_surge_min_qps", 50.0);
@@ -1995,8 +2033,9 @@ public class GatewayService {
             double currentP60 = cur != null ? cur[1] : 0;
             double previousP60 = prev != null ? prev[1] : 0;
 
-            // 过滤：至少10次请求且有RT数据，否则P60无统计意义
-            if (currentCount < 10) continue;
+            // 过滤：至少minReq次请求且有RT数据，否则P60无统计意义
+            int minReq = (int) alertThresholdService.getDouble("min_request_count", 10.0);
+            if (currentCount < minReq) continue;
             if (currentP60 == 0) continue;
 
             // 计算劣化幅度（用于显示）

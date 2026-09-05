@@ -35,6 +35,7 @@ public class AlertDataService {
     private final SnapshotCache snapshotCache;
     private final SlsQueryClient slsQueryClient;
     private final MonitorProperties monitorProperties;
+    private final AlertThresholdService alertThresholdService;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final java.util.concurrent.Executor queryExecutor;
 
@@ -310,8 +311,15 @@ public class AlertDataService {
                     .sum() / n;
             double stddev = Math.sqrt(variance);
 
-            int redThreshold = Math.max((int) Math.ceil(avg + 3 * stddev), Math.max((int) Math.ceil(avg * 5.0), 10));
-            int yellowThreshold = Math.max((int) Math.ceil(avg + 2 * stddev), Math.max((int) Math.ceil(avg * 3.0), 5));
+            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 3.0);
+            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 2.0);
+            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 5.0);
+            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 3.0);
+            int redFloor = (int) alertThresholdService.getDouble("dynamic_red_floor", 10.0);
+            int yellowFloor = (int) alertThresholdService.getDouble("dynamic_yellow_floor", 5.0);
+
+            int redThreshold = Math.max((int) Math.ceil(avg + redSigma * stddev), Math.max((int) Math.ceil(avg * redMeanMult), redFloor));
+            int yellowThreshold = Math.max((int) Math.ceil(avg + yellowSigma * stddev), Math.max((int) Math.ceil(avg * yellowMeanMult), yellowFloor));
             return new int[]{redThreshold, yellowThreshold};
         }
 
@@ -513,8 +521,12 @@ public class AlertDataService {
                 }
 
                 double avgPerMin = minuteCount > 0 ? (double) totalErrors / minuteCount : 0;
-                int redTh = Math.max((int) Math.ceil(avgPerMin * 6), 5);
-                int yellowTh = Math.max((int) Math.ceil(avgPerMin * 3), 2);
+                double redMultiplier = alertThresholdService.getDouble("minute_red_multiplier", 6.0);
+                double yellowMultiplier = alertThresholdService.getDouble("minute_yellow_multiplier", 3.0);
+                int redFloor = (int) alertThresholdService.getDouble("minute_red_floor", 5.0);
+                int yellowFloor = (int) alertThresholdService.getDouble("minute_yellow_floor", 2.0);
+                int redTh = Math.max((int) Math.ceil(avgPerMin * redMultiplier), redFloor);
+                int yellowTh = Math.max((int) Math.ceil(avgPerMin * yellowMultiplier), yellowFloor);
                 thresholdsMap.put(service, new ServiceThresholds(redTh, yellowTh));
 
             } catch (Exception e) {

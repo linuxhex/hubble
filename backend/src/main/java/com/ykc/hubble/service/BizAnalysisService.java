@@ -18,24 +18,55 @@ public class BizAnalysisService {
 
     private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
+    private volatile String cachedLatestDate;
+    private volatile long cachedLatestDateTs;
+
+    private String latestDate() {
+        long now = System.currentTimeMillis();
+        if (cachedLatestDate != null && now - cachedLatestDateTs < 600_000) {
+            return cachedLatestDate;
+        }
+        String today = LocalDate.now().format(DT);
+        String weekAgo = LocalDate.now().minusDays(7).format(DT);
+        List<Map<String, Object>> rows = dorisQueryClient.query(
+            "SELECT MAX(dt) as maxDt FROM internal.ads.ads_station_daily_operation_dt " +
+            "WHERE dt >= '" + weekAgo + "' AND dt <= '" + today + "'");
+        if (!rows.isEmpty() && rows.get(0).get("maxDt") != null) {
+            String dt = String.valueOf(rows.get(0).get("maxDt"));
+            if (dt.length() >= 10) {
+                cachedLatestDate = dt.substring(0, 10);
+                cachedLatestDateTs = now;
+                return cachedLatestDate;
+            }
+        }
+        String fallback = LocalDate.now().minusDays(1).format(DT);
+        cachedLatestDate = fallback;
+        cachedLatestDateTs = now;
+        return fallback;
+    }
+
+    private String latestDatePlusOne() {
+        return LocalDate.parse(latestDate(), DT).plusDays(1).format(DT);
+    }
+
     public Map<String, Object> dailyOverview() {
-        String today = LocalDate.now().minusDays(1).format(DT);
+        String dt = latestDate();
         Map<String, Object> result = new LinkedHashMap<>();
 
         List<Map<String, Object>> opRows = dorisQueryClient.query(
             "SELECT SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
-            "WHERE dt = '" + today + "'");
+            "WHERE dt = '" + dt + "'");
 
         List<Map<String, Object>> gunRows = dorisQueryClient.query(
             "SELECT COUNT(*) as total, SUM(CASE WHEN gun_status = 2 THEN 1 ELSE 0 END) as charging " +
             "FROM internal.ads.ads_gun_status_dt_da_distributed " +
-            "WHERE dt = '" + today + "'");
+            "WHERE dt = '" + dt + "'");
 
         List<Map<String, Object>> dauRows = dorisQueryClient.query(
             "SELECT SUM(dau_user_cnt) as dau, SUM(ad_click_user_cnt) as adClick " +
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
-            "WHERE dt = '" + today + "'");
+            "WHERE dt = '" + dt + "'");
 
         if (!opRows.isEmpty()) {
             var row = opRows.get(0);
@@ -52,14 +83,13 @@ public class BizAnalysisService {
             result.put("dau", row.get("dau"));
             result.put("adClick", row.get("adClick"));
         }
-        result.put("date", today);
+        result.put("date", dt);
         return result;
     }
 
     public List<Map<String, Object>> monthlyTrend() {
-        // 分区数限制 365，用近 3 个月逐月汇总（避免命中分区数上限拦截）
-        String startDate = LocalDate.now().minusMonths(3).withDayOfMonth(1).format(DT);
-        String endDate = LocalDate.now().format(DT);
+        String startDate = LocalDate.parse(latestDate(), DT).minusMonths(3).withDayOfMonth(1).format(DT);
+        String endDate = latestDatePlusOne();
         List<Map<String, Object>> rows = dorisQueryClient.query(
             "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
@@ -88,8 +118,8 @@ public class BizAnalysisService {
 
     public List<Map<String, Object>> dailyOrderEnergy(int days) {
         if (days <= 0 || days > 90) days = 30;
-        String startDate = LocalDate.now().minusDays(days).format(DT);
-        String endDate = LocalDate.now().format(DT);
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT dt as statDate, SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
@@ -99,10 +129,10 @@ public class BizAnalysisService {
 
     public Map<String, Object> scenarioBreakdown() {
         Map<String, Object> result = new LinkedHashMap<>();
+        String ld = latestDate();
 
-        // 业务场景：近 30 天按 trade_mode_type 汇总（限制分区数）
-        String modeStart = LocalDate.now().minusDays(30).format(DT);
-        String modeEnd = LocalDate.now().format(DT);
+        String modeStart = LocalDate.parse(ld, DT).minusDays(30).format(DT);
+        String modeEnd = latestDatePlusOne();
         List<Map<String, Object>> modeRows = dorisQueryClient.query(
             "SELECT trade_mode_type as tradeMode, " +
             "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
@@ -112,8 +142,6 @@ public class BizAnalysisService {
             "ORDER BY trade_mode_type");
         result.put("byTradeMode", modeRows);
 
-        // 渠道拆分：昨日全天
-        String recentDt = LocalDate.now().minusDays(1).format(DT);
         List<Map<String, Object>> channelRows = dorisQueryClient.query(
             "SELECT " +
             "SUM(order_cnt_retail) as retailOrder, SUM(power_retail) as retailPower, " +
@@ -121,7 +149,7 @@ public class BizAnalysisService {
             "SUM(order_cnt_twjs) as twjsOrder, SUM(power_twjs) as twjsPower, " +
             "SUM(order_cnt_xdt) as xdtOrder, SUM(power_xdt) as xdtPower " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
-            "WHERE dt = '" + recentDt + "'");
+            "WHERE dt = '" + ld + "'");
         result.put("byChannel", channelRows);
 
         return result;
@@ -129,7 +157,7 @@ public class BizAnalysisService {
 
     public List<Map<String, Object>> activeUsersTop(int limit) {
         if (limit <= 0 || limit > 100) limit = 20;
-        String recentDt = LocalDate.now().minusDays(1).format(DT);
+        String recentDt = latestDate();
         return dorisQueryClient.query(
             "SELECT user_id as userId, total_ord_cnt as orderCnt, total_price as totalPrice " +
             "FROM internal.ads.ads_recharge_user_behavir_ord_anal_dt " +
@@ -140,8 +168,8 @@ public class BizAnalysisService {
 
     public List<Map<String, Object>> appActive(int days) {
         if (days <= 0 || days > 90) days = 30;
-        String startDate = LocalDate.now().minusDays(days).format(DT);
-        String endDate = LocalDate.now().format(DT);
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT dt as statDate, dau_user_cnt as dau, ad_click_user_cnt as adClick " +
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
@@ -150,8 +178,8 @@ public class BizAnalysisService {
     }
 
     public List<Map<String, Object>> mauTrend() {
-        String startDate = LocalDate.now().minusMonths(6).withDayOfMonth(1).format(DT);
-        String endDate = LocalDate.now().format(DT);
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusMonths(6).withDayOfMonth(1).format(DT);
         List<Map<String, Object>> dailyRows = dorisQueryClient.query(
             "SELECT dt as statDate, dau_user_cnt as dau " +
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
@@ -183,28 +211,27 @@ public class BizAnalysisService {
 
     public Map<String, Object> yearlyComparison() {
         Map<String, Object> result = new LinkedHashMap<>();
-        int currentYear = LocalDate.now().getYear();
+        String ld = latestDate();
+        String ldPlus1 = latestDatePlusOne();
+        int currentYear = LocalDate.parse(ld, DT).getYear();
         int lastYear = currentYear - 1;
 
-        // 今年：从年初到今天（限制分区数）
         String thisYearStart = currentYear + "-01-01";
-        String today = LocalDate.now().format(DT);
         List<Map<String, Object>> thisYearRows = dorisQueryClient.query(
             "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
-            "WHERE dt >= '" + thisYearStart + "' AND dt < '" + today + "' " +
+            "WHERE dt >= '" + thisYearStart + "' AND dt < '" + ldPlus1 + "' " +
             "GROUP BY DATE_FORMAT(dt, '%Y-%m') " +
             "ORDER BY monthStr");
 
-        // 去年同期：去年同范围
         String lastYearStart = lastYear + "-01-01";
-        String lastYearEnd = lastYear + LocalDate.now().format(DateTimeFormatter.ofPattern("-MM-dd"));
+        String lastYearEnd = lastYear + LocalDate.parse(ld, DT).format(DateTimeFormatter.ofPattern("-MM-dd"));
         List<Map<String, Object>> lastYearRows = dorisQueryClient.query(
             "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
-            "WHERE dt >= '" + lastYearStart + "' AND dt < '" + lastYearEnd + "' " +
+            "WHERE dt >= '" + lastYearStart + "' AND dt <= '" + lastYearEnd + "' " +
             "GROUP BY DATE_FORMAT(dt, '%Y-%m') " +
             "ORDER BY monthStr");
 
@@ -255,5 +282,103 @@ public class BizAnalysisService {
         result.put("totalLastYearPower", totalLastYearPower);
         result.put("powerYoy", totalLastYearPower > 0 ? Math.round((totalThisYearPower - totalLastYearPower) / totalLastYearPower * 10000) / 100.0 : null);
         return result;
+    }
+
+    /**
+     * 收入分析：近 N 日收入趋势 + 客单价 + 度电收入
+     */
+    public List<Map<String, Object>> revenueTrend(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        List<Map<String, Object>> rows = dorisQueryClient.query(
+            "SELECT dt as statDate, SUM(income) as income, SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY dt ORDER BY dt");
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>(row);
+            double income = ((Number) row.getOrDefault("income", 0)).doubleValue();
+            double orderCnt = ((Number) row.getOrDefault("orderCnt", 0)).doubleValue();
+            double power = ((Number) row.getOrDefault("chargedPower", 0)).doubleValue();
+            item.put("avgOrderValue", orderCnt > 0 ? Math.round(income / orderCnt * 100) / 100.0 : 0);
+            item.put("revenuePerKwh", power > 0 ? Math.round(income / power * 10000) / 100.0 : 0);
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 枪利用率趋势：近 N 日充电枪数/总枪数
+     */
+    public List<Map<String, Object>> utilizationTrend(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        List<Map<String, Object>> rows = dorisQueryClient.query(
+            "SELECT dt as statDate, " +
+            "COUNT(*) as totalGuns, " +
+            "SUM(CASE WHEN gun_status = 2 THEN 1 ELSE 0 END) as chargingGuns " +
+            "FROM internal.ads.ads_gun_status_dt_da_distributed " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY dt ORDER BY dt");
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>(row);
+            double total = ((Number) row.getOrDefault("totalGuns", 0)).doubleValue();
+            double charging = ((Number) row.getOrDefault("chargingGuns", 0)).doubleValue();
+            item.put("utilizationRate", total > 0 ? Math.round(charging / total * 10000) / 100.0 : 0);
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 区域分布：按城市统计订单量/电量/收入（近 N 日）
+     */
+    public List<Map<String, Object>> regionDistribution(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        return dorisQueryClient.query(
+            "SELECT city_name as region, " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY city_name ORDER BY orderCnt DESC LIMIT 20");
+    }
+
+    /**
+     * 站点排名：Top N 站点按订单量（近 N 日）
+     */
+    public List<Map<String, Object>> stationRanking(int days, int limit) {
+        if (days <= 0 || days > 90) days = 30;
+        if (limit <= 0 || limit > 100) limit = 20;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        return dorisQueryClient.query(
+            "SELECT station_name as stationName, " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY station_name ORDER BY orderCnt DESC LIMIT " + limit);
+    }
+
+    /**
+     * 时段分布：按小时统计订单量/电量（近 N 日平均）
+     */
+    public List<Map<String, Object>> hourlyDistribution(int days) {
+        if (days <= 0 || days > 30) days = 7;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        return dorisQueryClient.query(
+            "SELECT hour_of_day as hour, " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_station_hourly_operation_dt " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY hour_of_day ORDER BY hour_of_day");
     }
 }

@@ -88,6 +88,52 @@ public class BizAnalysisController {
         return Result.success(bizAnalysisService.yearlyComparison());
     }
 
+    @GetMapping("/revenue-trend")
+    @Operation(summary = "收入趋势+客单价+度电收入")
+    public Result<List<Map<String, Object>>> revenueTrend(
+            @RequestParam(defaultValue = "30") int days,
+            HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.revenueTrend(days));
+    }
+
+    @GetMapping("/utilization-trend")
+    @Operation(summary = "枪利用率趋势")
+    public Result<List<Map<String, Object>>> utilizationTrend(
+            @RequestParam(defaultValue = "30") int days,
+            HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.utilizationTrend(days));
+    }
+
+    @GetMapping("/region-distribution")
+    @Operation(summary = "区域分布（按城市）")
+    public Result<List<Map<String, Object>>> regionDistribution(
+            @RequestParam(defaultValue = "30") int days,
+            HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.regionDistribution(days));
+    }
+
+    @GetMapping("/station-ranking")
+    @Operation(summary = "站点排名 TopN")
+    public Result<List<Map<String, Object>>> stationRanking(
+            @RequestParam(defaultValue = "30") int days,
+            @RequestParam(defaultValue = "20") int limit,
+            HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.stationRanking(days, limit));
+    }
+
+    @GetMapping("/hourly-distribution")
+    @Operation(summary = "时段分布（按小时）")
+    public Result<List<Map<String, Object>>> hourlyDistribution(
+            @RequestParam(defaultValue = "7") int days,
+            HttpServletRequest request) {
+        checkPermission(request);
+        return Result.success(bizAnalysisService.hourlyDistribution(days));
+    }
+
     private void checkPermission(HttpServletRequest request) {
         String token = extractToken(request);
         if (token == null) {

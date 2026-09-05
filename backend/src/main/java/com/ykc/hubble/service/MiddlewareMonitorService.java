@@ -25,6 +25,9 @@ public class MiddlewareMonitorService {
     private final CloudMonitorClient cloudMonitorClient;
     private final GrafanaClient grafanaClient;
     private final MiddlewareProperties middlewareProperties;
+    private final PageDataCacheService pageDataCacheService;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final java.util.concurrent.Executor queryExecutor;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -66,6 +69,8 @@ public class MiddlewareMonitorService {
     private long redisSlowQueriesCacheTime = 0;
     private List<Map<String, Object>> mysqlSlowQueriesCache = null;
     private long mysqlSlowQueriesCacheTime = 0;
+    private List<Map<String, Object>> mysqlTopTablesCache = null;
+    private long mysqlTopTablesCacheTime = 0;
     private List<Map<String, Object>> lindormTopTablesCache = null;
     private long lindormTopTablesCacheTime = 0;
     private List<Map<String, Object>> elasticsearchTopIndicesCache = null;
@@ -90,15 +95,30 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * 查询 Redis 实例列表 + 每个实例的 CPU/连接数/内存/QPS（仅 prod 环境，带 5 分钟缓存）
+     * 查询 Redis 实例列表 + 每个实例的 CPU/连接数/内存/QPS（仅 prod 环境）
+     * 先返回 DB 缓存（快速展示），后台异步刷新最新数据覆盖缓存。
      */
     public List<Map<String, Object>> redisInstances() {
         long now = System.currentTimeMillis();
         if (redisInstancesCache != null && now - redisInstancesCacheTime < MONITOR_CACHE_TTL_MS) {
-            log.debug("Redis 实例使用缓存（{} 个）", redisInstancesCache.size());
+            log.debug("Redis 实例使用内存缓存（{} 个）", redisInstancesCache.size());
             return redisInstancesCache;
         }
 
+        // DB 缓存：先返回，后台异步刷新
+        List<Map<String, Object>> dbCached = loadFromDbCache("middleware_redis", "instances");
+        if (dbCached != null && !dbCached.isEmpty()) {
+            redisInstancesCache = dbCached;
+            redisInstancesCacheTime = now;
+            java.util.concurrent.CompletableFuture.runAsync(this::refreshRedisInstances, queryExecutor);
+            log.debug("Redis 实例使用 DB 缓存（{} 个），后台刷新中", dbCached.size());
+            return dbCached;
+        }
+
+        return refreshRedisInstances();
+    }
+
+    private List<Map<String, Object>> refreshRedisInstances() {
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             var allInstances = cloudMonitorClient.listRedisInstances();
@@ -134,7 +154,10 @@ public class MiddlewareMonitorService {
             }
 
             redisInstancesCache = list;
-            redisInstancesCacheTime = now;
+            redisInstancesCacheTime = System.currentTimeMillis();
+            if (!list.isEmpty()) {
+                saveToDbCache("middleware_redis", "instances", list);
+            }
             log.info("Redis prod 实例监控已缓存: {} 个", list.size());
         } catch (Exception e) {
             log.error("查询 Redis 监控失败: {}", e.getMessage());
@@ -162,6 +185,20 @@ public class MiddlewareMonitorService {
             return mysqlInstancesCache;
         }
 
+        List<Map<String, Object>> dbCached = loadFromDbCache("middleware_mysql", "instances");
+        if (dbCached != null && !dbCached.isEmpty()) {
+            mysqlInstancesCache = dbCached;
+            mysqlInstancesCacheTime = now;
+            java.util.concurrent.CompletableFuture.runAsync(this::refreshMysqlInstances, queryExecutor);
+            log.debug("MySQL 实例使用 DB 缓存（{} 个），后台刷新中", dbCached.size());
+            return dbCached;
+        }
+
+        return refreshMysqlInstances();
+    }
+
+    private List<Map<String, Object>> refreshMysqlInstances() {
+        long now = System.currentTimeMillis();
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             var allInstances = cloudMonitorClient.listRdsInstances();
@@ -200,6 +237,9 @@ public class MiddlewareMonitorService {
 
             mysqlInstancesCache = list;
             mysqlInstancesCacheTime = now;
+            if (!list.isEmpty()) {
+                saveToDbCache("middleware_mysql", "instances", list);
+            }
             log.info("MySQL prod 实例监控已缓存: {} 个", list.size());
         } catch (Exception e) {
             log.error("查询 MySQL 监控失败: {}", e.getMessage());
@@ -616,6 +656,31 @@ public class MiddlewareMonitorService {
             log.error("查询 OSS 监控失败: {}", e.getMessage());
         }
         return list;
+    }
+
+    /**
+     * 从 DB 缓存加载 List<Map> 数据（stale-while-revalidate 模式的快速展示路径）
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> loadFromDbCache(String pageKey, String dataKey) {
+        String rawJson = pageDataCacheService.getRaw(pageKey, dataKey);
+        if (rawJson == null || rawJson.isEmpty()) return null;
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(rawJson,
+                new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            log.warn("反序列化 DB 缓存失败: pageKey={}, dataKey={}", pageKey, dataKey);
+            return null;
+        }
+    }
+
+    /**
+     * 保存数据到 DB 缓存（10 分钟 TTL，近几日数据可查便于环比）
+     */
+    private void saveToDbCache(String pageKey, String dataKey, List<Map<String, Object>> data) {
+        if (data != null && !data.isEmpty()) {
+            pageDataCacheService.save(pageKey, dataKey, data, 10);
+        }
     }
 
     /**
@@ -1045,10 +1110,58 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * MySQL Top Tables（需要直接连接数据库，当前返回空列表）
+     * MySQL Top Tables：从 Aliyun Prometheus 获取 RDS/PolarDB 各库的磁盘使用率作为 Top Tables 代理指标
      */
     public List<Map<String, Object>> mysqlTopTables() {
-        return new ArrayList<>();
+        long now = System.currentTimeMillis();
+        if (mysqlTopTablesCache != null && now - mysqlTopTablesCacheTime < MONITOR_CACHE_TTL_MS) {
+            return mysqlTopTablesCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            String ds = grafanaClient.getAliyunDsUid();
+
+            // RDS 磁盘使用率
+            var rdsRows = grafanaClient.queryInstant(
+                    "count by (desc) (AliyunRds_DiskUsage{desc=~\"prod-.*\"})", ds);
+            for (var row : rdsRows) {
+                String desc = String.valueOf(row.getOrDefault("desc", ""));
+                if (desc.isEmpty()) continue;
+                var disk = grafanaClient.queryInstant("AliyunRds_DiskUsage{desc=\"" + desc + "\"}", ds);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("tableName", desc);
+                item.put("engine", "RDS");
+                item.put("diskUsage", extractValue(disk));
+                list.add(item);
+            }
+
+            // PolarDB 磁盘使用率
+            var polardbRows = grafanaClient.queryInstant(
+                    "count by (desc) (AliyunPolardb_cluster_disk_utilization{desc=~\"prod-.*\"})", ds);
+            for (var row : polardbRows) {
+                String desc = String.valueOf(row.getOrDefault("desc", ""));
+                if (desc.isEmpty()) continue;
+                var disk = grafanaClient.queryInstant(
+                        "avg by (desc) (AliyunPolardb_cluster_disk_utilization{desc=\"" + desc + "\"})", ds);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("tableName", desc);
+                item.put("engine", "PolarDB");
+                item.put("diskUsage", extractValue(disk));
+                list.add(item);
+            }
+
+            list.sort((a, b) -> Double.compare(
+                    ((Number) b.getOrDefault("diskUsage", 0)).doubleValue(),
+                    ((Number) a.getOrDefault("diskUsage", 0)).doubleValue()));
+
+            mysqlTopTablesCache = list;
+            mysqlTopTablesCacheTime = now;
+            log.info("MySQL Top Tables: {} 个（已缓存）", list.size());
+        } catch (Exception e) {
+            log.error("查询 MySQL Top Tables 失败: {}", e.getMessage());
+        }
+        return list;
     }
 
     /**

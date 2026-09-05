@@ -42,6 +42,7 @@ public class MonitorSnapshotService {
     private final AlertPushService alertPushService;
     private final DingTalkClient dingTalkClient;
     private final AlertChartGenerator alertChartGenerator;
+    private final AlertThresholdService alertThresholdService;
     private final DingtalkRobotService dingtalkRobotService;
 
     private final Map<Long, Long> lastCollectAt = new ConcurrentHashMap<>();
@@ -192,9 +193,10 @@ public class MonitorSnapshotService {
                 int consecutive = consecutiveRedCount.merge(cfg.getId(), 1, Integer::sum);
                 long nowMs = System.currentTimeMillis();
                 Long lastSent = lastAlertTime.get(cfg.getId());
-                long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时
+                long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000);
+                int consecutiveThreshold = (int) alertThresholdService.getDouble("consecutive_red_count", 3.0);
 
-                if (consecutive >= 3 && (lastSent == null || nowMs - lastSent >= cooldownMs)) {
+                if (consecutive >= consecutiveThreshold && (lastSent == null || nowMs - lastSent >= cooldownMs)) {
                     // SSE 广播 + 钉钉群告警
                     alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
                     sendDingTalkAlert(cfg, count, now, status, effectiveThreshold);
@@ -394,8 +396,15 @@ public class MonitorSnapshotService {
                     .sum() / n;
             double stddev = Math.sqrt(variance);
 
-            int redThreshold = Math.max((int) Math.ceil(avg + 3 * stddev), Math.max((int) Math.ceil(avg * 5.0), 10));
-            int yellowThreshold = Math.max((int) Math.ceil(avg + 2 * stddev), Math.max((int) Math.ceil(avg * 3.0), 5));
+            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 3.0);
+            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 2.0);
+            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 5.0);
+            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 3.0);
+            int redFloor = (int) alertThresholdService.getDouble("dynamic_red_floor", 10.0);
+            int yellowFloor = (int) alertThresholdService.getDouble("dynamic_yellow_floor", 5.0);
+
+            int redThreshold = Math.max((int) Math.ceil(avg + redSigma * stddev), Math.max((int) Math.ceil(avg * redMeanMult), redFloor));
+            int yellowThreshold = Math.max((int) Math.ceil(avg + yellowSigma * stddev), Math.max((int) Math.ceil(avg * yellowMeanMult), yellowFloor));
             log.debug("动态阈值计算: n={}, avg={}, σ={}, red={}, yellow={}",
                     n, avg, stddev, redThreshold, yellowThreshold);
             return new int[]{redThreshold, yellowThreshold};

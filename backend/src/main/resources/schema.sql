@@ -98,3 +98,15 @@ CREATE TABLE IF NOT EXISTS alert_threshold_config (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );
+
+-- 业务链路（trace 管理）
+CREATE TABLE IF NOT EXISTS business_trace (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(200) NOT NULL COMMENT '业务名称',
+  description VARCHAR(500) COMMENT '业务描述',
+  category VARCHAR(100) COMMENT '业务分类',
+  deleted INT DEFAULT 0 COMMENT '删除标记',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
