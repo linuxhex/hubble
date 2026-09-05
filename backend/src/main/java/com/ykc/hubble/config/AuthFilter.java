@@ -52,6 +52,8 @@ public class AuthFilter extends OncePerRequestFilter {
             "/alert-data/trace-logs",
             "/alert-data/sse",
             "/error-analysis/query",
+            "/alert-threshold/",
+            "/dingtalk-robot/",
 
             // 网关大盘和日志搜索接口
             "/gateway/",
@@ -61,6 +63,9 @@ public class AuthFilter extends OncePerRequestFilter {
 
             // 中间件告警接口（无需用户认证）
             "/middleware-alert/",
+
+            // 经营分析接口（无需用户认证）
+            "/biz-analysis/",
 
             // AI 对话 WebSocket（握手阶段放行，onOpen 内校验 JWT）
             "/ws/ai/chat"
@@ -74,13 +79,15 @@ public class AuthFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         
         String requestPath = request.getRequestURI();
-        String contextPath = request.getContextPath();
         
-        // 去掉 context-path 前缀，获取相对路径
-        String relativePath = requestPath;
-        if (contextPath != null && !contextPath.isEmpty() && requestPath.startsWith(contextPath)) {
-            relativePath = requestPath.substring(contextPath.length());
+        // 只拦截 /api/ 路径，其他路径（静态资源、前端路由）直接放行
+        if (!requestPath.startsWith("/api/")) {
+            filterChain.doFilter(request, response);
+            return;
         }
+        
+        // 去掉 /api 前缀，获取 Controller 相对路径
+        String relativePath = requestPath.substring(4);
         
         // 检查是否为排除路径
         if (isExcludePath(relativePath)) {

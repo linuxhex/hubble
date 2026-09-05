@@ -93,16 +93,16 @@ class GatewayServiceAlertTest {
     // ==================== 接口劣化告警 ====================
 
     @Test
-    @DisplayName("劣化幅度>220% 且 当前RT>100ms → 应告警")
+    @DisplayName("劣化幅度>220% 且 当前RT>300ms → 应告警")
     void degradation_highRate_highRt_shouldAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 200.0, 1000)));
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 500.0, 1000)));
         verify(alertPushService, times(1)).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
-    @DisplayName("劣化幅度>220% 但 当前RT<=100ms → 不告警（低RT接口劣化无实际影响）")
+    @DisplayName("劣化幅度>220% 但 当前RT<=300ms → 不告警（低RT接口劣化无实际影响）")
     void degradation_highRate_lowRt_shouldNotAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 80.0, 1000)));
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 200.0, 1000)));
         verify(alertPushService, never()).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 
@@ -114,9 +114,9 @@ class GatewayServiceAlertTest {
     }
 
     @Test
-    @DisplayName("当前RT恰好100ms → 不告警（边界，必须 >100ms）")
-    void degradation_boundaryRt100_shouldNotAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 100.0, 1000)));
+    @DisplayName("当前RT恰好300ms → 不告警（边界，必须 >300ms）")
+    void degradation_boundaryRt300_shouldNotAlert() throws Exception {
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 300.0, 1000)));
         verify(alertPushService, never()).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 

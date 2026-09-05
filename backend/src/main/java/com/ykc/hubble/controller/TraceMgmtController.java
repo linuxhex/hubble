@@ -22,7 +22,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/traces/mgmt")
+@RequestMapping("/api/traces/mgmt")
 @RequiredArgsConstructor
 @Tag(name = "业务链路管理服务", description = "业务链路配置的增删改查")
 public class TraceMgmtController {

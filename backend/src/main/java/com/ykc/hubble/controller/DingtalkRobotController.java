@@ -17,7 +17,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/dingtalk-robot")
+@RequestMapping("/api/dingtalk-robot")
 @RequiredArgsConstructor
 @Tag(name = "钉钉机器人管理", description = "多机器人 CRUD 与测试发送")
 public class DingtalkRobotController {

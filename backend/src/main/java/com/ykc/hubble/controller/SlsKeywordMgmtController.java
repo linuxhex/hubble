@@ -22,7 +22,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/sls-keywords/mgmt")
+@RequestMapping("/api/sls-keywords/mgmt")
 @RequiredArgsConstructor
 @Tag(name = "SLS关键字模版管理", description = "SLS关键字模版的增删改查")
 public class SlsKeywordMgmtController {

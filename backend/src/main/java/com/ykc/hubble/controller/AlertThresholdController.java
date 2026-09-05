@@ -15,7 +15,7 @@ import java.util.Map;
  * 告警阈值配置：接口劣化/流量暴涨/红黄盘等阈值统一管理。
  */
 @RestController
-@RequestMapping("/alert-threshold")
+@RequestMapping("/api/alert-threshold")
 @RequiredArgsConstructor
 @Tag(name = "告警阈值配置", description = "服务告警阈值统一配置")
 public class AlertThresholdController {

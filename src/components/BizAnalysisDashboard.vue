@@ -174,7 +174,7 @@ const renderMonthlyChart = () => {
   if (!monthlyChartRef.value || monthlyData.value.length === 0) return
   if (monthlyChart) monthlyChart.dispose()
   monthlyChart = echarts.init(monthlyChartRef.value)
-  const months = monthlyData.value.map(d => d.month)
+  const months = monthlyData.value.map(d => d.monthStr)
   const orders = monthlyData.value.map(d => Number(d.orderCnt || 0))
   const powers = monthlyData.value.map(d => Number(d.chargedPower || 0))
   monthlyChart.setOption({
@@ -225,7 +225,7 @@ const renderDailyChart = () => {
   if (!dailyChartRef.value || dailyData.value.length === 0) return
   if (dailyChart) dailyChart.dispose()
   dailyChart = echarts.init(dailyChartRef.value)
-  const dates = dailyData.value.map(d => d.date)
+  const dates = dailyData.value.map(d => d.statDate)
   const orders = dailyData.value.map(d => Number(d.orderCnt || 0))
   const powers = dailyData.value.map(d => Number(d.chargedPower || 0))
   dailyChart.setOption({
@@ -247,7 +247,7 @@ const renderAppActiveChart = () => {
   if (!appActiveChartRef.value || appActiveData.value.length === 0) return
   if (appActiveChart) appActiveChart.dispose()
   appActiveChart = echarts.init(appActiveChartRef.value)
-  const dates = appActiveData.value.map(d => d.date)
+  const dates = appActiveData.value.map(d => d.statDate)
   const dau = appActiveData.value.map(d => Number(d.dau || 0))
   const clicks = appActiveData.value.map(d => Number(d.adClick || 0))
   appActiveChart.setOption({

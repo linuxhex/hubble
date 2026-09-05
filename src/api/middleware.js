@@ -103,3 +103,15 @@ export function getLindormTopTables() {
 export function getElasticsearchTopIndices() {
   return request.get('/middleware/elasticsearch/top-indices')
 }
+
+export function getDbInstances() {
+  return request.get('/middleware/db/instances')
+}
+
+export function getDruidInstances() {
+  return request.get('/middleware/druid/instances')
+}
+
+export function getJvmInstances() {
+  return request.get('/middleware/jvm/instances')
+}

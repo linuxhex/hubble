@@ -68,9 +68,9 @@ public class DorisQueryClient {
                 return List.of();
             }
 
-            return parseMcpResponse(response);
+            return parseMcpResponse(response, trimmed);
         } catch (Exception e) {
-            log.error("Doris 查询失败: {}", e.getMessage());
+            log.error("Doris 查询失败, SQL: {}, 错误: {}", trimmed.substring(0, Math.min(100, trimmed.length())), e.getMessage());
             return List.of();
         }
     }
@@ -79,24 +79,30 @@ public class DorisQueryClient {
      * 解析 MCP JSON-RPC 响应，提取 query_doris 结果行。
      * 响应结构：{result: {content: [{text: "{error_code:0, result:{data:[[...]], meta:[{name,...}]}}"]}}
      */
-    private List<Map<String, Object>> parseMcpResponse(String response) {
+    private List<Map<String, Object>> parseMcpResponse(String response, String sql) {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
-            // MCP 端点返回 SSE 格式（event: message\ndata: {json}），需提取 data: 后的 JSON
             String json = extractJsonFromSse(response);
             JsonNode root = objectMapper.readTree(json);
 
-            // MCP 响应：result.content[0].text 是内层 JSON 字符串
             JsonNode textNode = root.path("result").path("content").path(0).path("text");
             String innerJson;
             if (textNode.isTextual()) {
                 innerJson = textNode.asText();
             } else {
-                // 兜底：可能直接是 data 结构
                 innerJson = json;
             }
 
             JsonNode inner = objectMapper.readTree(innerJson);
+
+            int errorCode = inner.path("error_code").asInt(0);
+            if (errorCode != 0) {
+                String errorMsg = inner.path("error_msg").asText("unknown");
+                log.warn("Doris 查询返回错误, SQL: {}, error_code: {}, error_msg: {}",
+                    sql.substring(0, Math.min(100, sql.length())), errorCode, errorMsg);
+                return List.of();
+            }
+
             JsonNode resultNode = inner.path("result");
             JsonNode dataNode = resultNode.path("data");
             JsonNode metaNode = resultNode.path("meta");

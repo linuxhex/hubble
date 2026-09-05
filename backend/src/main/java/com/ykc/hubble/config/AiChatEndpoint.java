@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Component
-@ServerEndpoint("/ws/ai/chat")
+@ServerEndpoint("/api/ws/ai/chat")
 public class AiChatEndpoint {
 
     private static AiChatService aiChatService;

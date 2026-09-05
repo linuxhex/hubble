@@ -12,7 +12,7 @@ import java.util.Map;
  * 中间件监控：Redis + MySQL/PolarDB
  */
 @RestController
-@RequestMapping("/middleware")
+@RequestMapping("/api/middleware")
 @RequiredArgsConstructor
 public class MiddlewareController {
 
@@ -116,5 +116,20 @@ public class MiddlewareController {
     @GetMapping("/elasticsearch/top-indices")
     public Result<List<Map<String, Object>>> elasticsearchTopIndices() {
         return Result.success(middlewareMonitorService.elasticsearchTopIndices());
+    }
+
+    @GetMapping("/db/instances")
+    public Result<List<Map<String, Object>>> dbInstances() {
+        return Result.success(middlewareMonitorService.dbInstances());
+    }
+
+    @GetMapping("/druid/instances")
+    public Result<List<Map<String, Object>>> druidInstances() {
+        return Result.success(middlewareMonitorService.druidInstances());
+    }
+
+    @GetMapping("/jvm/instances")
+    public Result<List<Map<String, Object>>> jvmInstances() {
+        return Result.success(middlewareMonitorService.jvmInstances());
     }
 }

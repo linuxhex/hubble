@@ -1,7 +1,5 @@
 server:
   port: 8080
-  servlet:
-    context-path: /api
 
 spring:
   application:
@@ -73,6 +71,7 @@ grafana:
   pass: ${GRAFANA_PASS:}
   ds-uid: ${GRAFANA_DS_UID:6A__NzsMk}
   node-ds-uid: ${GRAFANA_NODE_DS_UID:cem0jt0mij668b}
+  aliyun-ds-uid: ${GRAFANA_ALIYUN_DS_UID:l9II0lm4z}
 
 # 中间件实例配置（CloudMonitor 通用查询，无需独立 SDK）
 middleware:

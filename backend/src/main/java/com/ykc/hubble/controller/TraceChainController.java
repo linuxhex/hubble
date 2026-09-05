@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/gateway/trace")
+@RequestMapping("/api/gateway/trace")
 @RequiredArgsConstructor
 public class TraceChainController {
 

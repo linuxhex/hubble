@@ -20,7 +20,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/sls-keywords/query")
+@RequestMapping("/api/sls-keywords/query")
 @RequiredArgsConstructor
 @Tag(name = "SLS关键字模版管理", description = "SLS关键字模版的增删改查")
 public class SlsKeywordQueryController {

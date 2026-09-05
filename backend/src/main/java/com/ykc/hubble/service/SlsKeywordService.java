@@ -88,13 +88,13 @@ public class SlsKeywordService {
         @SuppressWarnings("unchecked")
         List<SlsKeyword> pageList = (List<SlsKeyword>) queryResult.get("list");
         Long total = (Long) queryResult.get("total");
-        
-        // 转换为VO
-        List<SlsKeywordVO> voList = pageList.stream().map(slsKeyword -> {
+
+        // 转换为VO（处理空列表情况）
+        List<SlsKeywordVO> voList = (pageList != null) ? pageList.stream().map(slsKeyword -> {
             SlsKeywordVO vo = new SlsKeywordVO();
             BeanUtils.copyProperties(slsKeyword, vo);
             return vo;
-        }).collect(Collectors.toList());
+        }).collect(Collectors.toList()) : new ArrayList<>();
         
         Map<String, Object> result = new HashMap<>();
         result.put("total", total);

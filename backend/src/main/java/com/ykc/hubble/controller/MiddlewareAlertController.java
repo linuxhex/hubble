@@ -14,7 +14,7 @@ import java.util.*;
 
 @Slf4j
 @RestController
-@RequestMapping("/middleware-alert")
+@RequestMapping("/api/middleware-alert")
 @RequiredArgsConstructor
 @Tag(name = "中间件告警配置", description = "中间件监控告警阈值配置与检查")
 public class MiddlewareAlertController {

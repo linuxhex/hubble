@@ -20,7 +20,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/error-analysis")
+@RequestMapping("/api/error-analysis")
 @RequiredArgsConstructor
 @Tag(name = "错误分析服务", description = "错误类型排行与趋势")
 public class ErrorAnalysisController {

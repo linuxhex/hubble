@@ -17,7 +17,7 @@ import java.util.Map;
 
 @Slf4j
 @RestController
-@RequestMapping("/biz-analysis")
+@RequestMapping("/api/biz-analysis")
 @RequiredArgsConstructor
 @Tag(name = "经营分析", description = "经营分析数据（仅 lianzi 可见）")
 public class BizAnalysisController {

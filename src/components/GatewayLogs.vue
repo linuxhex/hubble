@@ -605,8 +605,14 @@ const handleUrlClick = (row) => {
   margin: 0 !important;
 }
 
+.no-margin :deep(.el-form-item__content) {
+  display: flex;
+  align-items: center;
+}
+
 .operation-buttons {
   display: flex;
+  align-items: center;
   flex-wrap: nowrap;
   gap: 6px;
   margin-left: auto !important;

@@ -20,7 +20,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/alert-config")
+@RequestMapping("/api/alert-config")
 @RequiredArgsConstructor
 @Tag(name = "日志监控配置服务", description = "监控项的增删改查与启停")
 public class AlertConfigController {

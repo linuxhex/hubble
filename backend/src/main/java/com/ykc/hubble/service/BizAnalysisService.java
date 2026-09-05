@@ -61,12 +61,12 @@ public class BizAnalysisService {
         String startDate = LocalDate.now().minusMonths(3).withDayOfMonth(1).format(DT);
         String endDate = LocalDate.now().format(DT);
         List<Map<String, Object>> rows = dorisQueryClient.query(
-            "SELECT DATE_FORMAT(dt, '%Y-%m') as `month`, " +
+            "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY DATE_FORMAT(dt, '%Y-%m') " +
-            "ORDER BY `month`");
+            "ORDER BY monthStr");
 
         List<Map<String, Object>> result = new ArrayList<>();
         for (int i = 0; i < rows.size(); i++) {
@@ -91,7 +91,7 @@ public class BizAnalysisService {
         String startDate = LocalDate.now().minusDays(days).format(DT);
         String endDate = LocalDate.now().format(DT);
         return dorisQueryClient.query(
-            "SELECT dt as `date`, SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "SELECT dt as statDate, SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY dt ORDER BY dt");
@@ -143,7 +143,7 @@ public class BizAnalysisService {
         String startDate = LocalDate.now().minusDays(days).format(DT);
         String endDate = LocalDate.now().format(DT);
         return dorisQueryClient.query(
-            "SELECT dt as `date`, dau_user_cnt as dau, ad_click_user_cnt as adClick " +
+            "SELECT dt as statDate, dau_user_cnt as dau, ad_click_user_cnt as adClick " +
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "ORDER BY dt");
@@ -153,16 +153,16 @@ public class BizAnalysisService {
         String startDate = LocalDate.now().minusMonths(6).withDayOfMonth(1).format(DT);
         String endDate = LocalDate.now().format(DT);
         List<Map<String, Object>> dailyRows = dorisQueryClient.query(
-            "SELECT dt as `date`, dau_user_cnt as dau " +
+            "SELECT dt as statDate, dau_user_cnt as dau " +
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "ORDER BY dt");
 
         Map<String, List<Double>> monthlyDau = new LinkedHashMap<>();
         for (Map<String, Object> row : dailyRows) {
-            String date = String.valueOf(row.get("date"));
-            if (date.length() >= 7) {
-                String month = date.substring(0, 7);
+            String dateStr = String.valueOf(row.get("statDate"));
+            if (dateStr.length() >= 7) {
+                String month = dateStr.substring(0, 7);
                 double dau = ((Number) row.getOrDefault("dau", 0)).doubleValue();
                 monthlyDau.computeIfAbsent(month, k -> new ArrayList<>()).add(dau);
             }
@@ -190,28 +190,28 @@ public class BizAnalysisService {
         String thisYearStart = currentYear + "-01-01";
         String today = LocalDate.now().format(DT);
         List<Map<String, Object>> thisYearRows = dorisQueryClient.query(
-            "SELECT DATE_FORMAT(dt, '%Y-%m') as `month`, " +
+            "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + thisYearStart + "' AND dt < '" + today + "' " +
             "GROUP BY DATE_FORMAT(dt, '%Y-%m') " +
-            "ORDER BY `month`");
+            "ORDER BY monthStr");
 
         // 去年同期：去年同范围
         String lastYearStart = lastYear + "-01-01";
         String lastYearEnd = lastYear + LocalDate.now().format(DateTimeFormatter.ofPattern("-MM-dd"));
         List<Map<String, Object>> lastYearRows = dorisQueryClient.query(
-            "SELECT DATE_FORMAT(dt, '%Y-%m') as `month`, " +
+            "SELECT DATE_FORMAT(dt, '%Y-%m') as monthStr, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
             "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + lastYearStart + "' AND dt < '" + lastYearEnd + "' " +
             "GROUP BY DATE_FORMAT(dt, '%Y-%m') " +
-            "ORDER BY `month`");
+            "ORDER BY monthStr");
 
         Map<String, Map<String, Object>> lastYearMap = new LinkedHashMap<>();
         for (Map<String, Object> row : lastYearRows) {
-            String month = String.valueOf(row.get("month"));
-            String monthKey = month.length() >= 7 ? month.substring(5) : month;
+            String monthVal = String.valueOf(row.get("monthStr"));
+            String monthKey = monthVal.length() >= 7 ? monthVal.substring(5) : monthVal;
             lastYearMap.put(monthKey, row);
         }
 
@@ -220,8 +220,8 @@ public class BizAnalysisService {
         double totalThisYearPower = 0, totalLastYearPower = 0;
 
         for (Map<String, Object> row : thisYearRows) {
-            String month = String.valueOf(row.get("month"));
-            String monthKey = month.length() >= 7 ? month.substring(5) : month;
+            String monthVal = String.valueOf(row.get("monthStr"));
+            String monthKey = monthVal.length() >= 7 ? monthVal.substring(5) : monthVal;
             Map<String, Object> lastRow = lastYearMap.get(monthKey);
 
             double thisOrder = ((Number) row.getOrDefault("orderCnt", 0)).doubleValue();

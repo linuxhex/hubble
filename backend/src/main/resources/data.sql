@@ -39,7 +39,7 @@ INSERT INTO middleware_alert_config (middleware_type, instance_id, metric_name, 
 -- 预置告警阈值配置
 INSERT INTO alert_threshold_config (config_key, config_value, description) VALUES
 ('degradation_threshold', '220', '接口劣化告警幅度阈值(%)'),
-('degradation_min_rt', '100', '接口劣化告警最小RT阈值(ms)，低于此值不告警'),
+('degradation_min_rt', '300', '接口劣化告警最小RT阈值(ms)，低于此值不告警'),
 ('traffic_surge_threshold', '200', '流量暴涨告警涨幅阈值(%)'),
 ('traffic_surge_min_qps', '50', '流量暴涨告警最小QPS，低于此值不告警'),
 ('minute_red_threshold', '50', '分钟级红盘阈值（错误数）'),

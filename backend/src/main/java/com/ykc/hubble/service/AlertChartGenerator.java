@@ -171,14 +171,16 @@ public class AlertChartGenerator {
 
         if (points.size() < 2) {
             points = new java.util.ArrayList<>(points);
-            int interval = 60;
-            long startTime = nowSec - interval * 10;
-            for (int i = 0; i < 10; i++) {
-                long t = startTime + (long) i * interval;
-                long v = (long) (currentCount * (0.3 + 0.7 * Math.random()));
-                points.add(new SnapshotPoint(t, v));
+            if (points.isEmpty()) {
+                int interval = 60;
+                long startTime = nowSec - interval * 10;
+                for (int i = 0; i <= 10; i++) {
+                    long t = startTime + (long) i * interval;
+                    points.add(new SnapshotPoint(t, currentCount));
+                }
+            } else if (points.size() == 1) {
+                points.add(new SnapshotPoint(nowSec, currentCount));
             }
-            points.add(new SnapshotPoint(nowSec, currentCount));
         }
 
         long minTime = points.get(0).getCollectedAt();

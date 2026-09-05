@@ -23,7 +23,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/system")
+@RequestMapping("/api/system")
 @RequiredArgsConstructor
 @Tag(name = "系统管理", description = "系统健康检查和身份验证")
 public class SystemController {

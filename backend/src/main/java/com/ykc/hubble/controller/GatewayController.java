@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/gateway")
+@RequestMapping("/api/gateway")
 @RequiredArgsConstructor
 public class GatewayController {
 

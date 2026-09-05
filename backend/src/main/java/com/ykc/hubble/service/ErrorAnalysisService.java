@@ -84,12 +84,85 @@ public class ErrorAnalysisService {
     }
 
     /**
-     * 错误数趋势（P0 返回空结构，前端兼容；P1 接入分桶统计）
+     * 错误数趋势：按时间桶分桶统计 ERROR 日志数量
      */
     public Map<String, Object> errorTrend(Long configId, String timeRange) {
         Map<String, Object> result = new HashMap<>();
-        result.put("timestamps", List.of());
-        result.put("counts", List.of());
+
+        try {
+            AlertConfig cfg = alertConfigService.detail(configId);
+            String logstore;
+            String filterQuery;
+
+            if (cfg != null && cfg.getKeywordTemplateId() != null) {
+                SlsKeywordVO template = slsKeywordService.getSlsKeywordDetail(cfg.getKeywordTemplateId());
+                logstore = (template != null && template.getLogstore() != null && !template.getLogstore().isBlank())
+                        ? template.getLogstore()
+                        : monitorProperties.getDefaultQueryLogstore();
+                String keywords = template != null ? template.getKeywords() : null;
+                filterQuery = (keywords != null && !keywords.isBlank())
+                        ? keywords + " and level: ERROR"
+                        : "level: ERROR";
+            } else {
+                logstore = monitorProperties.getDefaultQueryLogstore();
+                filterQuery = "level: ERROR";
+            }
+
+            long now = System.currentTimeMillis() / 1000;
+            long from = now - TimeRanges.toSeconds(timeRange);
+            long rangeSeconds = now - from;
+
+            String bucketFormat;
+            int limit;
+            if (rangeSeconds <= 3600) {
+                bucketFormat = "%Y-%m-%d %H:%i";
+                limit = 60;
+            } else if (rangeSeconds <= 21600) {
+                bucketFormat = "%Y-%m-%d %H:%i";
+                limit = 200;
+            } else if (rangeSeconds <= 86400) {
+                bucketFormat = "%Y-%m-%d %H:00";
+                limit = 24;
+            } else {
+                bucketFormat = "%Y-%m-%d";
+                limit = 30;
+            }
+
+            String query = filterQuery + " | SELECT " +
+                    "date_format(from_unixtime(__time__), '" + bucketFormat + "') as time_bucket, " +
+                    "count(*) as cnt " +
+                    "GROUP BY time_bucket " +
+                    "ORDER BY time_bucket ASC " +
+                    "LIMIT " + limit;
+
+            List<Map<String, String>> rows = slsQueryClient.queryAnalytics(logstore, query, from, now, limit);
+
+            List<Long> timestamps = new ArrayList<>();
+            List<Long> counts = new ArrayList<>();
+
+            for (Map<String, String> row : rows) {
+                String timeBucket = row.getOrDefault("time_bucket", "");
+                long cnt = 0;
+                try {
+                    cnt = Long.parseLong(row.getOrDefault("cnt", "0"));
+                } catch (NumberFormatException ignored) {
+                }
+
+                Long ts = parseTimeToMillis(timeBucket);
+                if (ts != null) {
+                    timestamps.add(ts);
+                    counts.add(cnt);
+                }
+            }
+
+            result.put("timestamps", timestamps);
+            result.put("counts", counts);
+        } catch (Exception e) {
+            log.error("查询错误趋势失败 configId={}: {}", configId, e.getMessage(), e);
+            result.put("timestamps", List.of());
+            result.put("counts", List.of());
+        }
+
         return result;
     }
 

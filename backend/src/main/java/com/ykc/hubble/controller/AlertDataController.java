@@ -24,7 +24,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/alert-data")
+@RequestMapping("/api/alert-data")
 @RequiredArgsConstructor
 @Tag(name = "日志监控数据服务", description = "实时统计、时序明细、下钻与推送")
 public class AlertDataController {

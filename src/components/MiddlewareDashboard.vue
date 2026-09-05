@@ -13,6 +13,7 @@
           <el-radio-button value="oss">OSS</el-radio-button>
           <el-radio-button value="pod">Pod</el-radio-button>
           <el-radio-button value="node">Node</el-radio-button>
+          <el-radio-button value="jvm">JVM</el-radio-button>
         </el-radio-group>
         <el-button size="small" @click="fetchData" :loading="loading">刷新</el-button>
         <el-button size="small" @click="handleExport">导出</el-button>
@@ -20,7 +21,7 @@
     </div>
 
     <!-- 告警摘要 -->
-    <div v-if="alertSummary.total > 0 && !['pod','node'].includes(activeTab)" class="alert-summary-bar">
+    <div v-if="alertSummary.total > 0 && !['pod','node','jvm'].includes(activeTab)" class="alert-summary-bar">
       <el-alert
         v-if="alertSummary.redCount > 0"
         :title="`${alertSummary.redCount} 个实例红盘告警`"
@@ -140,23 +141,6 @@
 
       <div class="sub-section">
         <el-tabs v-model="mysqlSubTab" type="card" size="small">
-          <el-tab-pane label="Top 表 Top10" name="topTables">
-            <el-table :data="mysqlTopTablesData" stripe border size="small" style="width: 100%">
-              <el-table-column label="#" width="50" prop="rank" align="center" />
-              <el-table-column label="表名" min-width="200" show-overflow-tooltip prop="tableName" />
-              <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
-              <el-table-column label="引擎" width="80" prop="engine" />
-              <el-table-column label="行数" width="110" align="right">
-                <template #default="{ row }">{{ Number(row.rowCount).toLocaleString() }}</template>
-              </el-table-column>
-              <el-table-column label="数据大小" width="110" align="right">
-                <template #default="{ row }">{{ row.dataSizeMB.toFixed(0) }} MB</template>
-              </el-table-column>
-              <el-table-column label="索引大小" width="110" align="right">
-                <template #default="{ row }">{{ row.indexSizeMB.toFixed(0) }} MB</template>
-              </el-table-column>
-            </el-table>
-          </el-tab-pane>
           <el-tab-pane label="慢查询 Top10" name="slowQueries">
             <el-table :data="mysqlSlowQueriesData" stripe border size="small" style="width: 100%">
               <el-table-column label="#" width="50" prop="rank" align="center" />
@@ -170,6 +154,46 @@
               </el-table-column>
               <el-table-column label="返回行" width="100" align="right">
                 <template #default="{ row }">{{ Number(row.rowsReturned).toLocaleString() }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="DB 分库监控" name="dbShard">
+            <el-table :data="dbData" stripe border size="small" style="width: 100%">
+              <el-table-column label="排名" width="60" type="index" />
+              <el-table-column label="实例" min-width="250" show-overflow-tooltip prop="instanceName" />
+              <el-table-column label="引擎" width="100" prop="engine" />
+              <el-table-column label="CPU%" width="100" align="right">
+                <template #default="{ row }">
+                  <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="内存%" width="100" align="right">
+                <template #default="{ row }">
+                  <span :class="metricClass(row.memoryUsage)">{{ row.memoryUsage.toFixed(1) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="IOPS%" width="100" align="right">
+                <template #default="{ row }">{{ row.iops.toFixed(1) }}%</template>
+              </el-table-column>
+              <el-table-column label="活跃会话" width="120" align="right">
+                <template #default="{ row }">{{ row.activeSessions.toFixed(1) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="Druid 连接池" name="druid">
+            <el-table :data="druidData" stripe border size="small" style="width: 100%">
+              <el-table-column label="排名" width="60" type="index" />
+              <el-table-column label="应用" min-width="200" show-overflow-tooltip prop="application" />
+              <el-table-column label="活动连接" width="110" align="right" prop="activeCount" />
+              <el-table-column label="最大连接" width="110" align="right" prop="maxActive" />
+              <el-table-column label="使用率%" width="110" align="right">
+                <template #default="{ row }">
+                  <span :class="metricClass(row.usageRate)">{{ row.usageRate.toFixed(1) }}%</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="等待线程" width="110" align="right" prop="waitThreadCount" />
+              <el-table-column label="SQL执行/s" width="120" align="right">
+                <template #default="{ row }">{{ row.sqlExecuteRate.toFixed(1) }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
@@ -450,6 +474,31 @@
       </el-table>
       <el-empty v-if="!loading && nodeData.length === 0" description="暂无 Node 数据" />
     </div>
+
+    <!-- JVM 监控 -->
+    <div v-if="activeTab === 'jvm'" class="monitor-section">
+      <el-table v-loading="loading" :data="jvmData" stripe border size="small" style="width: 100%">
+        <el-table-column label="排名" width="60" type="index" />
+        <el-table-column label="应用" min-width="200" show-overflow-tooltip prop="application" />
+        <el-table-column label="堆内存%" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="metricClass(row.heapUsage)">{{ row.heapUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="GC/s" width="100" align="right">
+          <template #default="{ row }">{{ row.gcRate.toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="QPS" width="110" align="right">
+          <template #default="{ row }">{{ row.qps.toFixed(1) }}</template>
+        </el-table-column>
+        <el-table-column label="CPU%" width="100" align="right">
+          <template #default="{ row }">
+            <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!loading && jvmData.length === 0" description="暂无 JVM 数据" />
+    </div>
   </div>
 </template>
 
@@ -462,15 +511,16 @@ import {
   getPodCpuTop, getPodMemoryTop, getNodeOverview,
   getRocketmqTopTopics, getKafkaTopPartitions,
   getRedisBigKeys, getRedisSlowQueries,
-  getMysqlTopTables, getMysqlSlowQueries,
+  getMysqlSlowQueries,
   getLindormTopTables, getElasticsearchTopIndices,
+  getDbInstances, getDruidInstances, getJvmInstances,
   checkMiddlewareAlerts
 } from '@/api/middleware.js'
 
 const loading = ref(false)
 const activeTab = ref('redis')
 const redisSubTab = ref('bigKeys')
-const mysqlSubTab = ref('topTables')
+const mysqlSubTab = ref('slowQueries')
 
 const redisData = ref([])
 const mysqlData = ref([])
@@ -483,11 +533,14 @@ const podCpuData = ref([])
 const podMemData = ref([])
 const nodeData = ref([])
 
+const dbData = ref([])
+const druidData = ref([])
+const jvmData = ref([])
+
 const rocketmqTopTopicsData = ref([])
 const kafkaTopPartitionsData = ref([])
 const redisBigKeysData = ref([])
 const redisSlowQueriesData = ref([])
-const mysqlTopTablesData = ref([])
 const mysqlSlowQueriesData = ref([])
 const lindormTopTablesData = ref([])
 const esTopIndicesData = ref([])
@@ -551,9 +604,10 @@ const fetchData = async () => {
       const res = await getMysqlInstances()
       mysqlData.value = res.data || []
       await fetchAlerts('mysql', mysqlData)
-      const [tablesRes, slowRes] = await Promise.all([getMysqlTopTables(), getMysqlSlowQueries()])
-      mysqlTopTablesData.value = tablesRes.data || []
+      const [slowRes, dbRes, druidRes] = await Promise.all([getMysqlSlowQueries(), getDbInstances(), getDruidInstances()])
       mysqlSlowQueriesData.value = slowRes.data || []
+      dbData.value = dbRes.data || []
+      druidData.value = druidRes.data || []
     } else if (activeTab.value === 'rocketmq') {
       const res = await getRocketmqInstances()
       rocketmqData.value = res.data || []
@@ -589,6 +643,9 @@ const fetchData = async () => {
     } else if (activeTab.value === 'node') {
       const res = await getNodeOverview()
       nodeData.value = res.data || []
+    } else if (activeTab.value === 'jvm') {
+      const res = await getJvmInstances()
+      jvmData.value = res.data || []
     }
   } catch (error) {
     console.error('Fetch error:', error)
@@ -611,6 +668,9 @@ const handleExport = () => {
   } else if (activeTab.value === 'pod') {
     data = podCpuData.value; filename = 'PodCPU监控'
     columns = [{label:'Pod',prop:'pod'},{label:'CPU',prop:'cpu'}]
+  } else if (activeTab.value === 'jvm') {
+    data = jvmData.value; filename = 'JVM监控'
+    columns = [{label:'应用',prop:'application'},{label:'堆内存%',prop:'heapUsage'},{label:'GC/s',prop:'gcRate'},{label:'QPS',prop:'qps'},{label:'CPU%',prop:'cpuUsage'}]
   }
   exportCSV(filename, data, columns)
 }

@@ -37,6 +37,9 @@ public class GrafanaClient {
     @Value("${grafana.node-ds-uid:cem0jt0mij668b}")
     private String nodeDsUid;
 
+    @Value("${grafana.aliyun-ds-uid:l9II0lm4z}")
+    private String aliyunDsUid;
+
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofSeconds(5))
             .build();
@@ -134,5 +137,13 @@ public class GrafanaClient {
 
     public String getNodeDsUid() {
         return nodeDsUid;
+    }
+
+    public String getAliyunDsUid() {
+        return aliyunDsUid;
+    }
+
+    public String getDsUid() {
+        return dsUid;
     }
 }

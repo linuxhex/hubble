@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RestController
-@RequestMapping("/traces/query")
+@RequestMapping("/api/traces/query")
 @RequiredArgsConstructor
 @Tag(name = "业务链路查询服务", description = "业务链路查询服务")
 public class TraceQueryController {
