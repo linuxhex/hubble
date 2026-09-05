@@ -2,7 +2,8 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton, TrendCharts, Box } from '@element-plus/icons-vue'
+import { HomeFilled, Monitor, Connection, Timer, Fold, Expand, Bell, BellFilled, DataLine, Warning, ArrowLeft, ArrowRight, Document, Refresh, Sort, SwitchButton, TrendCharts, Box, Search, Setting, Aim, Files, Histogram, PieChart } from '@element-plus/icons-vue'
+import AiChat from '@/components/AiChat.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +29,7 @@ const activeIndex = computed(() => {
   if (route.path === '/trend-dashboard') return '/trend-dashboard'
   if (route.path === '/second-chart') return '/second-chart'
   if (route.path === '/degradation-ranking') return '/degradation-ranking'
+  if (route.path === '/biz-analysis') return '/biz-analysis'
   return '1'
 })
 
@@ -93,7 +95,7 @@ onUnmounted(() => {
           <!-- 导航菜单 -->
           <el-menu-item index="/gateway">
             <el-icon><DataLine /></el-icon>
-            <span>概览</span>
+            <span>网关概览</span>
           </el-menu-item>
           <el-menu-item index="/abnormal">
             <el-icon><Warning /></el-icon>
@@ -122,6 +124,10 @@ onUnmounted(() => {
           <el-menu-item index="/gateway/logs">
             <el-icon><Document /></el-icon>
             <span>日志搜索</span>
+          </el-menu-item>
+          <el-menu-item v-if="authStore.user?.nickname === 'lianzi'" index="/biz-analysis">
+            <el-icon><TrendCharts /></el-icon>
+            <span>经营分析</span>
           </el-menu-item>
         </el-menu>
       </div>
@@ -180,6 +186,9 @@ onUnmounted(() => {
         <router-view />
       </div>
     </div>
+
+    <!-- AI 对话浮动球（非公开页面显示） -->
+    <AiChat v-if="!isPublicPage" />
   </div>
 </template>
 

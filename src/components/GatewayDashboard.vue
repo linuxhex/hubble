@@ -17,7 +17,7 @@
         <div class="overview-card">
           <div class="card-title">总请求量</div>
           <div class="card-value">{{ formatNumber(overview.totalRequests) }}</div>
-          <div class="card-trend" :class="trendClass(overview.totalTrend)">
+          <div class="card-trend" :class="trendClass(overview.totalTrend, 'positive')">
             <span>{{ trendArrow(overview.totalTrend) }} {{ formatPercent(Math.abs(overview.totalTrend)) }}</span>
             <span class="trend-label">较上周期</span>
           </div>
@@ -25,7 +25,7 @@
         <div class="overview-card">
           <div class="card-title">平均响应时间</div>
           <div class="card-value">{{ overview.avgResponseTime }}ms</div>
-          <div class="card-trend" :class="trendClass(overview.avgTrend)">
+          <div class="card-trend" :class="trendClass(overview.avgTrend, 'negative')">
             <span>{{ trendArrow(overview.avgTrend) }} {{ formatPercent(Math.abs(overview.avgTrend)) }}</span>
             <span class="trend-label">较上周期</span>
           </div>
@@ -33,7 +33,7 @@
         <div class="overview-card">
           <div class="card-title">错误率</div>
           <div class="card-value">{{ formatPercent(overview.errorRate) }}</div>
-          <div class="card-trend" :class="trendClass(overview.errorTrend)">
+          <div class="card-trend" :class="trendClass(overview.errorTrend, 'negative')">
             <span>{{ trendArrow(overview.errorTrend) }} {{ formatPercent(Math.abs(overview.errorTrend)) }}</span>
             <span class="trend-label">较上周期</span>
           </div>
@@ -41,7 +41,7 @@
         <div class="overview-card">
           <div class="card-title">QPS</div>
           <div class="card-value">{{ formatNumber(overview.qps) }}</div>
-          <div class="card-trend" :class="trendClass(overview.qpsTrend)">
+          <div class="card-trend" :class="trendClass(overview.qpsTrend, 'positive')">
             <span>{{ trendArrow(overview.qpsTrend) }} {{ formatPercent(Math.abs(overview.qpsTrend)) }}</span>
             <span class="trend-label">较上周期</span>
           </div>
@@ -92,7 +92,12 @@ let chart = null
 
 const formatNumber = (num) => num == null ? '0' : Number(num).toLocaleString()
 const formatPercent = (num) => num == null ? '0%' : Number(num).toFixed(2) + '%'
-const trendClass = (val) => val >= 0 ? 'up' : 'down'
+const trendClass = (val, direction = 'positive') => {
+  // direction: 'positive' = 上升为好（绿色），'negative' = 下降为好（绿色）
+  const isUp = val >= 0
+  const isGood = direction === 'positive' ? isUp : !isUp
+  return isGood ? 'up' : 'down'
+}
 const trendArrow = (val) => val >= 0 ? '↑' : '↓'
 
 const initChart = (trendData) => {
@@ -159,9 +164,10 @@ const stopPolling = () => { if (timer) { clearInterval(timer); timer = null } }
 const handleVisibility = () => {
   if (document.visibilityState === 'visible') { loadAll(); startPolling() } else stopPolling()
 }
+const handleResize = () => chart?.resize()
 
-onMounted(() => { loadAll(); startPolling(); window.addEventListener('resize', () => chart?.resize()); document.addEventListener('visibilitychange', handleVisibility) })
-onBeforeUnmount(() => { stopPolling(); window.removeEventListener('resize', () => chart?.resize()); document.removeEventListener('visibilitychange', handleVisibility); chart?.dispose() })
+onMounted(() => { loadAll(); startPolling(); window.addEventListener('resize', handleResize); document.addEventListener('visibilitychange', handleVisibility) })
+onBeforeUnmount(() => { stopPolling(); window.removeEventListener('resize', handleResize); document.removeEventListener('visibilitychange', handleVisibility); chart?.dispose() })
 </script>
 
 <style scoped>

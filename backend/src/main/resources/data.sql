@@ -17,3 +17,21 @@ INSERT INTO alert_config (title, description, keyword_template_id, start_time, e
 ('交易订单错误监控', '监控trade-order的ERROR日志', 'tpl-trade-order', '00:00:00', '23:59:59', 60, 300, 0.67, '10:00:00', '14:00:00', 450, 1),
 ('设备维护错误监控', '监控device-maint的ERROR日志', 'tpl-device-maint', '00:00:00', '23:59:59', 60, 200, 0.75, '09:00:00', '18:00:00', 300, 1),
 ('推送服务错误监控', '监控zdl-push-server的ERROR日志', 'tpl-zdl-push', '00:00:00', '23:59:59', 60, 200, 0.67, '10:00:00', '12:00:00', 300, 1);
+
+INSERT INTO middleware_alert_config (middleware_type, instance_id, metric_name, red_threshold, yellow_threshold, compare_type, enabled) VALUES
+('redis', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
+('redis', NULL, 'memoryUsage', 85.00, 70.00, '>', 1),
+('redis', NULL, 'connections', 10000.00, 8000.00, '>', 1),
+('mysql', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
+('mysql', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
+('mysql', NULL, 'connections', 80.00, 60.00, '>', 1),
+('rocketmq', NULL, 'messageAccumulation', 100000.00, 50000.00, '>', 1),
+('rocketmq', NULL, 'consumeLatency', 60.00, 30.00, '>', 1),
+('kafka', NULL, 'lag', 100000.00, 50000.00, '>', 1),
+('lindorm', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
+('lindorm', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
+('elasticsearch', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
+('elasticsearch', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
+('elasticsearch', NULL, 'jvmMemory', 85.00, 75.00, '>', 1),
+('oss', NULL, 'errorRate5xx', 1.00, 0.10, '>', 1),
+('oss', NULL, 'errorRate4xx', 5.00, 1.00, '>', 1);

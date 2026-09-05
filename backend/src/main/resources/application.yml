@@ -74,12 +74,44 @@ grafana:
   ds-uid: ${GRAFANA_DS_UID:6A__NzsMk}
   node-ds-uid: ${GRAFANA_NODE_DS_UID:cem0jt0mij668b}
 
+# 中间件实例配置（CloudMonitor 通用查询，无需独立 SDK）
+middleware:
+  rocketmq:
+    instances:
+      - instance-id: ${ROCKETMQ_INSTANCE_ID:}
+        instance-name: ${ROCKETMQ_INSTANCE_NAME:prod-rocketmq}
+        topic: ${ROCKETMQ_TOPIC:}
+  kafka:
+    instances:
+      - instance-id: ${KAFKA_INSTANCE_ID:}
+        instance-name: ${KAFKA_INSTANCE_NAME:prod-kafka}
+        topic: ${KAFKA_TOPIC:}
+  lindorm:
+    instances:
+      - instance-id: ${LINDORM_INSTANCE_ID:}
+        instance-name: ${LINDORM_INSTANCE_NAME:prod-lindorm}
+  elasticsearch:
+    instances:
+      - instance-id: ${ES_INSTANCE_ID:}
+        instance-name: ${ES_INSTANCE_NAME:prod-es}
+  oss:
+    buckets:
+      - bucket-name: ${OSS_BUCKET_NAME:}
+        instance-name: ${OSS_INSTANCE_NAME:prod-oss}
+
 # 父系统集成配置
 parent-system:
   api-url: ${PARENT_SYSTEM_API_URL:http://parent-system.example.com/api}
   jwt:
     public-key: ${JWT_PUBLIC_KEY:CloudEyesJwtSecretKeyForHMACSHA256AlgorithmMustBeAtLeast32Bytes}
     expiration: ${JWT_EXPIRATION:3600000}
+
+# 经营分析配置
+biz-analysis:
+  allowed-users: ${BIZ_ANALYSIS_USERS:lianzi}
+  query-server-url: ${MCP_BASE_URL:http://10.20.0.2:8081}
+  query-user: ${MCP_USER:caomunian}
+  query-pass: ${MCP_PASS:gc#d2GVE69#7}
 
 # 钉钉配置
 dingtalk:
@@ -105,6 +137,7 @@ milvus:
 dashscope:
   apiKey: ${DASHSCOPE_API_KEY:your-dashscope-api-key}
   embeddingModel: text-embedding-v3
+  chatModel: ${DASHSCOPE_CHAT_MODEL:qwen-turbo}
 
 # SpringDoc OpenAPI配置
 springdoc:

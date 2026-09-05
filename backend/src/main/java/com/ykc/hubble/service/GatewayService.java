@@ -1463,8 +1463,12 @@ public class GatewayService {
                 break;
             }
             default: {
-                currentRange = new long[]{today.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - 86400, currentRange[0]};
+                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                long nowSec = System.currentTimeMillis() / 1000;
+                long todayStart = today.atStartOfDay(zone).toEpochSecond();
+                long elapsed = nowSec - todayStart;
+                currentRange = new long[]{todayStart, nowSec};
+                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
                 break;
             }
         }
@@ -1550,15 +1554,20 @@ public class GatewayService {
     }
 
     /**
-     * 接口劣化告警：RT 劣化幅度 >220% 触发钉钉 + SSE，同一接口 24 小时内不重复告警
+     * 接口劣化告警：RT 劣化幅度 >220% 且当前 P60 RT >100ms 才触发钉钉 + SSE，同一接口 24 小时内不重复告警。
+     * 劣化幅度小（<220%）不告警；幅度达标但当前 RT 未超 100ms（本身很快）也不告警，避免对低 RT 接口的误报。
      */
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
         long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
         double degradationThreshold = 220.0;
+        double minRtMs = 100.0; // 当前 P60 RT 必须超过 100ms 才告警，低 RT 接口劣化无实际影响
 
         for (ApiDegradationVO vo : degradationList) {
+            // 劣化幅度小不告警
             if (vo.getDegradationRate() < degradationThreshold) continue;
+            // 劣化时当前 RT 必须超过 100ms 才告警，避免对本身很快的接口误报
+            if (vo.getCurrentAvgTime() <= minRtMs) continue;
 
             String apiPath = vo.getApiPath();
             String alertKey = "degradation:" + apiPath;
@@ -1776,8 +1785,12 @@ public class GatewayService {
                 break;
             }
             default: {
-                currentRange = new long[]{today.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - 86400, currentRange[0]};
+                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                long nowSec = System.currentTimeMillis() / 1000;
+                long todayStart = today.atStartOfDay(zone).toEpochSecond();
+                long elapsed = nowSec - todayStart;
+                currentRange = new long[]{todayStart, nowSec};
+                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
                 break;
             }
         }
@@ -1848,22 +1861,28 @@ public class GatewayService {
         log.info("流量涨幅排名完成: 总接口={}, 涨幅>0的={}, 返回={}",
             currentApiStats.size(), result.size(), Math.min(result.size(), 30));
 
-        // 流量暴涨告警检查：涨幅 >200% 且防抖
-        checkTrafficSurgeAlert(result);
+        // 流量暴涨告警检查：QPS>50 且涨幅>200% 且防抖
+        checkTrafficSurgeAlert(result, currentRange[1] - currentRange[0]);
 
         return result.size() > 30 ? result.subList(0, 30) : result;
     }
 
     /**
-     * 流量暴涨告警：涨幅 >200%（3 倍以上）触发钉钉 + SSE，同一接口 24 小时内不重复告警
+     * 流量暴涨告警：当前 QPS>50 且涨幅 >200%（3 倍以上）才触发钉钉 + SSE，同一接口 24 小时内不重复告警。
+     * QPS = 当前时段请求数 / 时段秒数，低 QPS 接口即使涨幅大也不告警，避免小流量接口误报。
      */
-    private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList) {
+    private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList, long periodSeconds) {
         long now = System.currentTimeMillis();
         long cooldownMs = 24 * 60 * 60 * 1000; // 24 小时防抖，同一接口一天只告警一次
         double surgeThreshold = 200.0; // 涨幅 200% 以上触发
+        double minQps = 50.0; // QPS 必须大于 50 才告警，小流量接口涨幅大不告警
 
         for (ApiDegradationVO vo : surgeList) {
+            // 涨幅未达 200% 不告警
             if (vo.getDegradationRate() < surgeThreshold) continue;
+            // QPS 必须大于 50 才告警，小流量接口（如定时任务触发的偶发请求）涨幅大也不告警
+            double qps = periodSeconds > 0 ? (double) vo.getCurrentCount() / periodSeconds : 0;
+            if (qps <= minQps) continue;
 
             String apiPath = vo.getApiPath();
             Long lastSent = trafficAlertLastSent.get(apiPath);
@@ -1933,8 +1952,12 @@ public class GatewayService {
                 break;
             }
             default: {
-                currentRange = new long[]{today.atStartOfDay(zone).toEpochSecond(), today.plusDays(1).atStartOfDay(zone).toEpochSecond()};
-                previousRange = new long[]{currentRange[0] - 86400, currentRange[0]};
+                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                long nowSec = System.currentTimeMillis() / 1000;
+                long todayStart = today.atStartOfDay(zone).toEpochSecond();
+                long elapsed = nowSec - todayStart;
+                currentRange = new long[]{todayStart, nowSec};
+                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
                 break;
             }
         }

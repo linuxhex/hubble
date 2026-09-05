@@ -9,7 +9,7 @@
           <el-option label="QPS" value="qps" />
           <el-option label="响应时间" value="responseTime" />
           <el-option label="错误率" value="errorRate" />
-          <el-option label="吞吐量" value="throughput" />
+          <el-option label="总请求量" value="throughput" />
         </el-select>
         <el-button size="small" @click="handleRefresh">
           <el-icon><Refresh /></el-icon>
@@ -62,7 +62,7 @@
         <el-table-column prop="qps" label="QPS" width="100" />
         <el-table-column prop="responseTime" label="响应时间(ms)" width="120" />
         <el-table-column prop="errorRate" label="错误率(%)" width="100" />
-        <el-table-column prop="throughput" label="吞吐量(MB/s)" />
+        <el-table-column prop="throughput" label="总请求量(次)" />
       </el-table>
     </div>
   </div>
@@ -85,7 +85,7 @@ const realtimeMetrics = ref([
   { key: 'qps', label: '当前QPS', value: '0', unit: 'req/s' },
   { key: 'responseTime', label: '平均响应时间', value: '0', unit: 'ms' },
   { key: 'errorRate', label: '错误率', value: '0', unit: '%' },
-  { key: 'throughput', label: '吞吐量', value: '0', unit: 'MB/s' }
+  { key: 'throughput', label: '总请求量', value: '0', unit: '次' }
 ])
 
 const tableData = ref([])
@@ -108,7 +108,7 @@ const updateMetricsFromOverview = (data) => {
   realtimeMetrics.value[0].value = (data.qps || 0).toFixed(1)
   realtimeMetrics.value[1].value = Math.round(data.avgResponseTime || 0).toString()
   realtimeMetrics.value[2].value = (data.errorRate || 0).toFixed(2)
-  realtimeMetrics.value[3].value = ((data.totalRequests || 0) / 1024 / 1024).toFixed(2)
+  realtimeMetrics.value[3].value = (data.totalRequests || 0).toLocaleString()
 }
 
 const addDataPointFromOverview = (data) => {
@@ -136,7 +136,7 @@ const getMetricValue = (data) => {
     case 'qps': return data.qps || 0
     case 'responseTime': return data.avgResponseTime || 0
     case 'errorRate': return data.errorRate || 0
-    case 'throughput': return ((data.totalRequests || 0) / 1024 / 1024)
+    case 'throughput': return data.totalRequests || 0
     default: return data.qps || 0
   }
 }
@@ -168,7 +168,7 @@ const getMetricName = (metric) => {
     qps: 'QPS',
     responseTime: '响应时间',
     errorRate: '错误率',
-    throughput: '吞吐量'
+    throughput: '总请求量'
   }
   return names[metric] || metric
 }

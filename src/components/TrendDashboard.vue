@@ -66,14 +66,14 @@ const metrics = ref([
   { key: 'qps', name: 'QPS', value: '-', trend: 0 },
   { key: 'avgTime', name: '平均响应时间', value: '-', trend: 0 },
   { key: 'errorRate', name: '错误率', value: '-', trend: 0 },
-  { key: 'throughput', name: '吞吐量', value: '-', trend: 0 }
+  { key: 'totalRequests', name: '总请求量', value: '-', trend: 0 }
 ])
 
 const charts = ref([
   { id: 'qps-trend', title: 'QPS趋势', series: [{ name: 'QPS', color: 'info' }] },
-  { id: 'response-time-trend', title: '响应时间趋势', series: [{ name: '平均响应时间', color: 'warn' }, { name: 'P95响应时间', color: 'error' }] },
+  { id: 'response-time-trend', title: '请求量趋势', series: [{ name: 'INFO', color: 'info' }, { name: 'WARN', color: 'warn' }, { name: 'ERROR', color: 'error' }] },
   { id: 'error-trend', title: '错误趋势', series: [{ name: '错误数', color: 'error' }] },
-  { id: 'throughput-trend', title: '吞吐量趋势', series: [{ name: '吞吐量', color: 'info' }] }
+  { id: 'throughput-trend', title: '请求级别分布', series: [{ name: 'INFO', color: 'info' }, { name: 'WARN', color: 'warn' }] }
 ])
 
 const fetchOverview = async () => {
@@ -106,7 +106,6 @@ const updateMetrics = (data) => {
   metrics.value[3].value = (data.totalRequests || 0).toLocaleString()
   metrics.value[3].trend = Math.round((data.totalTrend || 0) * 100) / 100
 }
-
 const setChartRef = (el, chartId) => {
   if (el && !chartInstances.value[chartId]) {
     nextTick(() => { initChart(el, chartId) })
@@ -151,11 +150,11 @@ const applyChartData = (chartId, chart) => {
       }
     }]
   } else if (chartId === 'response-time-trend') {
-    const avgData = (trend.infoCounts || []).map(v => v * 0.1)
-    const p95Data = avgData.map(v => v * 1.5)
+    // 请求级别分布：INFO / WARN / ERROR 三线，用真实数据
     baseOption.series = [
-      { name: '平均响应时间', type: 'line', smooth: true, data: avgData, itemStyle: { color: '#E6A23C' } },
-      { name: 'P95响应时间', type: 'line', smooth: true, data: p95Data, itemStyle: { color: '#F56C6C' } }
+      { name: 'INFO', type: 'line', smooth: true, data: trend.infoCounts || [], itemStyle: { color: '#409EFF' } },
+      { name: 'WARN', type: 'line', smooth: true, data: trend.warnCounts || [], itemStyle: { color: '#E6A23C' } },
+      { name: 'ERROR', type: 'line', smooth: true, data: trend.errorCounts || [], itemStyle: { color: '#F56C6C' } }
     ]
   } else if (chartId === 'error-trend') {
     baseOption.series = [{
@@ -164,20 +163,11 @@ const applyChartData = (chartId, chart) => {
       itemStyle: { color: '#F56C6C' }
     }]
   } else if (chartId === 'throughput-trend') {
-    const throughputData = (trend.infoCounts || []).map(v => v / 100)
-    baseOption.series = [{
-      name: '吞吐量', type: 'line', smooth: true,
-      data: throughputData,
-      itemStyle: { color: '#409EFF' },
-      areaStyle: {
-        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: 'rgba(64,158,255,0.3)' },
-            { offset: 1, color: 'rgba(64,158,255,0)' }
-          ]
-        }
-      }
-    }]
+    // INFO + WARN 请求量分布（真实数据，不再伪造吞吐量）
+    baseOption.series = [
+      { name: 'INFO', type: 'line', smooth: true, data: trend.infoCounts || [], itemStyle: { color: '#409EFF' } },
+      { name: 'WARN', type: 'line', smooth: true, data: trend.warnCounts || [], itemStyle: { color: '#E6A23C' } }
+    ]
   }
 
   chart.setOption(baseOption)
@@ -201,16 +191,18 @@ watch(selectedTimeRange, () => {
   loadAllData()
 })
 
+const handleResize = () => {
+  Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
+}
+
 onMounted(() => {
   loadAllData()
-  window.addEventListener('resize', () => {
-    Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
-  })
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   Object.values(chartInstances.value).forEach(chart => { chart?.dispose() })
-  window.removeEventListener('resize', () => {})
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 

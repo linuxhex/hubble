@@ -221,6 +221,12 @@ const loadConfigList = async () => {
         } else {
           ElMessage.error('未找到该监控配置')
         }
+      } else if (configList.value.length > 0) {
+        // 无 URL 参数时自动选中第一个配置
+        const first = configList.value[0]
+        selectedConfigId.value = first.id
+        selectedConfig.value = first
+        handleConfigChange()
       }
     }
   } catch (error) {
@@ -314,13 +320,13 @@ const handleRefresh = () => {
 
 const startAutoRefresh = () => {
   stopAutoRefresh()
-  console.log('[AlertDashboard] 启动自动刷新，间隔:', AUTO_REFRESH_INTERVAL, '秒')
+  // 自动刷新启动，间隔 AUTO_REFRESH_INTERVAL 秒
   countdownTimer = window.setInterval(() => {
     countdown.value--
     if (countdown.value <= 0) countdown.value = AUTO_REFRESH_INTERVAL
   }, 1000)
   autoRefreshTimer = window.setInterval(() => {
-    console.log('[AlertDashboard] 自动刷新触发')
+    // 自动刷新触发
     chartKey.value++
     loadStatistics()
     updateChart()
@@ -329,7 +335,7 @@ const startAutoRefresh = () => {
 }
 
 const stopAutoRefresh = () => {
-  console.log('[AlertDashboard] 停止自动刷新')
+  // 停止自动刷新
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer)
     autoRefreshTimer = null

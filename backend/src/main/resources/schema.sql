@@ -51,3 +51,20 @@ CREATE TABLE IF NOT EXISTS page_data_cache (
 CREATE INDEX IF NOT EXISTS idx_page_data_cache_page_key ON page_data_cache(page_key);
 CREATE INDEX IF NOT EXISTS idx_page_data_cache_expires_at ON page_data_cache(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_page_data_cache_keys ON page_data_cache(page_key, data_key);
+
+-- 中间件告警配置表
+CREATE TABLE IF NOT EXISTS middleware_alert_config (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  middleware_type VARCHAR(50) NOT NULL COMMENT '中间件类型: redis/mysql/rocketmq/kafka/lindorm/elasticsearch/oss',
+  instance_id VARCHAR(100) COMMENT '实例ID，空表示全局默认',
+  metric_name VARCHAR(100) NOT NULL COMMENT '指标名: cpu_usage/memory_usage/accumulation等',
+  red_threshold DECIMAL(10,2) NOT NULL COMMENT '红盘阈值',
+  yellow_threshold DECIMAL(10,2) NOT NULL COMMENT '粉盘阈值',
+  compare_type VARCHAR(20) NOT NULL DEFAULT '>' COMMENT '比较方式: > / < / >= / <=',
+  enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_middleware_alert_type ON middleware_alert_config(middleware_type);
+CREATE INDEX IF NOT EXISTS idx_middleware_alert_metric ON middleware_alert_config(metric_name);

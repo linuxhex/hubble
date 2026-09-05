@@ -4,6 +4,8 @@ import com.aliyuncs.DefaultAcsClient;
 import com.aliyuncs.IAcsClient;
 import com.aliyuncs.cms.model.v20190101.DescribeMetricListRequest;
 import com.aliyuncs.cms.model.v20190101.DescribeMetricListResponse;
+import com.aliyuncs.cms.model.v20190101.DescribeMetricMetaListRequest;
+import com.aliyuncs.cms.model.v20190101.DescribeMetricMetaListResponse;
 import com.aliyuncs.profile.DefaultProfile;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesRequest;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesResponse;
@@ -40,8 +42,9 @@ public class CloudMonitorClient {
     public void init() {
         try {
             DefaultProfile profile = DefaultProfile.getProfile(region, accessKeyId, accessKeySecret);
+            DefaultProfile.addEndpoint(region, "Cms", "metrics.aliyuncs.com");
             this.acsClient = new DefaultAcsClient(profile);
-            log.info("CloudMonitorClient 初始化完成, region={}", region);
+            log.info("CloudMonitorClient 初始化完成, region={}, endpoint=metrics.aliyuncs.com", region);
         } catch (Exception e) {
             log.error("CloudMonitorClient 初始化失败: {}", e.getMessage());
         }
@@ -72,10 +75,9 @@ public class CloudMonitorClient {
             DescribeMetricListResponse resp = acsClient.getAcsResponse(req);
             List<double[]> result = new ArrayList<>();
 
-            // CloudMonitor 返回的 datapoints 是 JSON 字符串
             String datapoints = resp.getDatapoints();
             if (datapoints != null && !datapoints.isEmpty()) {
-                // 解析 [{"timestamp":xxx,"Maximum":yyy,"Average":zzz},...]
+                log.debug("CloudMonitor 原始数据: ns={}, metric={}, dim={}, len={}", namespace, metricName, dimensions, datapoints.length());
                 com.alibaba.fastjson.JSONArray arr = com.alibaba.fastjson.JSON.parseArray(datapoints);
                 for (int i = 0; i < arr.size(); i++) {
                     com.alibaba.fastjson.JSONObject obj = arr.getJSONObject(i);
@@ -83,10 +85,12 @@ public class CloudMonitorClient {
                     double avg = obj.containsKey("Average") ? obj.getDoubleValue("Average") : 0;
                     result.add(new double[]{ts, avg});
                 }
+            } else {
+                log.info("CloudMonitor 无数据: ns={}, metric={}, dim={}", namespace, metricName, dimensions);
             }
             return result;
         } catch (Exception e) {
-            log.warn("CloudMonitor 查询失败: ns={}, metric={}, error={}", namespace, metricName, e.getMessage());
+            log.warn("CloudMonitor 查询失败: ns={}, metric={}, dim={}, error={}", namespace, metricName, dimensions, e.getMessage());
             return new ArrayList<>();
         }
     }
@@ -117,6 +121,27 @@ public class CloudMonitorClient {
             return resp.getInstances();
         } catch (Exception e) {
             log.warn("查询 Redis 实例列表失败: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 查询 CloudMonitor 可用的指标元数据（诊断用）
+     */
+    public List<String> listMetricMeta(String namespace) {
+        try {
+            DescribeMetricMetaListRequest req = new DescribeMetricMetaListRequest();
+            req.setNamespace(namespace);
+            DescribeMetricMetaListResponse resp = acsClient.getAcsResponse(req);
+            List<String> metrics = new ArrayList<>();
+            if (resp.getResources() != null) {
+                for (var resource : resp.getResources()) {
+                    metrics.add(resource.getMetricName() + " - " + resource.getDescription());
+                }
+            }
+            return metrics;
+        } catch (Exception e) {
+            log.warn("查询指标元数据失败: ns={}, error={}", namespace, e.getMessage());
             return new ArrayList<>();
         }
     }

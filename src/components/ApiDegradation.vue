@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { getApiDegradation, getP60Ranking } from '@/api/gateway.js'
 import { searchTracesByApi, getTraceChain } from '@/api/trace-chain.js'
+import { exportCSV } from '@/utils/export-csv.js'
 import * as echarts from 'echarts'
 
 const loading = ref(false)
@@ -43,6 +44,18 @@ const fetchData = async () => {
 const handleModeChange = (val) => {
   compareMode.value = val
   fetchData()
+}
+
+const handleExport = () => {
+  exportCSV('接口劣化排名', tableData.value, [
+    { label: '排名', prop: 'rank' },
+    { label: '接口', prop: 'apiPath' },
+    { label: '当前P60耗时(ms)', prop: 'currentAvgTime' },
+    { label: '上期P60耗时(ms)', prop: 'previousAvgTime' },
+    { label: '劣化幅度(%)', prop: 'degradationRate' },
+    { label: '当前请求数', prop: 'currentCount' },
+    { label: '上期请求数', prop: 'previousCount' }
+  ])
 }
 
 const getRankType = (rank) => {
@@ -217,6 +230,7 @@ onBeforeUnmount(() => {
         </el-form-item>
         <el-form-item class="no-margin">
           <el-button type="primary" @click="fetchData" :loading="loading">刷新</el-button>
+          <el-button @click="handleExport">导出</el-button>
           <span class="update-info">上次更新: {{ lastUpdated }} | 下次刷新: {{ countdownText }}</span>
         </el-form-item>
       </el-form>
@@ -269,7 +283,7 @@ onBeforeUnmount(() => {
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && tableData.length === 0" :description="compareMode === 'surge' ? '暂无流量涨幅接口' : '暂无劣化接口，表现良好'" />
+      <el-empty v-if="!loading && tableData.length === 0" :description="compareMode === 'p60' ? '暂无 P60 耗时数据' : compareMode === 'week' ? '本周与上周对比无劣化接口' : '今日与昨日同时段对比无劣化接口，表现良好'" />
     </div>
 
     <!-- 下钻抽屉 -->

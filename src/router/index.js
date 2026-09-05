@@ -21,6 +21,7 @@ import SecondChart from '../components/SecondChart.vue'
 import ApiDegradation from '../components/ApiDegradation.vue'
 import TrafficSurgeDashboard from '../components/TrafficSurgeDashboard.vue'
 import MiddlewareDashboard from '../components/MiddlewareDashboard.vue'
+import BizAnalysisDashboard from '../components/BizAnalysisDashboard.vue'
 
 const PUBLIC_PATHS = ['/login', '/unauthorized']
 
@@ -137,6 +138,11 @@ const routes = [
     path: '/middleware',
     name: 'MiddlewareDashboard',
     component: MiddlewareDashboard
+  },
+  {
+    path: '/biz-analysis',
+    name: 'BizAnalysis',
+    component: BizAnalysisDashboard
   }
 ]
 
@@ -155,6 +161,14 @@ router.beforeEach((to, from, next) => {
   if (!token) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
+  }
+
+  if (to.path === '/biz-analysis') {
+    const user = JSON.parse(localStorage.getItem('auth_user') || '{}')
+    if (user.nickname !== 'lianzi') {
+      next('/unauthorized')
+      return
+    }
   }
 
   next()

@@ -7,6 +7,7 @@
           <el-radio-button value="day">今天 vs 昨天</el-radio-button>
           <el-radio-button value="week">本周 vs 上周</el-radio-button>
         </el-radio-group>
+        <el-button size="small" @click="handleExport">导出</el-button>
         <span class="refresh-info">更新于 {{ lastUpdated }} | {{ countdownText }}</span>
       </div>
     </div>
@@ -86,7 +87,7 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && filteredData.length === 0" description="暂无流量涨幅接口" />
+      <el-empty v-if="!loading && filteredData.length === 0" :description="compareMode === 'day' ? '今日流量较昨日同时段未出现上涨' : '暂无流量涨幅接口'" />
     </div>
 
     <!-- 下钻抽屉 -->
@@ -133,6 +134,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { getApiTrafficSurge } from '@/api/gateway.js'
 import { searchTracesByApi, getTraceChain } from '@/api/trace-chain.js'
+import { exportCSV } from '@/utils/export-csv.js'
 import * as echarts from 'echarts'
 
 const loading = ref(false)
@@ -175,6 +177,18 @@ const fetchData = async () => {
 }
 
 const handleModeChange = () => fetchData()
+
+const handleExport = () => {
+  exportCSV('流量暴涨排名', tableData.value, [
+    { label: '排名', prop: 'rank' },
+    { label: '接口', prop: 'apiPath' },
+    { label: '流量涨幅(%)', prop: 'degradationRate' },
+    { label: '当前请求数', prop: 'currentCount' },
+    { label: '上期请求数', prop: 'previousCount' },
+    { label: '当前P60(ms)', prop: 'currentAvgTime' },
+    { label: '上期P60(ms)', prop: 'previousAvgTime' }
+  ])
+}
 
 const getRankType = (rank) => {
   if (rank <= 3) return 'danger'

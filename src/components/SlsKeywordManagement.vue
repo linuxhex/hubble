@@ -69,7 +69,7 @@
     <!-- 温馨提示 -->
     <div class="tip-area">
       <el-alert
-        title="温馨提示：Milvus 每10秒自动刷新一次数据，修改后请稍候刷新查看"
+        title="温馨提示：SLS 关键字用于日志查询模板，修改后即时生效"
         type="info"
         :closable="false"
         show-icon

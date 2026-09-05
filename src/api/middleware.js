@@ -16,6 +16,26 @@ export function getMysqlInstances() {
   return request.get('/middleware/mysql/instances')
 }
 
+export function getRocketmqInstances() {
+  return request.get('/middleware/rocketmq/instances')
+}
+
+export function getKafkaInstances() {
+  return request.get('/middleware/kafka/instances')
+}
+
+export function getLindormInstances() {
+  return request.get('/middleware/lindorm/instances')
+}
+
+export function getElasticsearchInstances() {
+  return request.get('/middleware/elasticsearch/instances')
+}
+
+export function getOssBuckets() {
+  return request.get('/middleware/oss/buckets')
+}
+
 export function getPodCpuTop() {
   return request.get('/middleware/pod/cpu')
 }
@@ -26,4 +46,48 @@ export function getPodMemoryTop() {
 
 export function getNodeOverview() {
   return request.get('/middleware/node/overview')
+}
+
+export function getRocketmqTopTopics() {
+  return request.get('/middleware/rocketmq/top-topics')
+}
+
+export function getKafkaTopPartitions() {
+  return request.get('/middleware/kafka/top-partitions')
+}
+
+export function getRedisBigKeys() {
+  return request.get('/middleware/redis/big-keys')
+}
+
+export function getRedisSlowQueries() {
+  return request.get('/middleware/redis/slow-queries')
+}
+
+export function getMysqlTopTables() {
+  return request.get('/middleware/mysql/top-tables')
+}
+
+export function getMysqlSlowQueries() {
+  return request.get('/middleware/mysql/slow-queries')
+}
+
+export function checkMiddlewareAlerts(type) {
+  return request.get(`/middleware-alert/check/${type}`)
+}
+
+export function checkAllAlerts() {
+  return request.get('/middleware-alert/check/all')
+}
+
+export function getAlertConfigs(middlewareType) {
+  return request.get('/middleware-alert/config/list', { params: { middlewareType } })
+}
+
+export function getLindormTopTables() {
+  return request.get('/middleware/lindorm/top-tables')
+}
+
+export function getElasticsearchTopIndices() {
+  return request.get('/middleware/elasticsearch/top-indices')
 }

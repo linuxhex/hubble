@@ -6,74 +6,403 @@
         <el-radio-group v-model="activeTab" size="small" @change="fetchData">
           <el-radio-button value="redis">Redis</el-radio-button>
           <el-radio-button value="mysql">MySQL / PolarDB</el-radio-button>
+          <el-radio-button value="rocketmq">RocketMQ</el-radio-button>
+          <el-radio-button value="kafka">Kafka</el-radio-button>
+          <el-radio-button value="lindorm">Lindorm</el-radio-button>
+          <el-radio-button value="elasticsearch">Elasticsearch</el-radio-button>
+          <el-radio-button value="oss">OSS</el-radio-button>
           <el-radio-button value="pod">Pod</el-radio-button>
           <el-radio-button value="node">Node</el-radio-button>
         </el-radio-group>
         <el-button size="small" @click="fetchData" :loading="loading">刷新</el-button>
+        <el-button size="small" @click="handleExport">导出</el-button>
       </div>
+    </div>
+
+    <!-- 告警摘要 -->
+    <div v-if="alertSummary.total > 0 && !['pod','node'].includes(activeTab)" class="alert-summary-bar">
+      <el-alert
+        v-if="alertSummary.redCount > 0"
+        :title="`${alertSummary.redCount} 个实例红盘告警`"
+        type="error" show-icon :closable="false" style="flex:1" />
+      <el-alert
+        v-if="alertSummary.yellowCount > 0"
+        :title="`${alertSummary.yellowCount} 个实例粉盘告警`"
+        type="warning" show-icon :closable="false" style="flex:1" />
+      <el-alert
+        v-if="alertSummary.redCount === 0 && alertSummary.yellowCount === 0"
+        title="所有实例状态正常"
+        type="success" show-icon :closable="false" style="flex:1" />
     </div>
 
     <!-- Redis 监控 -->
     <div v-if="activeTab === 'redis'" class="monitor-section">
       <el-table v-loading="loading" :data="redisData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
         <el-table-column label="实例ID" width="200" show-overflow-tooltip prop="instanceId" />
-        <el-table-column label="实例名称" width="180" show-overflow-tooltip prop="instanceName" />
-        <el-table-column label="规格" width="140" prop="instanceType" />
-        <el-table-column label="状态" width="100" align="center">
+        <el-table-column label="实例名称" width="160" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="规格" width="120" prop="instanceType" />
+        <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'Normal' ? 'success' : 'warning'" size="small">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="CPU%" width="100" align="right">
+        <el-table-column label="CPU%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="连接数" width="100" align="right">
+        <el-table-column label="连接数" width="90" align="right">
           <template #default="{ row }">{{ Math.round(row.connections) }}</template>
         </el-table-column>
-        <el-table-column label="内存%" width="100" align="right">
+        <el-table-column label="内存%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.memoryUsage)">{{ row.memoryUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'memoryUsage')">{{ row.memoryUsage.toFixed(1) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="QPS" width="100" align="right">
+        <el-table-column label="QPS" width="90" align="right">
           <template #default="{ row }">{{ Math.round(row.qps) }}</template>
         </el-table-column>
       </el-table>
+
+      <div class="sub-section">
+        <el-tabs v-model="redisSubTab" type="card" size="small">
+          <el-tab-pane label="Big Keys Top10" name="bigKeys">
+            <el-table :data="redisBigKeysData" stripe border size="small" style="width: 100%">
+              <el-table-column label="#" width="50" prop="rank" align="center" />
+              <el-table-column label="Key" min-width="250" show-overflow-tooltip prop="key" />
+              <el-table-column label="类型" width="80" prop="type" />
+              <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
+              <el-table-column label="内存" width="110" align="right">
+                <template #default="{ row }">{{ formatBytes(row.memoryBytes) }}</template>
+              </el-table-column>
+              <el-table-column label="TTL" width="90" align="right">
+                <template #default="{ row }">{{ row.ttl > 0 ? row.ttl + 's' : '-' }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="慢查询 Top10" name="slowQueries">
+            <el-table :data="redisSlowQueriesData" stripe border size="small" style="width: 100%">
+              <el-table-column label="#" width="50" prop="rank" align="center" />
+              <el-table-column label="命令" min-width="300" show-overflow-tooltip prop="command" />
+              <el-table-column label="耗时" width="110" align="right">
+                <template #default="{ row }">{{ (row.durationMicros / 1000).toFixed(1) }} ms</template>
+              </el-table-column>
+              <el-table-column label="客户端" width="140" prop="clientAddr" />
+              <el-table-column label="时间" width="160">
+                <template #default="{ row }">{{ formatTime(row.timestamp) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
       <el-empty v-if="!loading && redisData.length === 0" description="暂无 Redis 实例" />
     </div>
 
     <!-- MySQL/PolarDB 监控 -->
     <div v-if="activeTab === 'mysql'" class="monitor-section">
       <el-table v-loading="loading" :data="mysqlData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
         <el-table-column label="实例ID" width="200" show-overflow-tooltip prop="instanceId" />
-        <el-table-column label="实例名称" width="180" show-overflow-tooltip prop="instanceName" />
-        <el-table-column label="引擎" width="100" prop="engine" />
-        <el-table-column label="版本" width="100" prop="engineVersion" />
-        <el-table-column label="状态" width="100" align="center">
+        <el-table-column label="实例名称" width="160" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="引擎" width="90" prop="engine" />
+        <el-table-column label="版本" width="80" prop="engineVersion" />
+        <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'Running' ? 'success' : 'warning'" size="small">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="CPU%" width="100" align="right">
+        <el-table-column label="CPU%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="连接数" width="100" align="right">
+        <el-table-column label="连接数" width="90" align="right">
           <template #default="{ row }">{{ Math.round(row.connections) }}</template>
         </el-table-column>
-        <el-table-column label="IOPS" width="100" align="right">
+        <el-table-column label="IOPS" width="80" align="right">
           <template #default="{ row }">{{ Math.round(row.iops) }}</template>
         </el-table-column>
-        <el-table-column label="内存%" width="100" align="right">
+        <el-table-column label="磁盘%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.memoryUsage)">{{ row.memoryUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="sub-section">
+        <el-tabs v-model="mysqlSubTab" type="card" size="small">
+          <el-tab-pane label="Top 表 Top10" name="topTables">
+            <el-table :data="mysqlTopTablesData" stripe border size="small" style="width: 100%">
+              <el-table-column label="#" width="50" prop="rank" align="center" />
+              <el-table-column label="表名" min-width="200" show-overflow-tooltip prop="tableName" />
+              <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
+              <el-table-column label="引擎" width="80" prop="engine" />
+              <el-table-column label="行数" width="110" align="right">
+                <template #default="{ row }">{{ Number(row.rowCount).toLocaleString() }}</template>
+              </el-table-column>
+              <el-table-column label="数据大小" width="110" align="right">
+                <template #default="{ row }">{{ row.dataSizeMB.toFixed(0) }} MB</template>
+              </el-table-column>
+              <el-table-column label="索引大小" width="110" align="right">
+                <template #default="{ row }">{{ row.indexSizeMB.toFixed(0) }} MB</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="慢查询 Top10" name="slowQueries">
+            <el-table :data="mysqlSlowQueriesData" stripe border size="small" style="width: 100%">
+              <el-table-column label="#" width="50" prop="rank" align="center" />
+              <el-table-column label="SQL" min-width="300" show-overflow-tooltip prop="sql" />
+              <el-table-column label="说明" width="130" show-overflow-tooltip prop="description" />
+              <el-table-column label="耗时" width="100" align="right">
+                <template #default="{ row }">{{ row.durationMs.toLocaleString() }} ms</template>
+              </el-table-column>
+              <el-table-column label="扫描行" width="110" align="right">
+                <template #default="{ row }">{{ Number(row.rowsExamined).toLocaleString() }}</template>
+              </el-table-column>
+              <el-table-column label="返回行" width="100" align="right">
+                <template #default="{ row }">{{ Number(row.rowsReturned).toLocaleString() }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
       <el-empty v-if="!loading && mysqlData.length === 0" description="暂无 MySQL/PolarDB 实例" />
+    </div>
+
+    <!-- RocketMQ 监控 -->
+    <div v-if="activeTab === 'rocketmq'" class="monitor-section">
+      <div class="sub-title">实例基础信息</div>
+      <el-table v-loading="loading" :data="rocketmqData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
+        <el-table-column label="实例名称" width="150" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="地域" width="130" show-overflow-tooltip prop="region" />
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'Running' ? 'success' : 'warning'" size="small">{{ row.status || '-' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="版本" width="70" align="center" prop="version" />
+        <el-table-column label="消息堆积" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'messageAccumulation')">
+              {{ Math.round(row.messageAccumulation || 0).toLocaleString() }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="生产 TPS" width="100" align="right">
+          <template #default="{ row }">{{ (row.sendTps || 0).toFixed(1) }}</template>
+        </el-table-column>
+        <el-table-column label="消费 TPS" width="100" align="right">
+          <template #default="{ row }">{{ (row.consumeTps || 0).toFixed(1) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <div class="sub-section">
+        <div class="sub-title">Top Topics（按消息堆积排序）</div>
+        <el-table :data="rocketmqTopTopicsData" stripe border size="small" style="width: 100%">
+          <el-table-column label="#" width="50" prop="rank" align="center" />
+          <el-table-column label="Topic" min-width="200" show-overflow-tooltip prop="topic" />
+          <el-table-column label="实例" width="150" show-overflow-tooltip prop="instanceName" />
+          <el-table-column label="消息堆积" width="120" align="right">
+            <template #default="{ row }">{{ Math.round(row.messageAccumulation).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="生产 TPS" width="110" align="right">
+            <template #default="{ row }">{{ row.sendTps.toFixed(1) }}</template>
+          </el-table-column>
+          <el-table-column label="消费 TPS" width="110" align="right">
+            <template #default="{ row }">{{ row.consumeTps.toFixed(1) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <el-empty v-if="!loading && rocketmqData.length === 0" description="暂无 RocketMQ 实例" />
+    </div>
+
+    <!-- Kafka 监控 -->
+    <div v-if="activeTab === 'kafka'" class="monitor-section">
+      <div class="sub-title">实例基础信息</div>
+      <el-table v-loading="loading" :data="kafkaData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
+        <el-table-column label="实例名称" width="150" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="地域" width="130" show-overflow-tooltip prop="region" />
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'Running' ? 'success' : 'warning'" size="small">{{ row.status || '-' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="版本" width="70" align="center" prop="version" />
+        <el-table-column label="Lag" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'lag')">
+              {{ Math.round(row.lag || 0).toLocaleString() }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="生产 TPS" width="100" align="right">
+          <template #default="{ row }">{{ (row.produceTps || 0).toFixed(1) }}</template>
+        </el-table-column>
+        <el-table-column label="消费 TPS" width="100" align="right">
+          <template #default="{ row }">{{ (row.consumeTps || 0).toFixed(1) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <div class="sub-section">
+        <div class="sub-title">Top Partitions（按 Lag 排序）</div>
+        <el-table :data="kafkaTopPartitionsData" stripe border size="small" style="width: 100%">
+          <el-table-column label="#" width="50" prop="rank" align="center" />
+          <el-table-column label="Topic" min-width="200" show-overflow-tooltip prop="topic" />
+          <el-table-column label="实例" width="150" show-overflow-tooltip prop="instanceName" />
+          <el-table-column label="Lag" width="120" align="right">
+            <template #default="{ row }">{{ Math.round(row.lag).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="生产 TPS" width="110" align="right">
+            <template #default="{ row }">{{ row.produceTps.toFixed(1) }}</template>
+          </el-table-column>
+          <el-table-column label="消费 TPS" width="110" align="right">
+            <template #default="{ row }">{{ row.consumeTps.toFixed(1) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <el-empty v-if="!loading && kafkaData.length === 0" description="暂无 Kafka 实例" />
+    </div>
+
+    <!-- Lindorm 监控 -->
+    <div v-if="activeTab === 'lindorm'" class="monitor-section">
+      <el-table v-loading="loading" :data="lindormData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
+        <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="CPU%" width="120" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="磁盘%" width="120" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="QPS" width="120" align="right">
+          <template #default="{ row }">{{ Math.round(row.qps) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <div class="sub-section">
+        <div class="sub-title">Top 读写表（按 QPS 排序）</div>
+        <el-table :data="lindormTopTablesData" stripe border size="small" style="width: 100%">
+          <el-table-column label="#" width="50" prop="rank" align="center" />
+          <el-table-column label="表名" min-width="200" show-overflow-tooltip prop="tableName" />
+          <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
+          <el-table-column label="读 QPS" width="110" align="right">
+            <template #default="{ row }">{{ Math.round(row.readQps).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="写 QPS" width="110" align="right">
+            <template #default="{ row }">{{ Math.round(row.writeQps).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="存储" width="110" align="right">
+            <template #default="{ row }">{{ row.storageMB.toFixed(0) }} MB</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <el-empty v-if="!loading && lindormData.length === 0" description="暂无 Lindorm 实例" />
+    </div>
+
+    <!-- Elasticsearch 监控 -->
+    <div v-if="activeTab === 'elasticsearch'" class="monitor-section">
+      <el-table v-loading="loading" :data="esData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
+        <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="CPU%" width="120" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="磁盘%" width="120" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="JVM 内存%" width="130" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'jvmMemory')">{{ row.jvmMemory.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="sub-section">
+        <div class="sub-title">Top 大索引（按存储排序）</div>
+        <el-table :data="esTopIndicesData" stripe border size="small" style="width: 100%">
+          <el-table-column label="#" width="50" prop="rank" align="center" />
+          <el-table-column label="索引名" min-width="220" show-overflow-tooltip prop="indexName" />
+          <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
+          <el-table-column label="文档数" width="120" align="right">
+            <template #default="{ row }">{{ Number(row.docCount).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="存储" width="100" align="right">
+            <template #default="{ row }">{{ row.storageGB.toFixed(0) }} GB</template>
+          </el-table-column>
+          <el-table-column label="分片" width="80" align="right" prop="shardCount" />
+          <el-table-column label="副本" width="80" align="right" prop="replicaCount" />
+        </el-table>
+      </div>
+      <el-empty v-if="!loading && esData.length === 0" description="暂无 Elasticsearch 实例" />
+    </div>
+
+    <!-- OSS 监控 -->
+    <div v-if="activeTab === 'oss'" class="monitor-section">
+      <el-table v-loading="loading" :data="ossData" stripe border size="small" style="width: 100%">
+        <el-table-column label="告警" width="70" align="center">
+          <template #default="{ row }">
+            <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Bucket" width="220" show-overflow-tooltip prop="bucketName" />
+        <el-table-column label="名称" min-width="160" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="请求数" width="110" align="right">
+          <template #default="{ row }">{{ Math.round(row.totalRequests).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column label="外网流出" width="120" align="right">
+          <template #default="{ row }">{{ formatBytes(row.internetSend) }}</template>
+        </el-table-column>
+        <el-table-column label="4xx 错误率" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'errorRate4xx')">{{ row.errorRate4xx.toFixed(2) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="5xx 错误率" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'errorRate5xx')">{{ row.errorRate5xx.toFixed(2) }}%</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!loading && ossData.length === 0" description="暂无 OSS Bucket" />
     </div>
 
     <!-- Pod 监控 -->
@@ -126,20 +455,86 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getRedisInstances, getMysqlInstances, getPodCpuTop, getPodMemoryTop, getNodeOverview } from '@/api/middleware.js'
+import { exportCSV } from '@/utils/export-csv.js'
+import {
+  getRedisInstances, getMysqlInstances, getRocketmqInstances, getKafkaInstances,
+  getLindormInstances, getElasticsearchInstances, getOssBuckets,
+  getPodCpuTop, getPodMemoryTop, getNodeOverview,
+  getRocketmqTopTopics, getKafkaTopPartitions,
+  getRedisBigKeys, getRedisSlowQueries,
+  getMysqlTopTables, getMysqlSlowQueries,
+  getLindormTopTables, getElasticsearchTopIndices,
+  checkMiddlewareAlerts
+} from '@/api/middleware.js'
 
 const loading = ref(false)
 const activeTab = ref('redis')
+const redisSubTab = ref('bigKeys')
+const mysqlSubTab = ref('topTables')
+
 const redisData = ref([])
 const mysqlData = ref([])
+const rocketmqData = ref([])
+const kafkaData = ref([])
+const lindormData = ref([])
+const esData = ref([])
+const ossData = ref([])
 const podCpuData = ref([])
 const podMemData = ref([])
 const nodeData = ref([])
+
+const rocketmqTopTopicsData = ref([])
+const kafkaTopPartitionsData = ref([])
+const redisBigKeysData = ref([])
+const redisSlowQueriesData = ref([])
+const mysqlTopTablesData = ref([])
+const mysqlSlowQueriesData = ref([])
+const lindormTopTablesData = ref([])
+const esTopIndicesData = ref([])
+
+const alertSummary = ref({ total: 0, redCount: 0, yellowCount: 0, normalCount: 0 })
 
 const metricClass = (val) => {
   if (val > 80) return 'metric-critical'
   if (val > 50) return 'metric-warning'
   return 'metric-normal'
+}
+
+const alertMetricClass = (row, metric) => {
+  if (row.alertLevel === 'red') {
+    const details = row.alertDetails || []
+    if (details.some(d => d.metricName === metric && d.level === 'red')) return 'metric-critical'
+  }
+  if (row.alertLevel === 'yellow' || row.alertLevel === 'red') {
+    const details = row.alertDetails || []
+    if (details.some(d => d.metricName === metric)) return 'metric-warning'
+  }
+  return 'metric-normal'
+}
+
+const formatBytes = (bytes) => {
+  if (!bytes || bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
+}
+
+const formatTime = (ts) => {
+  if (!ts) return '-'
+  const d = new Date(ts)
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+const fetchAlerts = async (type, dataRef) => {
+  try {
+    const res = await checkMiddlewareAlerts(type)
+    if (res.data && res.data.instances) {
+      dataRef.value = res.data.instances
+      alertSummary.value = res.data.summary || { total: 0, redCount: 0, yellowCount: 0, normalCount: 0 }
+    }
+  } catch (e) {
+    console.warn('Alert check failed:', e)
+  }
 }
 
 const fetchData = async () => {
@@ -148,9 +543,45 @@ const fetchData = async () => {
     if (activeTab.value === 'redis') {
       const res = await getRedisInstances()
       redisData.value = res.data || []
+      await fetchAlerts('redis', redisData)
+      const [keysRes, slowRes] = await Promise.all([getRedisBigKeys(), getRedisSlowQueries()])
+      redisBigKeysData.value = keysRes.data || []
+      redisSlowQueriesData.value = slowRes.data || []
     } else if (activeTab.value === 'mysql') {
       const res = await getMysqlInstances()
       mysqlData.value = res.data || []
+      await fetchAlerts('mysql', mysqlData)
+      const [tablesRes, slowRes] = await Promise.all([getMysqlTopTables(), getMysqlSlowQueries()])
+      mysqlTopTablesData.value = tablesRes.data || []
+      mysqlSlowQueriesData.value = slowRes.data || []
+    } else if (activeTab.value === 'rocketmq') {
+      const res = await getRocketmqInstances()
+      rocketmqData.value = res.data || []
+      await fetchAlerts('rocketmq', rocketmqData)
+      const topRes = await getRocketmqTopTopics()
+      rocketmqTopTopicsData.value = topRes.data || []
+    } else if (activeTab.value === 'kafka') {
+      const res = await getKafkaInstances()
+      kafkaData.value = res.data || []
+      await fetchAlerts('kafka', kafkaData)
+      const topRes = await getKafkaTopPartitions()
+      kafkaTopPartitionsData.value = topRes.data || []
+    } else if (activeTab.value === 'lindorm') {
+      const res = await getLindormInstances()
+      lindormData.value = res.data || []
+      await fetchAlerts('lindorm', lindormData)
+      const topRes = await getLindormTopTables()
+      lindormTopTablesData.value = topRes.data || []
+    } else if (activeTab.value === 'elasticsearch') {
+      const res = await getElasticsearchInstances()
+      esData.value = res.data || []
+      await fetchAlerts('elasticsearch', esData)
+      const topRes = await getElasticsearchTopIndices()
+      esTopIndicesData.value = topRes.data || []
+    } else if (activeTab.value === 'oss') {
+      const res = await getOssBuckets()
+      ossData.value = res.data || []
+      await fetchAlerts('oss', ossData)
     } else if (activeTab.value === 'pod') {
       const [cpuRes, memRes] = await Promise.all([getPodCpuTop(), getPodMemoryTop()])
       podCpuData.value = cpuRes.data || []
@@ -166,6 +597,24 @@ const fetchData = async () => {
   }
 }
 
+const handleExport = () => {
+  let data = [], filename = '中间件监控', columns = []
+  if (activeTab.value === 'redis') {
+    data = redisData.value; filename = 'Redis监控'
+    columns = [{label:'实例ID',prop:'instanceId'},{label:'实例名称',prop:'instanceName'},{label:'CPU%',prop:'cpuUsage'},{label:'连接数',prop:'connections'},{label:'内存%',prop:'memoryUsage'},{label:'QPS',prop:'qps'}]
+  } else if (activeTab.value === 'mysql') {
+    data = mysqlData.value; filename = 'MySQL监控'
+    columns = [{label:'实例ID',prop:'instanceId'},{label:'实例名称',prop:'instanceName'},{label:'CPU%',prop:'cpuUsage'},{label:'连接数',prop:'connections'},{label:'IOPS',prop:'iops'},{label:'磁盘%',prop:'diskUsage'}]
+  } else if (activeTab.value === 'node') {
+    data = nodeData.value; filename = 'Node监控'
+    columns = [{label:'节点',prop:'node'},{label:'CPU%',prop:'cpuUsage'},{label:'内存%',prop:'memoryUsage'}]
+  } else if (activeTab.value === 'pod') {
+    data = podCpuData.value; filename = 'PodCPU监控'
+    columns = [{label:'Pod',prop:'pod'},{label:'CPU',prop:'cpu'}]
+  }
+  exportCSV(filename, data, columns)
+}
+
 onMounted(() => fetchData())
 </script>
 
@@ -175,10 +624,26 @@ onMounted(() => fetchData())
 .page-header h2 { margin: 0; font-size: 20px; }
 .header-actions { display: flex; align-items: center; gap: 12px; }
 .monitor-section { margin-bottom: 20px; }
+.sub-section { margin-top: 16px; }
+.sub-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #303133; }
+.alert-summary-bar { display: flex; gap: 8px; margin-bottom: 16px; }
 .pod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .pod-card { border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; }
 .card-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .metric-critical { color: #f56c6c; font-weight: 700; }
 .metric-warning { color: #e6a23c; font-weight: 600; }
 .metric-normal { color: #67c23a; }
+
+.alert-dot-red {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: #f56c6c; box-shadow: 0 0 4px #f56c6c;
+}
+.alert-dot-yellow {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: #e6a23c; box-shadow: 0 0 4px #e6a23c;
+}
+.alert-dot-normal {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: #67c23a;
+}
 </style>
