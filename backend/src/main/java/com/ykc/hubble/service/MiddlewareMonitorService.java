@@ -680,6 +680,11 @@ public class MiddlewareMonitorService {
                 list.add(item);
             }
 
+            // 只保留有实际请求的 bucket，避免 84 个空 bucket 拖慢前端
+            list = list.stream()
+                    .filter(item -> toDouble(item.get("totalRequests")) > 0 || toDouble(item.get("internetSend")) > 0)
+                    .toList();
+
             ossBucketsCache = list;
             ossBucketsCacheTime = now;
             log.info("OSS Bucket 监控已缓存: {} 个", list.size());

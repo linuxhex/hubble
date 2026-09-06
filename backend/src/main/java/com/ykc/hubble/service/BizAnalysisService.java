@@ -388,17 +388,17 @@ public class BizAnalysisService {
     }
 
     /**
-     * 时段分布：按小时统计订单量/电量（近 N 日平均）
+     * 时段分布：按小时统计订单量/电量（近 N 日，从日表按 dt 的小时部分聚合）
      */
     public List<Map<String, Object>> hourlyDistribution(int days) {
         if (days <= 0 || days > 30) days = 7;
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
-            "SELECT hour_of_day as hour, " +
+            "SELECT hour(dt) as hour, " +
             "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
-            "FROM internal.ads.ads_station_hourly_operation_dt " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
-            "GROUP BY hour_of_day ORDER BY hour_of_day");
+            "GROUP BY hour(dt) ORDER BY hour");
     }
 }
