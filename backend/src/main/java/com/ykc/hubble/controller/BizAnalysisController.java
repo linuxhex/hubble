@@ -106,4 +106,18 @@ public class BizAnalysisController {
             @RequestParam(defaultValue = "7") int days) {
         return Result.success(bizAnalysisService.hourlyDistribution(days));
     }
+
+    @GetMapping("/realtime-order")
+    @Operation(summary = "实时订单概览（各状态订单数）")
+    public Result<Map<String, Object>> realtimeOrder() {
+        return Result.success(bizAnalysisService.realtimeOrderOverview());
+    }
+
+    @GetMapping("/idle-station-ranking")
+    @Operation(summary = "长时间无订单枪站排名")
+    public Result<List<Map<String, Object>>> idleStationRanking(
+            @RequestParam(defaultValue = "30") int days,
+            @RequestParam(defaultValue = "20") int limit) {
+        return Result.success(bizAnalysisService.idleStationRanking(days, limit));
+    }
 }

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { nextTick } from 'vue'
 import MonitorDashboard from '../components/MonitorDashboard.vue'
 import AbnormalDashboard from '../components/AbnormalDashboard.vue'
 import GatewayDashboard from '../components/GatewayDashboard.vue'
@@ -148,6 +149,16 @@ router.beforeEach((to, from, next) => {
   }
 
   next()
+})
+
+// 支持锚点跳转：告警详情链接带 #anchor，滚动到对应区块
+router.afterEach((to) => {
+  if (to.hash) {
+    nextTick(() => {
+      const el = document.querySelector(to.hash)
+      if (el) el.scrollIntoView({ behavior: 'smooth' })
+    })
+  }
 })
 
 export default router

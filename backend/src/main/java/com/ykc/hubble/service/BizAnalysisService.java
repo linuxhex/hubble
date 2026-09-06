@@ -15,6 +15,7 @@ import java.util.*;
 public class BizAnalysisService {
 
     private final DorisQueryClient dorisQueryClient;
+    private final com.ykc.hubble.client.GrafanaClient grafanaClient;
 
     private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -306,14 +307,16 @@ public class BizAnalysisService {
 
     /**
      * 收入分析：近 N 日收入趋势 + 客单价 + 度电收入
+     * 注意：ads_station_daily_operation_dt.income 被数仓脱敏返回***，
+     * 改用 ads_order_history_agg_dt_da.order_total_fee（未脱敏的真实订单总金额）
      */
     public List<Map<String, Object>> revenueTrend(int days) {
         if (days <= 0 || days > 90) days = 30;
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         List<Map<String, Object>> rows = dorisQueryClient.query(
-            "SELECT dt as statDate, SUM(income) as income, SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
-            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "SELECT dt as statDate, SUM(order_total_fee) as income, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY dt ORDER BY dt");
 
@@ -357,7 +360,7 @@ public class BizAnalysisService {
     }
 
     /**
-     * 区域分布：按城市统计订单量/电量/收入（近 N 日）
+     * 区域分布：按城市统计订单量/电量/收入（近 N 日，用 order_total_fee 替代脱敏的 income）
      */
     public List<Map<String, Object>> regionDistribution(int days) {
         if (days <= 0 || days > 90) days = 30;
@@ -365,14 +368,14 @@ public class BizAnalysisService {
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT city_name as region, " +
-            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
-            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower, SUM(order_total_fee) as income " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY city_name ORDER BY orderCnt DESC LIMIT 20");
     }
 
     /**
-     * 站点排名：Top N 站点按订单量（近 N 日）
+     * 站点排名：Top N 站点按订单量（近 N 日，用 order_total_fee 替代脱敏的 income）
      */
     public List<Map<String, Object>> stationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
@@ -381,8 +384,8 @@ public class BizAnalysisService {
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT station_name as stationName, " +
-            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower, SUM(income) as income " +
-            "FROM internal.ads.ads_station_daily_operation_dt " +
+            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower, SUM(order_total_fee) as income " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY station_name ORDER BY orderCnt DESC LIMIT " + limit);
     }
@@ -400,5 +403,43 @@ public class BizAnalysisService {
             "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY dt_hour ORDER BY dt_hour");
+    }
+
+    /**
+     * 实时订单概览：从 Grafana 业务 Prometheus 取各状态实时订单数
+     */
+    public Map<String, Object> realtimeOrderOverview() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            String bizDs = grafanaClient.getBizDsUid();
+            var rows = grafanaClient.queryInstant("realtimeOrder", bizDs);
+            for (var row : rows) {
+                String id = String.valueOf(row.getOrDefault("id", ""));
+                String name = String.valueOf(row.getOrDefault("name", ""));
+                double value = toDouble(row.get("value"), 0);
+                result.put(name, value);
+                result.put("id_" + id, value);
+            }
+            result.put("timestamp", System.currentTimeMillis());
+        } catch (Exception e) {
+            log.error("查询实时订单概览失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 长时间无订单枪站排名：从数仓取近 N 日无订单/极少订单的站点
+     */
+    public List<Map<String, Object>> idleStationRanking(int days, int limit) {
+        if (days <= 0 || days > 90) days = 30;
+        if (limit <= 0 || limit > 100) limit = 20;
+        String endDate = latestDatePlusOne();
+        String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
+        return dorisQueryClient.query(
+            "SELECT station_name as stationName, " +
+            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
+            "GROUP BY station_name ORDER BY orderCnt ASC LIMIT " + limit);
     }
 }

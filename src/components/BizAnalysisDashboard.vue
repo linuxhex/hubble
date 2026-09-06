@@ -34,6 +34,16 @@
       </div>
     </div>
 
+    <!-- 1.5 实时订单概览 -->
+    <div class="summary-cards">
+      <div class="summary-card" v-for="(val, key) in realtimeOrderData" :key="key">
+        <template v-if="!key.startsWith('id_') && key !== 'timestamp'">
+          <div class="card-label">{{ key }}</div>
+          <div class="card-value highlight">{{ formatNum(val) }}</div>
+        </template>
+      </div>
+    </div>
+
     <!-- 2. 趋势区：月度趋势 + 年度同比 并排 -->
     <div class="chart-row two-col">
       <div class="chart-section">
@@ -167,16 +177,35 @@
         </el-table>
       </div>
     </div>
+
+    <!-- 8. 长时间无订单枪站排名 -->
+    <div class="ranking-section">
+      <div class="section-title">长时间无订单站点 Top20（近 30 日）</div>
+      <el-table :data="idleStationData" stripe border size="small" style="width: 100%">
+        <el-table-column label="#" width="50" align="center">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="站点" min-width="250" show-overflow-tooltip prop="stationName" />
+        <el-table-column label="订单量" width="120" align="right">
+          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+        </el-table-column>
+        <el-table-column label="电量(kWh)" width="140" align="right">
+          <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getRealtimeOrder, getIdleStationRanking } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
+const realtimeOrderData = ref({})
+const idleStationData = ref([])
 const monthlyData = ref([])
 const dailyData = ref([])
 const scenario = ref({})
@@ -405,9 +434,10 @@ const renderHourlyChart = () => {
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes] = await Promise.all([
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, rtRes, idleRes] = await Promise.all([
       getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
-      getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7)
+      getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
+      getRealtimeOrder(), getIdleStationRanking(30, 20)
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -422,6 +452,8 @@ const fetchAll = async () => {
     regionData.value = regRes.data || []
     stationData.value = staRes.data || []
     hourlyData.value = hrRes.data || []
+    realtimeOrderData.value = rtRes.data || {}
+    idleStationData.value = idleRes.data || []
 
     await nextTick()
     renderMonthlyChart()

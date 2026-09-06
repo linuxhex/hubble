@@ -1634,7 +1634,7 @@ public class GatewayService {
                         .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                         .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
                 String dashboardUrl = monitorProperties.getDashboardUrl();
-                String detailUrl = dashboardUrl + "/#/degradation-ranking";
+                String detailUrl = dashboardUrl + "/#/degradation-ranking?api=" + java.net.URLEncoder.encode(apiPath, java.nio.charset.StandardCharsets.UTF_8);
                 String title = "接口劣化告警";
                 StringBuilder md = new StringBuilder();
                 md.append("### 🔴 接口劣化告警\n\n");

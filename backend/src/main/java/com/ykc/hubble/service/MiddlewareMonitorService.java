@@ -631,7 +631,7 @@ public class MiddlewareMonitorService {
             var buckets = allBuckets.stream()
                     .filter(bucket -> bucket.getName() != null)
                     .toList();
-            log.info("OSS Bucket 数: 总{} 个, prod {} 个", allBuckets.size(), buckets.size());
+            log.info("OSS Bucket 数: 总{} 个", allBuckets.size());
 
             String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
             String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
@@ -640,18 +640,27 @@ public class MiddlewareMonitorService {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("bucketName", bucket.getName());
                 item.put("instanceName", bucket.getName());
+                item.put("location", bucket.getLocation());
+                item.put("creationDate", String.valueOf(bucket.getCreationDate()));
 
                 String dim = "[{\"BucketName\":\"" + bucket.getName() + "\"}]";
-                item.put("totalRequests", queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime));
-                item.put("internetSend", queryLatestMetric("acs_oss", "InternetSendBytes", dim, startTime, endTime));
-                item.put("errorRate4xx", queryLatestMetric("acs_oss", "ClientErrorRate", dim, startTime, endTime));
-                item.put("errorRate5xx", queryLatestMetric("acs_oss", "ServerErrorRate", dim, startTime, endTime));
+                // 尝试多个指标，能取到什么就展示什么
+                double totalReq = queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime);
+                double internetSend = queryLatestMetric("acs_oss", "InternetSendBytes", dim, startTime, endTime);
+                double internetRecv = queryLatestMetric("acs_oss", "InternetRecvBytes", dim, startTime, endTime);
+                double successRate = queryLatestMetric("acs_oss", "SuccessRate", dim, startTime, endTime);
+                item.put("totalRequests", totalReq);
+                item.put("internetSend", internetSend);
+                item.put("internetRecv", internetRecv);
+                item.put("successRate", successRate);
                 list.add(item);
             }
 
-            // 只保留有实际请求的 bucket，避免 84 个空 bucket 拖慢前端
+            // 只保留有实际请求/带宽的 bucket
             list = list.stream()
-                    .filter(item -> toDouble(item.get("totalRequests")) > 0 || toDouble(item.get("internetSend")) > 0)
+                    .filter(item -> toDouble(item.get("totalRequests")) > 0
+                            || toDouble(item.get("internetSend")) > 0
+                            || toDouble(item.get("internetRecv")) > 0)
                     .toList();
 
             ossBucketsCache = list;

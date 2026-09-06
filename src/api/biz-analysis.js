@@ -51,3 +51,11 @@ export function getStationRanking(days = 30, limit = 20) {
 export function getHourlyDistribution(days = 7) {
   return request.get('/biz-analysis/hourly-distribution', { params: { days } })
 }
+
+export function getRealtimeOrder() {
+  return request.get('/biz-analysis/realtime-order')
+}
+
+export function getIdleStationRanking(days = 30, limit = 20) {
+  return request.get('/biz-analysis/idle-station-ranking', { params: { days, limit } })
+}
