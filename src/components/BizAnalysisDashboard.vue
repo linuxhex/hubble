@@ -131,8 +131,8 @@
           <el-table-column label="订单量" width="100" align="right">
             <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
           </el-table-column>
-          <el-table-column label="收入" width="100" align="right">
-            <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(0) : '-' }}</template>
+          <el-table-column label="电量(kWh)" width="110" align="right">
+            <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
           </el-table-column>
         </el-table>
       </div>
@@ -146,8 +146,8 @@
           <el-table-column label="订单量" width="100" align="right">
             <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
           </el-table-column>
-          <el-table-column label="收入" width="100" align="right">
-            <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(0) : '-' }}</template>
+          <el-table-column label="电量(kWh)" width="110" align="right">
+            <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
           </el-table-column>
         </el-table>
       </div>
