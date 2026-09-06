@@ -34,33 +34,63 @@
       </div>
     </div>
 
-    <!-- 2. 月度趋势 + 环比 -->
-    <div class="chart-section">
-      <div class="section-title">月度趋势（近 12 月）</div>
-      <div ref="monthlyChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 2.5 年度同比对比 -->
-    <div class="chart-section">
-      <div class="section-title">
-        年度同比（{{ yearlyData.currentYear || '-' }} vs {{ yearlyData.lastYear || '-' }}）
-        <span v-if="yearlyData.orderYoy != null" class="yoy-badge" :class="yearlyData.orderYoy >= 0 ? 'up' : 'down'">
-          订单同比 {{ yearlyData.orderYoy >= 0 ? '+' : '' }}{{ yearlyData.orderYoy }}%
-        </span>
-        <span v-if="yearlyData.powerYoy != null" class="yoy-badge" :class="yearlyData.powerYoy >= 0 ? 'up' : 'down'" style="margin-left:8px">
-          电量同比 {{ yearlyData.powerYoy >= 0 ? '+' : '' }}{{ yearlyData.powerYoy }}%
-        </span>
+    <!-- 2. 趋势区：月度趋势 + 年度同比 并排 -->
+    <div class="chart-row two-col">
+      <div class="chart-section">
+        <div class="section-title">月度趋势（近 12 月）</div>
+        <div ref="monthlyChartRef" class="chart-container"></div>
       </div>
-      <div ref="yearlyChartRef" class="chart-container"></div>
+      <div class="chart-section">
+        <div class="section-title">
+          年度同比（{{ yearlyData.currentYear || '-' }} vs {{ yearlyData.lastYear || '-' }}）
+          <span v-if="yearlyData.orderYoy != null" class="yoy-badge" :class="yearlyData.orderYoy >= 0 ? 'up' : 'down'">
+            订单 {{ yearlyData.orderYoy >= 0 ? '+' : '' }}{{ yearlyData.orderYoy }}%
+          </span>
+          <span v-if="yearlyData.powerYoy != null" class="yoy-badge" :class="yearlyData.powerYoy >= 0 ? 'up' : 'down'" style="margin-left:8px">
+            电量 {{ yearlyData.powerYoy >= 0 ? '+' : '' }}{{ yearlyData.powerYoy }}%
+          </span>
+        </div>
+        <div ref="yearlyChartRef" class="chart-container"></div>
+      </div>
     </div>
 
-    <!-- 3. 每日订单电量 -->
-    <div class="chart-section">
-      <div class="section-title">每日订单 & 电量（近 30 日）</div>
-      <div ref="dailyChartRef" class="chart-container"></div>
+    <!-- 3. 趋势区：每日订单电量 + 收入趋势 并排 -->
+    <div class="chart-row two-col">
+      <div class="chart-section">
+        <div class="section-title">每日订单 & 电量（近 30 日）</div>
+        <div ref="dailyChartRef" class="chart-container"></div>
+      </div>
+      <div class="chart-section">
+        <div class="section-title">收入趋势 & 客单价（近 30 日）</div>
+        <div ref="revenueChartRef" class="chart-container"></div>
+      </div>
     </div>
 
-    <!-- 4. 业务场景拆分 -->
+    <!-- 4. 趋势区：枪利用率 + 充电时段分布 并排 -->
+    <div class="chart-row two-col">
+      <div class="chart-section">
+        <div class="section-title">枪利用率趋势（近 30 日）</div>
+        <div ref="utilizationChartRef" class="chart-container"></div>
+      </div>
+      <div class="chart-section">
+        <div class="section-title">充电时段分布（近 7 日）</div>
+        <div ref="hourlyChartRef" class="chart-container"></div>
+      </div>
+    </div>
+
+    <!-- 5. 用户区：DAU + MAU 并排 -->
+    <div class="chart-row two-col">
+      <div class="chart-section">
+        <div class="section-title">DAU 日活趋势（近 30 日）</div>
+        <div ref="appActiveChartRef" class="chart-container"></div>
+      </div>
+      <div class="chart-section">
+        <div class="section-title">MAU 月活趋势（近 6 月）</div>
+        <div ref="mauChartRef" class="chart-container"></div>
+      </div>
+    </div>
+
+    <!-- 6. 场景拆分 -->
     <div class="scenario-section">
       <div class="section-title">业务场景拆分</div>
       <div class="scenario-grid">
@@ -89,91 +119,53 @@
       </div>
     </div>
 
-    <!-- 5. 小程序活跃趋势 -->
-    <div class="chart-section">
-      <div class="section-title">DAU 日活趋势（近 30 日）</div>
-      <div ref="appActiveChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 5.5 MAU 月活趋势 -->
-    <div class="chart-section">
-      <div class="section-title">MAU 月活趋势（近 6 月）</div>
-      <div ref="mauChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 6. 充电最活跃用户排名 -->
-    <div class="ranking-section">
-      <div class="section-title">充电最活跃用户 Top20</div>
-      <el-table :data="activeUsers" stripe border size="small" style="width: 100%">
-        <el-table-column label="排名" width="70" align="center">
-          <template #default="{ $index }">{{ $index + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="用户ID" min-width="200" show-overflow-tooltip prop="userId" />
-        <el-table-column label="订单数" width="120" align="right">
-          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
-        </el-table-column>
-        <el-table-column label="总金额" width="140" align="right">
-          <template #default="{ row }">{{ row.totalPrice != null ? Number(row.totalPrice).toFixed(2) : '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <!-- 7. 收入趋势 + 客单价 -->
-    <div class="chart-section">
-      <div class="section-title">收入趋势 & 客单价（近 30 日）</div>
-      <div ref="revenueChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 8. 枪利用率趋势 -->
-    <div class="chart-section">
-      <div class="section-title">枪利用率趋势（近 30 日）</div>
-      <div ref="utilizationChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 9. 时段分布 -->
-    <div class="chart-section">
-      <div class="section-title">充电时段分布（近 7 日平均）</div>
-      <div ref="hourlyChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 10. 区域分布 -->
-    <div class="ranking-section">
-      <div class="section-title">区域分布 Top20（近 30 日）</div>
-      <el-table :data="regionData" stripe border size="small" style="width: 100%">
-        <el-table-column label="排名" width="70" align="center">
-          <template #default="{ $index }">{{ $index + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="城市" min-width="150" prop="region" />
-        <el-table-column label="订单量" width="120" align="right">
-          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
-        </el-table-column>
-        <el-table-column label="电量(kWh)" width="140" align="right">
-          <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
-        </el-table-column>
-        <el-table-column label="收入(元)" align="right">
-          <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(2) : '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <!-- 11. 站点排名 -->
-    <div class="ranking-section">
-      <div class="section-title">站点排名 Top20（近 30 日）</div>
-      <el-table :data="stationData" stripe border size="small" style="width: 100%">
-        <el-table-column label="排名" width="70" align="center">
-          <template #default="{ $index }">{{ $index + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="站点" min-width="200" show-overflow-tooltip prop="stationName" />
-        <el-table-column label="订单量" width="120" align="right">
-          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
-        </el-table-column>
-        <el-table-column label="电量(kWh)" width="140" align="right">
-          <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
-        </el-table-column>
-        <el-table-column label="收入(元)" align="right">
-          <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(2) : '-' }}</template>
-        </el-table-column>
-      </el-table>
+    <!-- 7. 排名区：区域分布 + 站点排名 + 活跃用户 三列 -->
+    <div class="chart-row three-col">
+      <div class="ranking-section">
+        <div class="section-title">区域分布 Top20</div>
+        <el-table :data="regionData" stripe border size="small" style="width: 100%" max-height="500">
+          <el-table-column label="#" width="50" align="center">
+            <template #default="{ $index }">{{ $index + 1 }}</template>
+          </el-table-column>
+          <el-table-column label="城市" min-width="100" prop="region" />
+          <el-table-column label="订单量" width="100" align="right">
+            <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+          </el-table-column>
+          <el-table-column label="收入" width="100" align="right">
+            <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(0) : '-' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <div class="ranking-section">
+        <div class="section-title">站点排名 Top20</div>
+        <el-table :data="stationData" stripe border size="small" style="width: 100%" max-height="500">
+          <el-table-column label="#" width="50" align="center">
+            <template #default="{ $index }">{{ $index + 1 }}</template>
+          </el-table-column>
+          <el-table-column label="站点" min-width="120" show-overflow-tooltip prop="stationName" />
+          <el-table-column label="订单量" width="100" align="right">
+            <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+          </el-table-column>
+          <el-table-column label="收入" width="100" align="right">
+            <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(0) : '-' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <div class="ranking-section">
+        <div class="section-title">活跃用户 Top20</div>
+        <el-table :data="activeUsers" stripe border size="small" style="width: 100%" max-height="500">
+          <el-table-column label="#" width="50" align="center">
+            <template #default="{ $index }">{{ $index + 1 }}</template>
+          </el-table-column>
+          <el-table-column label="用户ID" min-width="120" show-overflow-tooltip prop="userId" />
+          <el-table-column label="订单数" width="90" align="right">
+            <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+          </el-table-column>
+          <el-table-column label="总金额" width="100" align="right">
+            <template #default="{ row }">{{ row.totalPrice != null ? Number(row.totalPrice).toFixed(2) : '-' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
     </div>
   </div>
 </template>
@@ -492,6 +484,10 @@ onUnmounted(() => {
 .chart-section { margin-bottom: 20px; }
 .section-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: #303133; }
 .chart-container { height: 320px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; }
+.chart-row { display: flex; gap: 16px; margin-bottom: 20px; }
+.chart-row.two-col .chart-section { flex: 1; min-width: 0; }
+.chart-row.three-col { align-items: flex-start; }
+.chart-row.three-col .ranking-section { flex: 1; min-width: 0; }
 .scenario-section { margin-bottom: 20px; }
 .scenario-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .scenario-card { background: #fff; border: 1px solid #ebeef5; border-radius: 8px; padding: 12px; }
