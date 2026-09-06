@@ -14,6 +14,7 @@
           <el-radio-button value="pod">Pod</el-radio-button>
           <el-radio-button value="node">Node</el-radio-button>
           <el-radio-button value="jvm">JVM</el-radio-button>
+          <el-radio-button value="threadpool">线程池</el-radio-button>
         </el-radio-group>
         <el-button size="small" @click="fetchData" :loading="loading">刷新</el-button>
         <el-button size="small" @click="handleExport">导出</el-button>
@@ -21,7 +22,7 @@
     </div>
 
     <!-- 告警摘要 -->
-    <div v-if="alertSummary.total > 0 && !['pod','node','jvm'].includes(activeTab)" class="alert-summary-bar">
+    <div v-if="alertSummary.total > 0 && !['pod','node','jvm','threadpool'].includes(activeTab)" class="alert-summary-bar">
       <el-alert
         v-if="alertSummary.redCount > 0"
         :title="`${alertSummary.redCount} 个实例红盘告警`"
@@ -499,6 +500,27 @@
       </el-table>
       <el-empty v-if="!loading && jvmData.length === 0" description="暂无 JVM 数据" />
     </div>
+
+    <!-- 线程池监控 -->
+    <div v-if="activeTab === 'threadpool'" class="monitor-section">
+      <el-table v-loading="loading" :data="threadPoolData" stripe border size="small" style="width: 100%">
+        <el-table-column label="排名" width="60" type="index" />
+        <el-table-column label="应用" min-width="160" show-overflow-tooltip prop="application" />
+        <el-table-column label="线程池" min-width="200" show-overflow-tooltip prop="threadPoolName" />
+        <el-table-column label="活跃线程" width="100" align="right" prop="activeCount" />
+        <el-table-column label="最大线程" width="100" align="right" prop="maxSize" />
+        <el-table-column label="使用率%" width="100" align="right">
+          <template #default="{ row }">
+            <span :class="metricClass(row.usageRate)">{{ row.usageRate.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="队列大小" width="100" align="right" prop="queueSize" />
+        <el-table-column label="拒绝/分钟" width="110" align="right">
+          <template #default="{ row }">{{ row.rejectPerMin.toFixed(1) }}</template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!loading && threadPoolData.length === 0" description="暂无线程池数据" />
+    </div>
   </div>
 </template>
 
@@ -513,7 +535,7 @@ import {
   getRedisBigKeys, getRedisSlowQueries,
   getMysqlSlowQueries,
   getLindormTopTables, getElasticsearchTopIndices,
-  getDbInstances, getDruidInstances, getJvmInstances,
+  getDbInstances, getDruidInstances, getJvmInstances, getThreadPoolInstances,
   checkMiddlewareAlerts
 } from '@/api/middleware.js'
 
@@ -536,6 +558,7 @@ const nodeData = ref([])
 const dbData = ref([])
 const druidData = ref([])
 const jvmData = ref([])
+const threadPoolData = ref([])
 
 const rocketmqTopTopicsData = ref([])
 const kafkaTopPartitionsData = ref([])
@@ -646,6 +669,9 @@ const fetchData = async () => {
     } else if (activeTab.value === 'jvm') {
       const res = await getJvmInstances()
       jvmData.value = res.data || []
+    } else if (activeTab.value === 'threadpool') {
+      const res = await getThreadPoolInstances()
+      threadPoolData.value = res.data || []
     }
   } catch (error) {
     console.error('Fetch error:', error)
@@ -671,6 +697,9 @@ const handleExport = () => {
   } else if (activeTab.value === 'jvm') {
     data = jvmData.value; filename = 'JVM监控'
     columns = [{label:'应用',prop:'application'},{label:'堆内存%',prop:'heapUsage'},{label:'GC/s',prop:'gcRate'},{label:'QPS',prop:'qps'},{label:'CPU%',prop:'cpuUsage'}]
+  } else if (activeTab.value === 'threadpool') {
+    data = threadPoolData.value; filename = '线程池监控'
+    columns = [{label:'应用',prop:'application'},{label:'线程池',prop:'threadPoolName'},{label:'活跃线程',prop:'activeCount'},{label:'最大线程',prop:'maxSize'},{label:'使用率%',prop:'usageRate'},{label:'队列大小',prop:'queueSize'},{label:'拒绝/分钟',prop:'rejectPerMin'}]
   }
   exportCSV(filename, data, columns)
 }

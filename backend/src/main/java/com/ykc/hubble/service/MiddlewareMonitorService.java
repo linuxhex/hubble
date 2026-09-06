@@ -77,13 +77,15 @@ public class MiddlewareMonitorService {
     private List<Map<String, Object>> elasticsearchTopIndicesCache = null;
     private long elasticsearchTopIndicesCacheTime = 0;
 
-    // DB 分库 / Druid 连接池 / JVM 监控缓存（5 分钟）
+    // DB 分库 / Druid 连接池 / JVM / 线程池 监控缓存（5 分钟）
     private List<Map<String, Object>> dbInstancesCache = null;
     private long dbInstancesCacheTime = 0;
     private List<Map<String, Object>> druidInstancesCache = null;
     private long druidInstancesCacheTime = 0;
     private List<Map<String, Object>> jvmInstancesCache = null;
     private long jvmInstancesCacheTime = 0;
+    private List<Map<String, Object>> threadPoolCache = null;
+    private long threadPoolCacheTime = 0;
 
     /**
      * 查询 Redis 监控概览
@@ -925,6 +927,68 @@ public class MiddlewareMonitorService {
             log.info("JVM 监控已缓存: {} 个应用", list.size());
         } catch (Exception e) {
             log.error("查询 JVM 监控失败: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    /**
+     * 线程池监控：按应用+线程池名聚合活跃线程/最大线程/队列大小/拒绝任务数（k8s Prometheus），5 分钟缓存
+     */
+    public List<Map<String, Object>> threadPoolInstances() {
+        long now = System.currentTimeMillis();
+        if (threadPoolCache != null && now - threadPoolCacheTime < MONITOR_CACHE_TTL_MS) {
+            return threadPoolCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            String ds = grafanaClient.getDsUid();
+
+            // 发现有线程池指标的应用+线程池名
+            var poolRows = grafanaClient.queryInstant(
+                    "count by (app_name, thread_pool_name) (thread_pool_active_count)", ds);
+            for (var row : poolRows) {
+                String app = String.valueOf(row.getOrDefault("app_name", ""));
+                String poolName = String.valueOf(row.getOrDefault("thread_pool_name", ""));
+                if (app.isEmpty() || poolName.isEmpty()) continue;
+
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("application", app);
+                item.put("threadPoolName", poolName);
+
+                // 活跃线程数
+                var active = grafanaClient.queryInstant(
+                        "sum(thread_pool_active_count{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
+                // 最大线程数
+                var max = grafanaClient.queryInstant(
+                        "sum(thread_pool_maximum_size{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
+                // 队列大小
+                var queue = grafanaClient.queryInstant(
+                        "sum(thread_pool_queue_size{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
+                // 拒绝任务数（每分钟）
+                var reject = grafanaClient.queryInstant(
+                        "sum(rate(thread_pool_reject_count{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"}[1m]))*60", ds);
+
+                double activeVal = extractValue(active);
+                double maxVal = extractValue(max);
+                item.put("activeCount", activeVal);
+                item.put("maxSize", maxVal);
+                item.put("queueSize", extractValue(queue));
+                item.put("rejectPerMin", extractValue(reject));
+                item.put("usageRate", maxVal > 0 ? activeVal / maxVal * 100 : 0);
+                list.add(item);
+            }
+
+            // 按活跃线程数降序
+            list.sort((a, b) -> Double.compare(
+                    toDouble(b.getOrDefault("activeCount", 0)),
+                    toDouble(a.getOrDefault("activeCount", 0))));
+
+            threadPoolCache = list;
+            threadPoolCacheTime = now;
+            log.info("线程池监控已缓存: {} 个线程池", list.size());
+        } catch (Exception e) {
+            log.error("查询线程池监控失败: {}", e.getMessage());
         }
         return list;
     }

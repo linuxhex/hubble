@@ -132,4 +132,9 @@ public class MiddlewareController {
     public Result<List<Map<String, Object>>> jvmInstances() {
         return Result.success(middlewareMonitorService.jvmInstances());
     }
+
+    @GetMapping("/thread-pool/instances")
+    public Result<List<Map<String, Object>>> threadPoolInstances() {
+        return Result.success(middlewareMonitorService.threadPoolInstances());
+    }
 }

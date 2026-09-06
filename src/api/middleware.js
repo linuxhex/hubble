@@ -115,3 +115,7 @@ export function getDruidInstances() {
 export function getJvmInstances() {
   return request.get('/middleware/jvm/instances')
 }
+
+export function getThreadPoolInstances() {
+  return request.get('/middleware/thread-pool/instances')
+}
