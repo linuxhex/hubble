@@ -360,7 +360,8 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * RocketMQ 实例监控（消息堆积/生产TPS/消费TPS），5 分钟缓存，自动发现实例
+     * RocketMQ 实例监控（消息堆积/生产TPS/消费TPS），5 分钟缓存。
+     * 优先从 Aliyun Prometheus 获取（CloudMonitor API 返回 0 实例），CloudMonitor 作 fallback。
      */
     public List<Map<String, Object>> rocketmqInstances() {
         long now = System.currentTimeMillis();
@@ -370,25 +371,55 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            var allInstances = cloudMonitorClient.listRocketMQInstances();
-            var instances = allInstances.stream()
-                    .filter(inst -> inst.getInstanceName() != null && inst.getInstanceName().startsWith("prod-"))
-                    .toList();
-            log.info("RocketMQ 实例数: 总{} 个, prod {} 个", allInstances.size(), instances.size());
+            String aliyunDs = grafanaClient.getAliyunDsUid();
+            var instanceRows = grafanaClient.queryInstant(
+                    "count by (instanceId, instanceName) ({__name__=~\"AliyunMq_.*\"})", aliyunDs);
 
-            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+            if (!instanceRows.isEmpty()) {
+                for (var row : instanceRows) {
+                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
+                    if (instanceId.isEmpty()) continue;
+                    String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
 
-            for (var inst : instances) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("instanceId", inst.getInstanceId());
-                item.put("instanceName", inst.getInstanceName());
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("instanceId", instanceId);
+                    item.put("instanceName", instanceName);
 
-                String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
-                item.put("messageAccumulation", queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime));
-                item.put("sendTps", queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime));
-                item.put("consumeTps", queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime));
-                list.add(item);
+                    var lagResults = grafanaClient.queryInstant(
+                            "sum by (instanceId) (AliyunMq_MessageAccumulation{instanceId=\"" + instanceId + "\"})", aliyunDs);
+                    item.put("messageAccumulation", extractValue(lagResults));
+
+                    var sendResults = grafanaClient.queryInstant(
+                            "sum by (instanceId) (AliyunMq_SendTps{instanceId=\"" + instanceId + "\"})", aliyunDs);
+                    item.put("sendTps", extractValue(sendResults));
+
+                    var consumeResults = grafanaClient.queryInstant(
+                            "sum by (instanceId) (AliyunMq_ConsumeTps{instanceId=\"" + instanceId + "\"})", aliyunDs);
+                    item.put("consumeTps", extractValue(consumeResults));
+
+                    list.add(item);
+                }
+                log.info("RocketMQ 实例监控(Prometheus): {} 个", list.size());
+            } else {
+                var allInstances = cloudMonitorClient.listRocketMQInstances();
+                var instances = allInstances.stream()
+                        .filter(inst -> inst.getInstanceName() != null && inst.getInstanceName().startsWith("prod-"))
+                        .toList();
+                log.info("RocketMQ 实例数(CloudMonitor): 总{} 个, prod {} 个", allInstances.size(), instances.size());
+
+                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
+                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+
+                for (var inst : instances) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("instanceId", inst.getInstanceId());
+                    item.put("instanceName", inst.getInstanceName());
+                    String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
+                    item.put("messageAccumulation", queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime));
+                    item.put("sendTps", queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime));
+                    item.put("consumeTps", queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime));
+                    list.add(item);
+                }
             }
 
             rocketmqInstancesCache = list;
@@ -1048,7 +1079,7 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * Redis Slow Queries（使用 CloudMonitor 指标，因 API 权限不足）
+     * Redis Slow Queries：优先从 Aliyun Prometheus 获取，CloudMonitor 作 fallback
      */
     public List<Map<String, Object>> redisSlowQueries() {
         long now = System.currentTimeMillis();
@@ -1058,42 +1089,67 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            var instances = redisInstances();
-            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusHours(1).format(FMT);
+            String aliyunDs = grafanaClient.getAliyunDsUid();
 
-            String[] possibleMetrics = {"SlowRequests", "slow_requests", "Redis_SlowRequests", "slowlog"};
-            String workingMetric = null;
-
-            for (var inst : instances) {
-                String instanceId = (String) inst.get("instanceId");
-                String instanceName = (String) inst.getOrDefault("instanceName", instanceId);
-                String dimensions = String.format("[{\"instanceId\":\"%s\"}]", instanceId);
-
-                for (String metricName : possibleMetrics) {
-                    var dataPoints = cloudMonitorClient.queryMetric("acs_kvstore", metricName,
-                            dimensions, 60, startTime, endTime);
-
-                    if (!dataPoints.isEmpty()) {
-                        workingMetric = metricName;
-                        for (var point : dataPoints) {
-                            if (point[1] > 0) {
-                                Map<String, Object> item = new LinkedHashMap<>();
-                                item.put("instanceId", instanceId);
-                                item.put("instanceName", instanceName);
-                                item.put("timestamp", (long) point[0]);
-                                item.put("slowCount", (long) point[1]);
-                                item.put("metric", metricName);
-                                list.add(item);
-                            }
-                        }
-                        break;
-                    }
-                }
+            var slowRows = grafanaClient.queryInstant(
+                    "sum by (instanceId, instanceName) (AliyunRedis_SlowRequests)", aliyunDs);
+            if (slowRows.isEmpty()) {
+                slowRows = grafanaClient.queryInstant(
+                        "sum by (instanceId, instanceName) (AliyunKvstore_SlowRequests)", aliyunDs);
             }
 
-            if (workingMetric != null) {
-                log.info("Redis 慢查询使用指标: {}", workingMetric);
+            if (!slowRows.isEmpty()) {
+                for (var row : slowRows) {
+                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
+                    if (instanceId.isEmpty()) continue;
+                    String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+                    Object val = row.getOrDefault("value", 0);
+                    double slowCount = val instanceof Number ? ((Number) val).doubleValue() : 0;
+                    if (slowCount <= 0) continue;
+
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("instanceId", instanceId);
+                    item.put("instanceName", instanceName);
+                    item.put("timestamp", now);
+                    item.put("slowCount", (long) slowCount);
+                    item.put("metric", "Prometheus");
+                    list.add(item);
+                }
+                log.info("Redis Slow Queries(Prometheus): {} 个", list.size());
+            }
+
+            if (list.isEmpty()) {
+                log.info("Prometheus 无 Redis 慢查数据，尝试 CloudMonitor");
+                var instances = redisInstances();
+                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
+                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusHours(1).format(FMT);
+
+                String[] possibleMetrics = {"SlowRequests", "slow_requests", "Redis_SlowRequests", "slowlog"};
+                for (var inst : instances) {
+                    String instanceId = (String) inst.get("instanceId");
+                    String instanceName = (String) inst.getOrDefault("instanceName", instanceId);
+                    String dimensions = String.format("[{\"instanceId\":\"%s\"}]", instanceId);
+
+                    for (String metricName : possibleMetrics) {
+                        var dataPoints = cloudMonitorClient.queryMetric("acs_kvstore", metricName,
+                                dimensions, 60, startTime, endTime);
+                        if (!dataPoints.isEmpty()) {
+                            for (var point : dataPoints) {
+                                if (point[1] > 0) {
+                                    Map<String, Object> item = new LinkedHashMap<>();
+                                    item.put("instanceId", instanceId);
+                                    item.put("instanceName", instanceName);
+                                    item.put("timestamp", (long) point[0]);
+                                    item.put("slowCount", (long) point[1]);
+                                    item.put("metric", metricName);
+                                    list.add(item);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                log.info("Redis Slow Queries(CloudMonitor): {} 个", list.size());
             }
 
             list.sort((a, b) -> Long.compare(
@@ -1110,7 +1166,7 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * MySQL Top Tables：从 Aliyun Prometheus 获取 RDS/PolarDB 各库的磁盘使用率作为 Top Tables 代理指标
+     * MySQL Top Tables：从 Aliyun Prometheus 获取 RDS/PolarDB 各实例的磁盘使用率
      */
     public List<Map<String, Object>> mysqlTopTables() {
         long now = System.currentTimeMillis();
@@ -1122,30 +1178,43 @@ public class MiddlewareMonitorService {
         try {
             String ds = grafanaClient.getAliyunDsUid();
 
-            // RDS 磁盘使用率
-            var rdsRows = grafanaClient.queryInstant(
-                    "count by (desc) (AliyunRds_DiskUsage{desc=~\"prod-.*\"})", ds);
-            for (var row : rdsRows) {
-                String desc = String.valueOf(row.getOrDefault("desc", ""));
-                if (desc.isEmpty()) continue;
-                var disk = grafanaClient.queryInstant("AliyunRds_DiskUsage{desc=\"" + desc + "\"}", ds);
+            var rdsInstances = grafanaClient.queryInstant(
+                    "count by (instanceId, instanceName) ({__name__=~\"AliyunRds_.*\"})", ds);
+            for (var row : rdsInstances) {
+                String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
+                if (instanceId.isEmpty()) continue;
+                String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+
+                var disk = grafanaClient.queryInstant(
+                        "AliyunRds_DiskUsage{instanceId=\"" + instanceId + "\"}", ds);
+                if (disk.isEmpty()) {
+                    disk = grafanaClient.queryInstant(
+                            "AliyunRds_disk_usage{instanceId=\"" + instanceId + "\"}", ds);
+                }
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("tableName", desc);
+                item.put("tableName", instanceName);
+                item.put("instanceId", instanceId);
                 item.put("engine", "RDS");
                 item.put("diskUsage", extractValue(disk));
                 list.add(item);
             }
 
-            // PolarDB 磁盘使用率
-            var polardbRows = grafanaClient.queryInstant(
-                    "count by (desc) (AliyunPolardb_cluster_disk_utilization{desc=~\"prod-.*\"})", ds);
-            for (var row : polardbRows) {
-                String desc = String.valueOf(row.getOrDefault("desc", ""));
-                if (desc.isEmpty()) continue;
+            var polardbInstances = grafanaClient.queryInstant(
+                    "count by (instanceId, instanceName) ({__name__=~\"AliyunPolardb_.*\"})", ds);
+            for (var row : polardbInstances) {
+                String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
+                if (instanceId.isEmpty()) continue;
+                String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+
                 var disk = grafanaClient.queryInstant(
-                        "avg by (desc) (AliyunPolardb_cluster_disk_utilization{desc=\"" + desc + "\"})", ds);
+                        "AliyunPolardb_cluster_disk_utilization{instanceId=\"" + instanceId + "\"}", ds);
+                if (disk.isEmpty()) {
+                    disk = grafanaClient.queryInstant(
+                            "AliyunPolardb_DiskUsage{instanceId=\"" + instanceId + "\"}", ds);
+                }
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("tableName", desc);
+                item.put("tableName", instanceName);
+                item.put("instanceId", instanceId);
                 item.put("engine", "PolarDB");
                 item.put("diskUsage", extractValue(disk));
                 list.add(item);
@@ -1155,9 +1224,9 @@ public class MiddlewareMonitorService {
                     ((Number) b.getOrDefault("diskUsage", 0)).doubleValue(),
                     ((Number) a.getOrDefault("diskUsage", 0)).doubleValue()));
 
-            mysqlTopTablesCache = list;
+            mysqlTopTablesCache = list.size() > 50 ? list.subList(0, 50) : list;
             mysqlTopTablesCacheTime = now;
-            log.info("MySQL Top Tables: {} 个（已缓存）", list.size());
+            log.info("MySQL Top Tables: {} 个（已缓存）", mysqlTopTablesCache.size());
         } catch (Exception e) {
             log.error("查询 MySQL Top Tables 失败: {}", e.getMessage());
         }

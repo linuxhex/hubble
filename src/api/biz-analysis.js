@@ -31,3 +31,23 @@ export function getMauTrend() {
 export function getYearlyComparison() {
   return request.get('/biz-analysis/yearly-comparison')
 }
+
+export function getRevenueTrend(days = 30) {
+  return request.get('/biz-analysis/revenue-trend', { params: { days } })
+}
+
+export function getUtilizationTrend(days = 30) {
+  return request.get('/biz-analysis/utilization-trend', { params: { days } })
+}
+
+export function getRegionDistribution(days = 30) {
+  return request.get('/biz-analysis/region-distribution', { params: { days } })
+}
+
+export function getStationRanking(days = 30, limit = 20) {
+  return request.get('/biz-analysis/station-ranking', { params: { days, limit } })
+}
+
+export function getHourlyDistribution(days = 7) {
+  return request.get('/biz-analysis/hourly-distribution', { params: { days } })
+}

@@ -117,13 +117,71 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <!-- 7. 收入趋势 + 客单价 -->
+    <div class="chart-section">
+      <div class="section-title">收入趋势 & 客单价（近 30 日）</div>
+      <div ref="revenueChartRef" class="chart-container"></div>
+    </div>
+
+    <!-- 8. 枪利用率趋势 -->
+    <div class="chart-section">
+      <div class="section-title">枪利用率趋势（近 30 日）</div>
+      <div ref="utilizationChartRef" class="chart-container"></div>
+    </div>
+
+    <!-- 9. 时段分布 -->
+    <div class="chart-section">
+      <div class="section-title">充电时段分布（近 7 日平均）</div>
+      <div ref="hourlyChartRef" class="chart-container"></div>
+    </div>
+
+    <!-- 10. 区域分布 -->
+    <div class="ranking-section">
+      <div class="section-title">区域分布 Top20（近 30 日）</div>
+      <el-table :data="regionData" stripe border size="small" style="width: 100%">
+        <el-table-column label="排名" width="70" align="center">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="城市" min-width="150" prop="region" />
+        <el-table-column label="订单量" width="120" align="right">
+          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+        </el-table-column>
+        <el-table-column label="电量(kWh)" width="140" align="right">
+          <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
+        </el-table-column>
+        <el-table-column label="收入(元)" align="right">
+          <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(2) : '-' }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 11. 站点排名 -->
+    <div class="ranking-section">
+      <div class="section-title">站点排名 Top20（近 30 日）</div>
+      <el-table :data="stationData" stripe border size="small" style="width: 100%">
+        <el-table-column label="排名" width="70" align="center">
+          <template #default="{ $index }">{{ $index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="站点" min-width="200" show-overflow-tooltip prop="stationName" />
+        <el-table-column label="订单量" width="120" align="right">
+          <template #default="{ row }">{{ formatNum(row.orderCnt) }}</template>
+        </el-table-column>
+        <el-table-column label="电量(kWh)" width="140" align="right">
+          <template #default="{ row }">{{ formatNum(row.chargedPower) }}</template>
+        </el-table-column>
+        <el-table-column label="收入(元)" align="right">
+          <template #default="{ row }">{{ row.income != null ? Number(row.income).toFixed(2) : '-' }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
@@ -134,18 +192,29 @@ const activeUsers = ref([])
 const appActiveData = ref([])
 const mauData = ref([])
 const yearlyData = ref({})
+const revenueData = ref([])
+const utilizationData = ref([])
+const regionData = ref([])
+const stationData = ref([])
+const hourlyData = ref([])
 
 const monthlyChartRef = ref(null)
 const yearlyChartRef = ref(null)
 const dailyChartRef = ref(null)
 const appActiveChartRef = ref(null)
 const mauChartRef = ref(null)
+const revenueChartRef = ref(null)
+const utilizationChartRef = ref(null)
+const hourlyChartRef = ref(null)
 
 let monthlyChart = null
 let yearlyChart = null
 let dailyChart = null
 let appActiveChart = null
 let mauChart = null
+let revenueChart = null
+let utilizationChart = null
+let hourlyChart = null
 
 const formatNum = (v) => {
   if (v == null) return '-'
@@ -281,11 +350,72 @@ const renderMauChart = () => {
   })
 }
 
+const renderRevenueChart = () => {
+  if (!revenueChartRef.value || revenueData.value.length === 0) return
+  if (revenueChart) revenueChart.dispose()
+  revenueChart = echarts.init(revenueChartRef.value)
+  const dates = revenueData.value.map(d => d.statDate)
+  const income = revenueData.value.map(d => Number(d.income || 0))
+  const atv = revenueData.value.map(d => Number(d.avgOrderValue || 0))
+  revenueChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['收入(元)', '客单价(元)'], top: 0 },
+    xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45 } },
+    yAxis: [
+      { type: 'value', name: '收入(元)' },
+      { type: 'value', name: '客单价(元)' }
+    ],
+    series: [
+      { name: '收入(元)', type: 'bar', data: income, itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] } },
+      { name: '客单价(元)', type: 'line', yAxisIndex: 1, data: atv, smooth: true, itemStyle: { color: '#E6A23C' } }
+    ]
+  })
+}
+
+const renderUtilizationChart = () => {
+  if (!utilizationChartRef.value || utilizationData.value.length === 0) return
+  if (utilizationChart) utilizationChart.dispose()
+  utilizationChart = echarts.init(utilizationChartRef.value)
+  const dates = utilizationData.value.map(d => d.statDate)
+  const rates = utilizationData.value.map(d => Number(d.utilizationRate || 0))
+  utilizationChart.setOption({
+    tooltip: { trigger: 'axis', formatter: (params) => `${params[0].name}<br/>利用率: ${Number(params[0].value).toFixed(1)}%` },
+    xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45 } },
+    yAxis: { type: 'value', name: '利用率(%)', max: 100 },
+    series: [
+      { name: '利用率', type: 'line', data: rates, smooth: true, areaStyle: { opacity: 0.3 }, itemStyle: { color: '#67C23A' } }
+    ]
+  })
+}
+
+const renderHourlyChart = () => {
+  if (!hourlyChartRef.value || hourlyData.value.length === 0) return
+  if (hourlyChart) hourlyChart.dispose()
+  hourlyChart = echarts.init(hourlyChartRef.value)
+  const hours = hourlyData.value.map(d => d.hour + ':00')
+  const orders = hourlyData.value.map(d => Number(d.orderCnt || 0))
+  const power = hourlyData.value.map(d => Number(d.chargedPower || 0))
+  hourlyChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['订单量', '电量(kWh)'], top: 0 },
+    xAxis: { type: 'category', data: hours },
+    yAxis: [
+      { type: 'value', name: '订单量' },
+      { type: 'value', name: '电量(kWh)' }
+    ],
+    series: [
+      { name: '订单量', type: 'bar', data: orders, itemStyle: { color: '#409EFF', borderRadius: [4, 4, 0, 0] } },
+      { name: '电量(kWh)', type: 'line', yAxisIndex: 1, data: power, smooth: true, itemStyle: { color: '#F56C6C' } }
+    ]
+  })
+}
+
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes] = await Promise.all([
-      getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison()
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes] = await Promise.all([
+      getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
+      getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7)
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -295,6 +425,11 @@ const fetchAll = async () => {
     appActiveData.value = aaRes.data || []
     mauData.value = mauRes.data || []
     yearlyData.value = ycRes.data || {}
+    revenueData.value = revRes.data || []
+    utilizationData.value = utilRes.data || []
+    regionData.value = regRes.data || []
+    stationData.value = staRes.data || []
+    hourlyData.value = hrRes.data || []
 
     await nextTick()
     renderMonthlyChart()
@@ -302,6 +437,9 @@ const fetchAll = async () => {
     renderDailyChart()
     renderAppActiveChart()
     renderMauChart()
+    renderRevenueChart()
+    renderUtilizationChart()
+    renderHourlyChart()
   } catch (e) {
     console.error('经营分析加载失败:', e)
   } finally {
@@ -315,6 +453,9 @@ const handleResize = () => {
   dailyChart?.resize()
   appActiveChart?.resize()
   mauChart?.resize()
+  revenueChart?.resize()
+  utilizationChart?.resize()
+  hourlyChart?.resize()
 }
 
 onMounted(() => {
@@ -329,6 +470,9 @@ onUnmounted(() => {
   dailyChart?.dispose()
   appActiveChart?.dispose()
   mauChart?.dispose()
+  revenueChart?.dispose()
+  utilizationChart?.dispose()
+  hourlyChart?.dispose()
 })
 </script>
 
