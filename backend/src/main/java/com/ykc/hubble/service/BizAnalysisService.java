@@ -360,7 +360,8 @@ public class BizAnalysisService {
     }
 
     /**
-     * 区域分布：按城市统计订单量/电量/收入（近 N 日，用 order_total_fee 替代脱敏的 income）
+     * 区域分布：按城市统计订单量/电量（近 N 日，从日表取 city_name）
+     * 注：ads_order_history_agg_dt_da 无 city_name 字段，用 ads_station_daily_operation_dt
      */
     public List<Map<String, Object>> regionDistribution(int days) {
         if (days <= 0 || days > 90) days = 30;
@@ -368,14 +369,14 @@ public class BizAnalysisService {
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT city_name as region, " +
-            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower, SUM(order_total_fee) as income " +
-            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY city_name ORDER BY orderCnt DESC LIMIT 20");
     }
 
     /**
-     * 站点排名：Top N 站点按订单量（近 N 日，用 order_total_fee 替代脱敏的 income）
+     * 站点排名：Top N 站点按订单量（近 N 日，从日表取 station_name）
      */
     public List<Map<String, Object>> stationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
@@ -384,8 +385,8 @@ public class BizAnalysisService {
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT station_name as stationName, " +
-            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower, SUM(order_total_fee) as income " +
-            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY station_name ORDER BY orderCnt DESC LIMIT " + limit);
     }
@@ -398,7 +399,7 @@ public class BizAnalysisService {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
-            "SELECT dt_hour as hour, " +
+            "SELECT dt_hour as `hour`, " +
             "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
             "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
@@ -429,6 +430,7 @@ public class BizAnalysisService {
 
     /**
      * 长时间无订单枪站排名：从数仓取近 N 日无订单/极少订单的站点
+     * 注：ads_order_history_agg_dt_da 无 station_name，用 ads_station_daily_operation_dt
      */
     public List<Map<String, Object>> idleStationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
@@ -437,8 +439,8 @@ public class BizAnalysisService {
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
             "SELECT station_name as stationName, " +
-            "SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
-            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "SUM(order_cnt) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY station_name ORDER BY orderCnt ASC LIMIT " + limit);
     }
