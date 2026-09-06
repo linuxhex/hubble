@@ -636,34 +636,35 @@ public class MiddlewareMonitorService {
             log.info("OSS Bucket 数: 总{} 个", allBuckets.size());
 
             String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusHours(24).format(FMT);
 
-            for (var bucket : buckets) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("bucketName", bucket.getName());
-                item.put("instanceName", bucket.getName());
-                item.put("location", bucket.getLocation());
-                item.put("creationDate", String.valueOf(bucket.getCreationDate()));
+            var futures = buckets.stream()
+                .map(bucket -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("bucketName", bucket.getName());
+                    item.put("instanceName", bucket.getName());
+                    item.put("location", bucket.getLocation());
+                    item.put("creationDate", String.valueOf(bucket.getCreationDate()));
+                    try {
+                        String dim = "[{\"BucketName\":\"" + bucket.getName() + "\"}]";
+                        item.put("totalRequests", queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime));
+                        item.put("successRate", queryLatestMetric("acs_oss", "SuccessRate", dim, startTime, endTime));
+                    } catch (Exception e) {
+                        log.warn("查询 OSS Bucket {} 指标失败: {}", bucket.getName(), e.getMessage());
+                        item.put("totalRequests", 0.0);
+                        item.put("successRate", 0.0);
+                    }
+                    return item;
+                }))
+                .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-                String dim = "[{\"BucketName\":\"" + bucket.getName() + "\"}]";
-                // 尝试多个指标，能取到什么就展示什么
-                double totalReq = queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime);
-                double internetSend = queryLatestMetric("acs_oss", "InternetSendBytes", dim, startTime, endTime);
-                double internetRecv = queryLatestMetric("acs_oss", "InternetRecvBytes", dim, startTime, endTime);
-                double successRate = queryLatestMetric("acs_oss", "SuccessRate", dim, startTime, endTime);
-                item.put("totalRequests", totalReq);
-                item.put("internetSend", internetSend);
-                item.put("internetRecv", internetRecv);
-                item.put("successRate", successRate);
-                list.add(item);
+            java.util.concurrent.CompletableFuture.allOf(futures).join();
+            for (var f : futures) {
+                try {
+                    Map<String, Object> item = (Map<String, Object>) f.get();
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
-
-            // 只保留有实际请求/带宽的 bucket
-            list = list.stream()
-                    .filter(item -> toDouble(item.get("totalRequests")) > 0
-                            || toDouble(item.get("internetSend")) > 0
-                            || toDouble(item.get("internetRecv")) > 0)
-                    .toList();
 
             ossBucketsCache = list;
             ossBucketsCacheTime = now;
@@ -943,43 +944,33 @@ public class MiddlewareMonitorService {
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             String ds = grafanaClient.getDsUid();
+            String byPool = "sum by (app_name, thread_pool_name)";
 
-            // 发现有线程池指标的应用+线程池名
-            var poolRows = grafanaClient.queryInstant(
-                    "count by (app_name, thread_pool_name) (thread_pool_active_count)", ds);
-            for (var row : poolRows) {
-                String app = String.valueOf(row.getOrDefault("app_name", ""));
-                String poolName = String.valueOf(row.getOrDefault("thread_pool_name", ""));
-                if (app.isEmpty() || poolName.isEmpty()) continue;
+            var activeRows = grafanaClient.queryInstant(byPool + " (thread_pool_active_count)", ds);
+            var maxRows = grafanaClient.queryInstant(byPool + " (thread_pool_maximum_size)", ds);
+            var queueRows = grafanaClient.queryInstant(byPool + " (thread_pool_queue_size)", ds);
+            var rejectRows = grafanaClient.queryInstant(byPool + " (rate(thread_pool_reject_count[1m]))*60", ds);
 
+            Map<String, double[]> metrics = new LinkedHashMap<>();
+            collectMetric(activeRows, metrics, 0);
+            collectMetric(maxRows, metrics, 1);
+            collectMetric(queueRows, metrics, 2);
+            collectMetric(rejectRows, metrics, 3);
+
+            for (var entry : metrics.entrySet()) {
+                String[] keys = entry.getKey().split("\0", 2);
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("application", app);
-                item.put("threadPoolName", poolName);
-
-                // 活跃线程数
-                var active = grafanaClient.queryInstant(
-                        "sum(thread_pool_active_count{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
-                // 最大线程数
-                var max = grafanaClient.queryInstant(
-                        "sum(thread_pool_maximum_size{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
-                // 队列大小
-                var queue = grafanaClient.queryInstant(
-                        "sum(thread_pool_queue_size{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"})", ds);
-                // 拒绝任务数（每分钟）
-                var reject = grafanaClient.queryInstant(
-                        "sum(rate(thread_pool_reject_count{app_name=\"" + app + "\",thread_pool_name=\"" + poolName + "\"}[1m]))*60", ds);
-
-                double activeVal = extractValue(active);
-                double maxVal = extractValue(max);
-                item.put("activeCount", activeVal);
-                item.put("maxSize", maxVal);
-                item.put("queueSize", extractValue(queue));
-                item.put("rejectPerMin", extractValue(reject));
-                item.put("usageRate", maxVal > 0 ? activeVal / maxVal * 100 : 0);
+                item.put("application", keys[0]);
+                item.put("threadPoolName", keys[1]);
+                item.put("activeCount", vals[0]);
+                item.put("maxSize", vals[1]);
+                item.put("queueSize", vals[2]);
+                item.put("rejectPerMin", vals[3]);
+                item.put("usageRate", vals[1] > 0 ? vals[0] / vals[1] * 100 : 0);
                 list.add(item);
             }
 
-            // 按活跃线程数降序
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("activeCount", 0)),
                     toDouble(a.getOrDefault("activeCount", 0))));
@@ -991,6 +982,16 @@ public class MiddlewareMonitorService {
             log.error("查询线程池监控失败: {}", e.getMessage());
         }
         return list;
+    }
+
+    private void collectMetric(List<Map<String, Object>> rows, Map<String, double[]> metrics, int idx) {
+        for (var row : rows) {
+            String app = String.valueOf(row.getOrDefault("app_name", ""));
+            String pool = String.valueOf(row.getOrDefault("thread_pool_name", ""));
+            if (app.isEmpty() || pool.isEmpty()) continue;
+            double val = toDouble(row.get("value"));
+            metrics.computeIfAbsent(app + "\0" + pool, k -> new double[4])[idx] = val;
+        }
     }
 
     // ===== Top 指标（接入真实数据源） =====

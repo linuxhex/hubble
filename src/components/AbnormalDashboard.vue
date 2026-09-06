@@ -48,6 +48,11 @@
 
       <div v-if="!loading && timeSlots.length === 0" class="empty-tip">暂无异常数据</div>
     </div>
+
+    <ServiceDrillDown
+      v-model:visible="drillDownVisible"
+      :service-name="drillDownService"
+    />
   </div>
 </template>
 
@@ -55,12 +60,16 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getMinuteTimeline } from '@/api/alert.js'
+import ServiceDrillDown from './ServiceDrillDown.vue'
 
 const router = useRouter()
 const timeSlots = ref([])
 const loading = ref(false)
 const timeRange = ref('15m')
 let refreshTimer = null
+
+const drillDownVisible = ref(false)
+const drillDownService = ref('')
 
 const startAutoRefresh = () => {
   stopAutoRefresh()
@@ -114,13 +123,8 @@ const fetchData = async () => {
 }
 
 const handleServiceClick = (serviceName) => {
-  router.push({
-    path: '/gateway/logs',
-    query: {
-      appName: serviceName,
-      keyword: 'level: ERROR'
-    }
-  })
+  drillDownService.value = serviceName
+  drillDownVisible.value = true
 }
 
 const onTimeRangeChange = () => {

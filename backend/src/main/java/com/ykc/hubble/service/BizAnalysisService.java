@@ -1,13 +1,18 @@
 package com.ykc.hubble.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.ykc.hubble.client.DorisQueryClient;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -16,11 +21,138 @@ public class BizAnalysisService {
 
     private final DorisQueryClient dorisQueryClient;
     private final com.ykc.hubble.client.GrafanaClient grafanaClient;
+    private final PageDataCacheService pageDataCacheService;
 
     private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final String PAGE_KEY = "biz_analysis";
+    private static final long MEMORY_TTL_MS = 5 * 60 * 1000;
 
     private volatile String cachedLatestDate;
     private volatile long cachedLatestDateTs;
+
+    private final ConcurrentHashMap<String, CacheEntry> memoryCache = new ConcurrentHashMap<>();
+
+    private static class CacheEntry {
+        final Object data;
+        final long timestamp;
+
+        CacheEntry(Object data) {
+            this.data = data;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > MEMORY_TTL_MS;
+        }
+    }
+
+    @PostConstruct
+    public void initCache() {
+        CompletableFuture.runAsync(() -> {
+            log.info("经营分析：启动预热缓存...");
+            try {
+                refreshAll();
+                log.info("经营分析：缓存预热完成");
+            } catch (Exception e) {
+                log.error("经营分析：缓存预热失败", e);
+            }
+        });
+    }
+
+    @Scheduled(fixedRate = 5 * 60 * 1000)
+    public void refreshAll() {
+        try {
+            memoryCache.put("overview", new CacheEntry(doDailyOverview()));
+            pageDataCacheService.save(PAGE_KEY, "overview", doDailyOverview());
+        } catch (Exception e) {
+            log.error("刷新 overview 缓存失败", e);
+        }
+        try {
+            var data = doMonthlyTrend();
+            memoryCache.put("monthlyTrend", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "monthlyTrend", data);
+        } catch (Exception e) {
+            log.error("刷新 monthlyTrend 缓存失败", e);
+        }
+        try {
+            var data = doDailyOrderEnergy(30);
+            memoryCache.put("daily30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "daily30", data);
+        } catch (Exception e) {
+            log.error("刷新 daily30 缓存失败", e);
+        }
+        try {
+            var data = doScenarioBreakdown();
+            memoryCache.put("scenario", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "scenario", data);
+        } catch (Exception e) {
+            log.error("刷新 scenario 缓存失败", e);
+        }
+        try {
+            var data = doActiveUsersTop(20);
+            memoryCache.put("activeUsers", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "activeUsers", data);
+        } catch (Exception e) {
+            log.error("刷新 activeUsers 缓存失败", e);
+        }
+        try {
+            var data = doAppActive(30);
+            memoryCache.put("appActive30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "appActive30", data);
+        } catch (Exception e) {
+            log.error("刷新 appActive30 缓存失败", e);
+        }
+        try {
+            var data = doMauTrend();
+            memoryCache.put("mauTrend", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "mauTrend", data);
+        } catch (Exception e) {
+            log.error("刷新 mauTrend 缓存失败", e);
+        }
+        try {
+            var data = doYearlyComparison();
+            memoryCache.put("yearlyComparison", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "yearlyComparison", data);
+        } catch (Exception e) {
+            log.error("刷新 yearlyComparison 缓存失败", e);
+        }
+        try {
+            var data = doRevenueTrend(30);
+            memoryCache.put("revenueTrend30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "revenueTrend30", data);
+        } catch (Exception e) {
+            log.error("刷新 revenueTrend30 缓存失败", e);
+        }
+        try {
+            var data = doUtilizationTrend(30);
+            memoryCache.put("utilizationTrend30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "utilizationTrend30", data);
+        } catch (Exception e) {
+            log.error("刷新 utilizationTrend30 缓存失败", e);
+        }
+        try {
+            var data = doRegionDistribution(30);
+            memoryCache.put("regionDist30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "regionDist30", data);
+        } catch (Exception e) {
+            log.error("刷新 regionDist30 缓存失败", e);
+        }
+        try {
+            var data = doStationRanking(30, 20);
+            memoryCache.put("stationRank30", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "stationRank30", data);
+        } catch (Exception e) {
+            log.error("刷新 stationRank30 缓存失败", e);
+        }
+        try {
+            var data = doHourlyDistribution(7);
+            memoryCache.put("hourly7", new CacheEntry(data));
+            pageDataCacheService.save(PAGE_KEY, "hourly7", data);
+        } catch (Exception e) {
+            log.error("刷新 hourly7 缓存失败", e);
+        }
+        log.info("经营分析：全部缓存刷新完成");
+    }
 
     private String latestDate() {
         long now = System.currentTimeMillis();
@@ -70,7 +202,154 @@ public class BizAnalysisService {
         return LocalDate.parse(latestDate(), DT).plusDays(1).format(DT);
     }
 
+    @SuppressWarnings("unchecked")
+    private <T> T getCachedOrRefresh(String cacheKey, String dbKey, TypeReference<T> typeRef, java.util.function.Supplier<T> loader) {
+        CacheEntry entry = memoryCache.get(cacheKey);
+        if (entry != null && !entry.isExpired()) {
+            return (T) entry.data;
+        }
+
+        T dbData = pageDataCacheService.get(PAGE_KEY, dbKey, typeRef);
+        if (dbData != null) {
+            memoryCache.put(cacheKey, new CacheEntry(dbData));
+            CompletableFuture.runAsync(() -> {
+                try {
+                    T fresh = loader.get();
+                    memoryCache.put(cacheKey, new CacheEntry(fresh));
+                    pageDataCacheService.save(PAGE_KEY, dbKey, fresh);
+                } catch (Exception e) {
+                    log.error("后台刷新缓存失败: {}", cacheKey, e);
+                }
+            });
+            return dbData;
+        }
+
+        if (entry != null) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    T fresh = loader.get();
+                    memoryCache.put(cacheKey, new CacheEntry(fresh));
+                    pageDataCacheService.save(PAGE_KEY, dbKey, fresh);
+                } catch (Exception e) {
+                    log.error("后台刷新缓存失败: {}", cacheKey, e);
+                }
+            });
+            return (T) entry.data;
+        }
+
+        T data = loader.get();
+        memoryCache.put(cacheKey, new CacheEntry(data));
+        pageDataCacheService.save(PAGE_KEY, dbKey, data);
+        return data;
+    }
+
     public Map<String, Object> dailyOverview() {
+        return getCachedOrRefresh("overview", "overview",
+            new TypeReference<Map<String, Object>>() {},
+            this::doDailyOverview);
+    }
+
+    public List<Map<String, Object>> monthlyTrend() {
+        return getCachedOrRefresh("monthlyTrend", "monthlyTrend",
+            new TypeReference<List<Map<String, Object>>>() {},
+            this::doMonthlyTrend);
+    }
+
+    public List<Map<String, Object>> dailyOrderEnergy(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        final int d = days;
+        String key = "daily" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doDailyOrderEnergy(d));
+    }
+
+    public Map<String, Object> scenarioBreakdown() {
+        return getCachedOrRefresh("scenario", "scenario",
+            new TypeReference<Map<String, Object>>() {},
+            this::doScenarioBreakdown);
+    }
+
+    public List<Map<String, Object>> activeUsersTop(int limit) {
+        if (limit <= 0 || limit > 100) limit = 20;
+        final int l = limit;
+        String key = "activeUsers" + l;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doActiveUsersTop(l));
+    }
+
+    public List<Map<String, Object>> appActive(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        final int d = days;
+        String key = "appActive" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doAppActive(d));
+    }
+
+    public List<Map<String, Object>> mauTrend() {
+        return getCachedOrRefresh("mauTrend", "mauTrend",
+            new TypeReference<List<Map<String, Object>>>() {},
+            this::doMauTrend);
+    }
+
+    public Map<String, Object> yearlyComparison() {
+        return getCachedOrRefresh("yearlyComparison", "yearlyComparison",
+            new TypeReference<Map<String, Object>>() {},
+            this::doYearlyComparison);
+    }
+
+    public List<Map<String, Object>> revenueTrend(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        final int d = days;
+        String key = "revenueTrend" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doRevenueTrend(d));
+    }
+
+    public List<Map<String, Object>> utilizationTrend(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        final int d = days;
+        String key = "utilizationTrend" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doUtilizationTrend(d));
+    }
+
+    public List<Map<String, Object>> regionDistribution(int days) {
+        if (days <= 0 || days > 90) days = 30;
+        final int d = days;
+        String key = "regionDist" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doRegionDistribution(d));
+    }
+
+    public List<Map<String, Object>> stationRanking(int days, int limit) {
+        if (days <= 0 || days > 90) days = 30;
+        if (limit <= 0 || limit > 100) limit = 20;
+        final int d = days;
+        final int l = limit;
+        String key = "stationRank" + d + "_" + l;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doStationRanking(d, l));
+    }
+
+    public List<Map<String, Object>> hourlyDistribution(int days) {
+        if (days <= 0 || days > 30) days = 7;
+        final int d = days;
+        String key = "hourly" + d;
+        return getCachedOrRefresh(key, key,
+            new TypeReference<List<Map<String, Object>>>() {},
+            () -> doHourlyDistribution(d));
+    }
+
+    // ─── 实际查询方法（doXxx） ───
+
+    private Map<String, Object> doDailyOverview() {
         String dt = latestDate();
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -108,7 +387,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    public List<Map<String, Object>> monthlyTrend() {
+    private List<Map<String, Object>> doMonthlyTrend() {
         String startDate = LocalDate.parse(latestDate(), DT).minusMonths(3).withDayOfMonth(1).format(DT);
         String endDate = latestDatePlusOne();
         List<Map<String, Object>> rows = dorisQueryClient.query(
@@ -137,8 +416,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    public List<Map<String, Object>> dailyOrderEnergy(int days) {
-        if (days <= 0 || days > 90) days = 30;
+    private List<Map<String, Object>> doDailyOrderEnergy(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
@@ -148,7 +426,7 @@ public class BizAnalysisService {
             "GROUP BY dt ORDER BY dt");
     }
 
-    public Map<String, Object> scenarioBreakdown() {
+    private Map<String, Object> doScenarioBreakdown() {
         Map<String, Object> result = new LinkedHashMap<>();
         String ld = latestDate();
 
@@ -176,8 +454,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    public List<Map<String, Object>> activeUsersTop(int limit) {
-        if (limit <= 0 || limit > 100) limit = 20;
+    private List<Map<String, Object>> doActiveUsersTop(int limit) {
         String recentDt = latestDate();
         return dorisQueryClient.query(
             "SELECT user_id as userId, total_ord_cnt as orderCnt, total_price as totalPrice " +
@@ -187,8 +464,7 @@ public class BizAnalysisService {
             "LIMIT " + limit);
     }
 
-    public List<Map<String, Object>> appActive(int days) {
-        if (days <= 0 || days > 90) days = 30;
+    private List<Map<String, Object>> doAppActive(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
@@ -198,7 +474,7 @@ public class BizAnalysisService {
             "ORDER BY dt");
     }
 
-    public List<Map<String, Object>> mauTrend() {
+    private List<Map<String, Object>> doMauTrend() {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusMonths(6).withDayOfMonth(1).format(DT);
         List<Map<String, Object>> dailyRows = dorisQueryClient.query(
@@ -230,7 +506,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    public Map<String, Object> yearlyComparison() {
+    private Map<String, Object> doYearlyComparison() {
         Map<String, Object> result = new LinkedHashMap<>();
         String ld = latestDate();
         String ldPlus1 = latestDatePlusOne();
@@ -305,13 +581,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    /**
-     * 收入分析：近 N 日收入趋势 + 客单价 + 度电收入
-     * 注意：ads_station_daily_operation_dt.income 被数仓脱敏返回***，
-     * 改用 ads_order_history_agg_dt_da.order_total_fee（未脱敏的真实订单总金额）
-     */
-    public List<Map<String, Object>> revenueTrend(int days) {
-        if (days <= 0 || days > 90) days = 30;
+    private List<Map<String, Object>> doRevenueTrend(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         List<Map<String, Object>> rows = dorisQueryClient.query(
@@ -333,11 +603,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    /**
-     * 枪利用率趋势：近 N 日充电枪数/总枪数
-     */
-    public List<Map<String, Object>> utilizationTrend(int days) {
-        if (days <= 0 || days > 90) days = 30;
+    private List<Map<String, Object>> doUtilizationTrend(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         List<Map<String, Object>> rows = dorisQueryClient.query(
@@ -359,12 +625,7 @@ public class BizAnalysisService {
         return result;
     }
 
-    /**
-     * 区域分布：按城市统计订单量/电量（近 N 日，从日表取 city_name）
-     * 注：ads_order_history_agg_dt_da 无 city_name 字段，用 ads_station_daily_operation_dt
-     */
-    public List<Map<String, Object>> regionDistribution(int days) {
-        if (days <= 0 || days > 90) days = 30;
+    private List<Map<String, Object>> doRegionDistribution(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
@@ -375,12 +636,7 @@ public class BizAnalysisService {
             "GROUP BY city_name ORDER BY orderCnt DESC LIMIT 20");
     }
 
-    /**
-     * 站点排名：Top N 站点按订单量（近 N 日，从日表取 station_name）
-     */
-    public List<Map<String, Object>> stationRanking(int days, int limit) {
-        if (days <= 0 || days > 90) days = 30;
-        if (limit <= 0 || limit > 100) limit = 20;
+    private List<Map<String, Object>> doStationRanking(int days, int limit) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
@@ -391,11 +647,7 @@ public class BizAnalysisService {
             "GROUP BY station_name ORDER BY orderCnt DESC LIMIT " + limit);
     }
 
-    /**
-     * 时段分布：按小时统计订单量/电量（近 N 日，从订单历史聚合表 dt_hour 字段）
-     */
-    public List<Map<String, Object>> hourlyDistribution(int days) {
-        if (days <= 0 || days > 30) days = 7;
+    private List<Map<String, Object>> doHourlyDistribution(int days) {
         String endDate = latestDatePlusOne();
         String startDate = LocalDate.parse(latestDate(), DT).minusDays(days).format(DT);
         return dorisQueryClient.query(
@@ -406,9 +658,6 @@ public class BizAnalysisService {
             "GROUP BY dt_hour ORDER BY dt_hour");
     }
 
-    /**
-     * 实时订单概览：从 Grafana 业务 Prometheus 取各状态实时订单数
-     */
     public Map<String, Object> realtimeOrderOverview() {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
@@ -428,10 +677,6 @@ public class BizAnalysisService {
         return result;
     }
 
-    /**
-     * 长时间无订单枪站排名：从数仓取近 N 日无订单/极少订单的站点
-     * 注：ads_order_history_agg_dt_da 无 station_name，用 ads_station_daily_operation_dt
-     */
     public List<Map<String, Object>> idleStationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
         if (limit <= 0 || limit > 100) limit = 20;

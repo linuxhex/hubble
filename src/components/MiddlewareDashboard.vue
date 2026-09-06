@@ -413,9 +413,6 @@
         <el-table-column label="请求数" width="110" align="right">
           <template #default="{ row }">{{ Math.round(row.totalRequests).toLocaleString() }}</template>
         </el-table-column>
-        <el-table-column label="外网流出" width="120" align="right">
-          <template #default="{ row }">{{ formatBytes(row.internetSend) }}</template>
-        </el-table-column>
         <el-table-column label="4xx 错误率" width="110" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'errorRate4xx')">{{ row.errorRate4xx.toFixed(2) }}%</span>

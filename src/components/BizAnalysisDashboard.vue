@@ -34,23 +34,13 @@
       </div>
     </div>
 
-    <!-- 1.5 实时订单概览 -->
-    <div class="summary-cards">
-      <div class="summary-card" v-for="(val, key) in realtimeOrderData" :key="key">
-        <template v-if="!key.startsWith('id_') && key !== 'timestamp'">
-          <div class="card-label">{{ key }}</div>
-          <div class="card-value highlight">{{ formatNum(val) }}</div>
-        </template>
-      </div>
-    </div>
-
     <!-- 2. 趋势区：月度趋势 + 年度同比 并排 -->
-    <div class="chart-row two-col">
-      <div class="chart-section">
+    <div class="chart-row two-col" v-if="monthlyData.length > 0 || (yearlyData.comparison && yearlyData.comparison.length > 0)">
+      <div class="chart-section" v-if="monthlyData.length > 0">
         <div class="section-title">月度趋势（近 12 月）</div>
         <div ref="monthlyChartRef" class="chart-container"></div>
       </div>
-      <div class="chart-section">
+      <div class="chart-section" v-if="yearlyData.comparison && yearlyData.comparison.length > 0">
         <div class="section-title">
           年度同比（{{ yearlyData.currentYear || '-' }} vs {{ yearlyData.lastYear || '-' }}）
           <span v-if="yearlyData.orderYoy != null" class="yoy-badge" :class="yearlyData.orderYoy >= 0 ? 'up' : 'down'">
@@ -65,43 +55,43 @@
     </div>
 
     <!-- 3. 趋势区：每日订单电量 + 收入趋势 并排 -->
-    <div class="chart-row two-col">
-      <div class="chart-section">
+    <div class="chart-row two-col" v-if="dailyData.length > 0 || revenueData.length > 0">
+      <div class="chart-section" v-if="dailyData.length > 0">
         <div class="section-title">每日订单 & 电量（近 30 日）</div>
         <div ref="dailyChartRef" class="chart-container"></div>
       </div>
-      <div class="chart-section">
+      <div class="chart-section" v-if="revenueData.length > 0">
         <div class="section-title">收入趋势 & 客单价（近 30 日）</div>
         <div ref="revenueChartRef" class="chart-container"></div>
       </div>
     </div>
 
     <!-- 4. 趋势区：枪利用率 + 充电时段分布 并排 -->
-    <div class="chart-row two-col">
-      <div class="chart-section">
+    <div class="chart-row two-col" v-if="utilizationData.length > 0 || hourlyData.length > 0">
+      <div class="chart-section" v-if="utilizationData.length > 0">
         <div class="section-title">枪利用率趋势（近 30 日）</div>
         <div ref="utilizationChartRef" class="chart-container"></div>
       </div>
-      <div class="chart-section">
+      <div class="chart-section" v-if="hourlyData.length > 0">
         <div class="section-title">充电时段分布（近 7 日）</div>
         <div ref="hourlyChartRef" class="chart-container"></div>
       </div>
     </div>
 
     <!-- 5. 用户区：DAU + MAU 并排 -->
-    <div class="chart-row two-col">
-      <div class="chart-section">
+    <div class="chart-row two-col" v-if="appActiveData.length > 0 || mauData.length > 0">
+      <div class="chart-section" v-if="appActiveData.length > 0">
         <div class="section-title">DAU 日活趋势（近 30 日）</div>
         <div ref="appActiveChartRef" class="chart-container"></div>
       </div>
-      <div class="chart-section">
+      <div class="chart-section" v-if="mauData.length > 0">
         <div class="section-title">MAU 月活趋势（近 6 月）</div>
         <div ref="mauChartRef" class="chart-container"></div>
       </div>
     </div>
 
     <!-- 6. 场景拆分 -->
-    <div class="scenario-section">
+    <div class="scenario-section" v-if="(scenario.byTradeMode && scenario.byTradeMode.length > 0) || channelTableData.length > 0">
       <div class="section-title">业务场景拆分</div>
       <div class="scenario-grid">
         <div class="scenario-card">
@@ -130,8 +120,8 @@
     </div>
 
     <!-- 7. 排名区：区域分布 + 站点排名 + 活跃用户 三列 -->
-    <div class="chart-row three-col">
-      <div class="ranking-section">
+    <div class="chart-row three-col" v-if="regionData.length > 0 || stationData.length > 0 || activeUsers.length > 0">
+      <div class="ranking-section" v-if="regionData.length > 0">
         <div class="section-title">区域分布 Top20</div>
         <el-table :data="regionData" stripe border size="small" style="width: 100%" max-height="500">
           <el-table-column label="#" width="50" align="center">
@@ -146,7 +136,7 @@
           </el-table-column>
         </el-table>
       </div>
-      <div class="ranking-section">
+      <div class="ranking-section" v-if="stationData.length > 0">
         <div class="section-title">站点排名 Top20</div>
         <el-table :data="stationData" stripe border size="small" style="width: 100%" max-height="500">
           <el-table-column label="#" width="50" align="center">
@@ -161,7 +151,7 @@
           </el-table-column>
         </el-table>
       </div>
-      <div class="ranking-section">
+      <div class="ranking-section" v-if="activeUsers.length > 0">
         <div class="section-title">活跃用户 Top20</div>
         <el-table :data="activeUsers" stripe border size="small" style="width: 100%" max-height="500">
           <el-table-column label="#" width="50" align="center">
@@ -179,7 +169,7 @@
     </div>
 
     <!-- 8. 长时间无订单枪站排名 -->
-    <div class="ranking-section">
+    <div class="ranking-section" v-if="idleStationData.length > 0">
       <div class="section-title">长时间无订单站点 Top20（近 30 日）</div>
       <el-table :data="idleStationData" stripe border size="small" style="width: 100%">
         <el-table-column label="#" width="50" align="center">
@@ -200,11 +190,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getRealtimeOrder, getIdleStationRanking } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getIdleStationRanking } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
-const realtimeOrderData = ref({})
 const idleStationData = ref([])
 const monthlyData = ref([])
 const dailyData = ref([])
@@ -434,10 +423,10 @@ const renderHourlyChart = () => {
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, rtRes, idleRes] = await Promise.all([
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, idleRes] = await Promise.all([
       getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
       getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
-      getRealtimeOrder(), getIdleStationRanking(30, 20)
+      getIdleStationRanking(30, 20)
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -452,7 +441,6 @@ const fetchAll = async () => {
     regionData.value = regRes.data || []
     stationData.value = staRes.data || []
     hourlyData.value = hrRes.data || []
-    realtimeOrderData.value = rtRes.data || {}
     idleStationData.value = idleRes.data || []
 
     await nextTick()

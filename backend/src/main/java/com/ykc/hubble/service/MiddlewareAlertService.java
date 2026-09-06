@@ -1,6 +1,7 @@
 package com.ykc.hubble.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.ykc.hubble.client.DingTalkClient;
 import com.ykc.hubble.entity.MiddlewareAlertConfig;
 import com.ykc.hubble.mapper.MiddlewareAlertConfigMapper;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -17,10 +19,16 @@ import java.util.stream.Collectors;
 public class MiddlewareAlertService {
 
     private final MiddlewareAlertConfigMapper alertConfigMapper;
+    private final DingTalkClient dingTalkClient;
+    private final AlertPushService alertPushService;
 
     private List<MiddlewareAlertConfig> configCache = null;
     private long configCacheTime = 0;
     private static final long CONFIG_CACHE_TTL_MS = 60 * 1000;
+
+    // 中间件告警防抖：同一实例同一指标 24 小时内不重复告警
+    private final Map<String, Long> alertLastSent = new ConcurrentHashMap<>();
+    private static final long ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000L;
 
     public List<MiddlewareAlertConfig> listByType(String middlewareType) {
         return alertConfigMapper.selectList(
@@ -117,9 +125,58 @@ public class MiddlewareAlertService {
 
             inst.put("alertLevel", maxLevel);
             inst.put("alertDetails", alertDetails);
+
+            // 红盘告警推送到 SSE + 钉钉（24h 防抖）
+            if ("red".equals(maxLevel)) {
+                String alertKey = "mw:" + middlewareType + ":" + instKey;
+                Long lastSent = alertLastSent.get(alertKey);
+                long nowMs = System.currentTimeMillis();
+                if (lastSent == null || nowMs - lastSent > ALERT_COOLDOWN_MS) {
+                    alertLastSent.put(alertKey, nowMs);
+                    pushMiddlewareAlert(middlewareType, inst, alertDetails);
+                }
+            }
         }
 
         return instances;
+    }
+
+    private void pushMiddlewareAlert(String type, Map<String, Object> inst, List<Map<String, Object>> details) {
+        String instName = String.valueOf(inst.getOrDefault("instanceName", inst.getOrDefault("bucketName", "")));
+        long now = System.currentTimeMillis();
+        String timeStr = java.time.Instant.ofEpochMilli(now)
+                .atZone(java.time.ZoneId.of("Asia/Shanghai"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+
+        StringBuilder md = new StringBuilder();
+        md.append("### 🔴 中间件告警\n\n");
+        md.append(String.format("> 类型：**%s**\n\n", type.toUpperCase()));
+        md.append(String.format("> 实例：**%s**\n\n", instName));
+        for (var d : details) {
+            if ("red".equals(d.get("level"))) {
+                md.append(String.format("> %s: **%s**（阈值 %s）\n\n",
+                        d.get("metricName"), d.get("currentValue"), d.get("redThreshold")));
+            }
+        }
+        md.append(String.format("> 时间：%s\n\n", timeStr));
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("type", "middleware_alert");
+            payload.put("middlewareType", type);
+            payload.put("instanceName", instName);
+            payload.put("time", now);
+            alertPushService.pushAlert(payload);
+        } catch (Exception e) {
+            log.warn("中间件告警SSE推送失败: {}", e.getMessage());
+        }
+
+        try {
+            String dashboardUrl = "http://localhost:5173/#/middleware";
+            dingTalkClient.sendRobotActionCard("中间件告警", md.toString(), "查看详情", dashboardUrl, true);
+        } catch (Exception e) {
+            log.warn("中间件告警钉钉推送失败: {}", e.getMessage());
+        }
     }
 
     public Map<String, Object> alertSummary(List<Map<String, Object>> instances) {
