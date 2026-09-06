@@ -1500,12 +1500,10 @@ public class GatewayService {
                 break;
             }
             default: {
-                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                // 最近15分钟 vs 昨天同一时段15分钟（同时段对比，范围小更灵敏）
                 long nowSec = System.currentTimeMillis() / 1000;
-                long todayStart = today.atStartOfDay(zone).toEpochSecond();
-                long elapsed = nowSec - todayStart;
-                currentRange = new long[]{todayStart, nowSec};
-                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
+                currentRange = new long[]{nowSec - 900, nowSec};
+                previousRange = new long[]{nowSec - 86400 - 900, nowSec - 86400};
                 break;
             }
         }
@@ -1824,12 +1822,10 @@ public class GatewayService {
                 break;
             }
             default: {
-                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                // 最近15分钟 vs 昨天同一时段15分钟（同时段对比，范围小更灵敏）
                 long nowSec = System.currentTimeMillis() / 1000;
-                long todayStart = today.atStartOfDay(zone).toEpochSecond();
-                long elapsed = nowSec - todayStart;
-                currentRange = new long[]{todayStart, nowSec};
-                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
+                currentRange = new long[]{nowSec - 900, nowSec};
+                previousRange = new long[]{nowSec - 86400 - 900, nowSec - 86400};
                 break;
             }
         }
@@ -1993,12 +1989,10 @@ public class GatewayService {
                 break;
             }
             default: {
-                // 今天截至现在 vs 昨天同一时段（同时段对比，避免全天含未来时段）
+                // 最近15分钟 vs 昨天同一时段15分钟（同时段对比，范围小更灵敏）
                 long nowSec = System.currentTimeMillis() / 1000;
-                long todayStart = today.atStartOfDay(zone).toEpochSecond();
-                long elapsed = nowSec - todayStart;
-                currentRange = new long[]{todayStart, nowSec};
-                previousRange = new long[]{todayStart - 86400, todayStart - 86400 + elapsed};
+                currentRange = new long[]{nowSec - 900, nowSec};
+                previousRange = new long[]{nowSec - 86400 - 900, nowSec - 86400};
                 break;
             }
         }

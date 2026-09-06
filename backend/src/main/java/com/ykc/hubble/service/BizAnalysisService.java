@@ -45,6 +45,26 @@ public class BizAnalysisService {
         return fallback;
     }
 
+    private static double toDouble(Object val, double defaultVal) {
+        if (val == null) return defaultVal;
+        if (val instanceof Number) return ((Number) val).doubleValue();
+        try {
+            return Double.parseDouble(String.valueOf(val));
+        } catch (NumberFormatException e) {
+            return defaultVal;
+        }
+    }
+
+    private static long toLong(Object val, long defaultVal) {
+        if (val == null) return defaultVal;
+        if (val instanceof Number) return ((Number) val).longValue();
+        try {
+            return Long.parseLong(String.valueOf(val));
+        } catch (NumberFormatException e) {
+            return defaultVal;
+        }
+    }
+
     private String latestDatePlusOne() {
         return LocalDate.parse(latestDate(), DT).plusDays(1).format(DT);
     }
@@ -103,12 +123,12 @@ public class BizAnalysisService {
             Map<String, Object> row = rows.get(i);
             Map<String, Object> item = new LinkedHashMap<>(row);
             if (i > 0) {
-                double prevOrder = ((Number) rows.get(i - 1).getOrDefault("orderCnt", 0)).doubleValue();
-                double curOrder = ((Number) row.getOrDefault("orderCnt", 0)).doubleValue();
+                double prevOrder = toDouble(rows.get(i - 1).get("orderCnt"), 0);
+                double curOrder = toDouble(row.get("orderCnt"), 0);
                 item.put("orderGrowth", prevOrder > 0 ? Math.round((curOrder - prevOrder) / prevOrder * 10000) / 100.0 : 0);
 
-                double prevPower = ((Number) rows.get(i - 1).getOrDefault("chargedPower", 0)).doubleValue();
-                double curPower = ((Number) row.getOrDefault("chargedPower", 0)).doubleValue();
+                double prevPower = toDouble(rows.get(i - 1).get("chargedPower"), 0);
+                double curPower = toDouble(row.get("chargedPower"), 0);
                 item.put("powerGrowth", prevPower > 0 ? Math.round((curPower - prevPower) / prevPower * 10000) / 100.0 : 0);
             }
             result.add(item);
@@ -191,7 +211,7 @@ public class BizAnalysisService {
             String dateStr = String.valueOf(row.get("statDate"));
             if (dateStr.length() >= 7) {
                 String month = dateStr.substring(0, 7);
-                double dau = ((Number) row.getOrDefault("dau", 0)).doubleValue();
+                double dau = toDouble(row.get("dau"), 0);
                 monthlyDau.computeIfAbsent(month, k -> new ArrayList<>()).add(dau);
             }
         }
@@ -251,10 +271,10 @@ public class BizAnalysisService {
             String monthKey = monthVal.length() >= 7 ? monthVal.substring(5) : monthVal;
             Map<String, Object> lastRow = lastYearMap.get(monthKey);
 
-            double thisOrder = ((Number) row.getOrDefault("orderCnt", 0)).doubleValue();
-            double thisPower = ((Number) row.getOrDefault("chargedPower", 0)).doubleValue();
-            double lastOrder = lastRow != null ? ((Number) lastRow.getOrDefault("orderCnt", 0)).doubleValue() : 0;
-            double lastPower = lastRow != null ? ((Number) lastRow.getOrDefault("chargedPower", 0)).doubleValue() : 0;
+            double thisOrder = toDouble(row.get("orderCnt"), 0);
+            double thisPower = toDouble(row.get("chargedPower"), 0);
+            double lastOrder = lastRow != null ? toDouble(lastRow.get("orderCnt"), 0) : 0;
+            double lastPower = lastRow != null ? toDouble(lastRow.get("chargedPower"), 0) : 0;
 
             totalThisYearOrder += thisOrder;
             totalThisYearPower += thisPower;
@@ -300,9 +320,9 @@ public class BizAnalysisService {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>(row);
-            double income = ((Number) row.getOrDefault("income", 0)).doubleValue();
-            double orderCnt = ((Number) row.getOrDefault("orderCnt", 0)).doubleValue();
-            double power = ((Number) row.getOrDefault("chargedPower", 0)).doubleValue();
+            double income = toDouble(row.get("income"), 0);
+            double orderCnt = toDouble(row.get("orderCnt"), 0);
+            double power = toDouble(row.get("chargedPower"), 0);
             item.put("avgOrderValue", orderCnt > 0 ? Math.round(income / orderCnt * 100) / 100.0 : 0);
             item.put("revenuePerKwh", power > 0 ? Math.round(income / power * 10000) / 100.0 : 0);
             result.add(item);
@@ -328,8 +348,8 @@ public class BizAnalysisService {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>(row);
-            double total = ((Number) row.getOrDefault("totalGuns", 0)).doubleValue();
-            double charging = ((Number) row.getOrDefault("chargingGuns", 0)).doubleValue();
+            double total = toDouble(row.get("totalGuns"), 0);
+            double charging = toDouble(row.get("chargingGuns"), 0);
             item.put("utilizationRate", total > 0 ? Math.round(charging / total * 10000) / 100.0 : 0);
             result.add(item);
         }

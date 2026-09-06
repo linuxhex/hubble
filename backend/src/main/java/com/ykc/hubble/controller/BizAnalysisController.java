@@ -1,13 +1,9 @@
 package com.ykc.hubble.controller;
 
 import com.ykc.hubble.common.Result;
-import com.ykc.hubble.common.exception.BusinessException;
-import com.ykc.hubble.config.BizAnalysisProperties;
 import com.ykc.hubble.service.BizAnalysisService;
-import com.ykc.hubble.util.JwtUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -19,99 +15,80 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/biz-analysis")
 @RequiredArgsConstructor
-@Tag(name = "经营分析", description = "经营分析数据（仅 lianzi 可见）")
+@Tag(name = "经营分析", description = "经营分析数据")
 public class BizAnalysisController {
 
     private final BizAnalysisService bizAnalysisService;
-    private final BizAnalysisProperties properties;
-    private final JwtUtil jwtUtil;
 
     @GetMapping("/overview")
     @Operation(summary = "汇总卡片")
-    public Result<Map<String, Object>> overview(HttpServletRequest request) {
-        checkPermission(request);
+    public Result<Map<String, Object>> overview() {
         return Result.success(bizAnalysisService.dailyOverview());
     }
 
     @GetMapping("/monthly-trend")
     @Operation(summary = "月度趋势+环比")
-    public Result<List<Map<String, Object>>> monthlyTrend(HttpServletRequest request) {
-        checkPermission(request);
+    public Result<List<Map<String, Object>>> monthlyTrend() {
         return Result.success(bizAnalysisService.monthlyTrend());
     }
 
     @GetMapping("/daily")
     @Operation(summary = "每日订单电量")
     public Result<List<Map<String, Object>>> daily(
-            @RequestParam(defaultValue = "30") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "30") int days) {
         return Result.success(bizAnalysisService.dailyOrderEnergy(days));
     }
 
     @GetMapping("/scenario")
     @Operation(summary = "业务场景拆分")
-    public Result<Map<String, Object>> scenario(HttpServletRequest request) {
-        checkPermission(request);
+    public Result<Map<String, Object>> scenario() {
         return Result.success(bizAnalysisService.scenarioBreakdown());
     }
 
     @GetMapping("/active-users")
     @Operation(summary = "充电最活跃用户排名")
     public Result<List<Map<String, Object>>> activeUsers(
-            @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "20") int limit) {
         return Result.success(bizAnalysisService.activeUsersTop(limit));
     }
 
     @GetMapping("/app-active")
     @Operation(summary = "小程序活跃数据")
     public Result<List<Map<String, Object>>> appActive(
-            @RequestParam(defaultValue = "30") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "30") int days) {
         return Result.success(bizAnalysisService.appActive(days));
     }
 
     @GetMapping("/mau-trend")
     @Operation(summary = "MAU 月活趋势（近 6 月）")
-    public Result<List<Map<String, Object>>> mauTrend(HttpServletRequest request) {
-        checkPermission(request);
+    public Result<List<Map<String, Object>>> mauTrend() {
         return Result.success(bizAnalysisService.mauTrend());
     }
 
     @GetMapping("/yearly-comparison")
     @Operation(summary = "年度同比对比")
-    public Result<Map<String, Object>> yearlyComparison(HttpServletRequest request) {
-        checkPermission(request);
+    public Result<Map<String, Object>> yearlyComparison() {
         return Result.success(bizAnalysisService.yearlyComparison());
     }
 
     @GetMapping("/revenue-trend")
     @Operation(summary = "收入趋势+客单价+度电收入")
     public Result<List<Map<String, Object>>> revenueTrend(
-            @RequestParam(defaultValue = "30") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "30") int days) {
         return Result.success(bizAnalysisService.revenueTrend(days));
     }
 
     @GetMapping("/utilization-trend")
     @Operation(summary = "枪利用率趋势")
     public Result<List<Map<String, Object>>> utilizationTrend(
-            @RequestParam(defaultValue = "30") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "30") int days) {
         return Result.success(bizAnalysisService.utilizationTrend(days));
     }
 
     @GetMapping("/region-distribution")
     @Operation(summary = "区域分布（按城市）")
     public Result<List<Map<String, Object>>> regionDistribution(
-            @RequestParam(defaultValue = "30") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "30") int days) {
         return Result.success(bizAnalysisService.regionDistribution(days));
     }
 
@@ -119,37 +96,14 @@ public class BizAnalysisController {
     @Operation(summary = "站点排名 TopN")
     public Result<List<Map<String, Object>>> stationRanking(
             @RequestParam(defaultValue = "30") int days,
-            @RequestParam(defaultValue = "20") int limit,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "20") int limit) {
         return Result.success(bizAnalysisService.stationRanking(days, limit));
     }
 
     @GetMapping("/hourly-distribution")
     @Operation(summary = "时段分布（按小时）")
     public Result<List<Map<String, Object>>> hourlyDistribution(
-            @RequestParam(defaultValue = "7") int days,
-            HttpServletRequest request) {
-        checkPermission(request);
+            @RequestParam(defaultValue = "7") int days) {
         return Result.success(bizAnalysisService.hourlyDistribution(days));
-    }
-
-    private void checkPermission(HttpServletRequest request) {
-        String token = extractToken(request);
-        if (token == null) {
-            throw new BusinessException(401, "未登录");
-        }
-        String username = jwtUtil.getUsername(token);
-        if (username == null || !properties.getAllowedUsers().contains(username)) {
-            throw new BusinessException(403, "无权限访问经营分析");
-        }
-    }
-
-    private String extractToken(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            return header.substring(7);
-        }
-        return request.getParameter("token");
     }
 }
