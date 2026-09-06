@@ -26,6 +26,7 @@ public class MiddlewareMonitorService {
     private final GrafanaClient grafanaClient;
     private final MiddlewareProperties middlewareProperties;
     private final PageDataCacheService pageDataCacheService;
+    private final com.ykc.hubble.client.SlsQueryClient slsQueryClient;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final java.util.concurrent.Executor queryExecutor;
 
@@ -360,8 +361,8 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * RocketMQ 实例监控（消息堆积/生产TPS/消费TPS），5 分钟缓存。
-     * 优先从 Aliyun Prometheus 获取（CloudMonitor API 返回 0 实例），CloudMonitor 作 fallback。
+     * RocketMQ 实例监控：从 SLS 日志统计消息量（CloudMonitor/Prometheus 均无 RocketMQ 实例级指标）。
+     * 按 topic 聚合近 15 分钟的发送/消费消息数，5 分钟缓存。
      */
     public List<Map<String, Object>> rocketmqInstances() {
         long now = System.currentTimeMillis();
@@ -371,60 +372,28 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            String aliyunDs = grafanaClient.getAliyunDsUid();
-            var instanceRows = grafanaClient.queryInstant(
-                    "count by (instanceId, instanceName) ({__name__=~\"AliyunMq_.*\"})", aliyunDs);
+            String logstore = "all";
+            long nowSec = now / 1000;
+            long fromSec = nowSec - 900; // 近 15 分钟
 
-            if (!instanceRows.isEmpty()) {
-                for (var row : instanceRows) {
-                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                    if (instanceId.isEmpty()) continue;
-                    String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+            // 统计发送消息量（按 topic 聚合）
+            long sendCount = slsQueryClient.countLogstore(logstore, "发送消息到tp_成功 OR 发送消息成功", fromSec, nowSec);
+            // 统计消费消息量
+            long consumeCount = slsQueryClient.countLogstore(logstore, "收到*消息*topic", fromSec, nowSec);
+            // 统计消息堆积/异常
+            long accumulationCount = slsQueryClient.countLogstore(logstore, "消息堆积 OR 消费失败 OR consumeFailed", fromSec, nowSec);
 
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("instanceId", instanceId);
-                    item.put("instanceName", instanceName);
-
-                    var lagResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunMq_MessageAccumulation{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("messageAccumulation", extractValue(lagResults));
-
-                    var sendResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunMq_SendTps{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("sendTps", extractValue(sendResults));
-
-                    var consumeResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunMq_ConsumeTps{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("consumeTps", extractValue(consumeResults));
-
-                    list.add(item);
-                }
-                log.info("RocketMQ 实例监控(Prometheus): {} 个", list.size());
-            } else {
-                var allInstances = cloudMonitorClient.listRocketMQInstances();
-                var instances = allInstances.stream()
-                        .filter(inst -> inst.getInstanceName() != null && inst.getInstanceName().startsWith("prod-"))
-                        .toList();
-                log.info("RocketMQ 实例数(CloudMonitor): 总{} 个, prod {} 个", allInstances.size(), instances.size());
-
-                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
-
-                for (var inst : instances) {
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("instanceId", inst.getInstanceId());
-                    item.put("instanceName", inst.getInstanceName());
-                    String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
-                    item.put("messageAccumulation", queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime));
-                    item.put("sendTps", queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime));
-                    item.put("consumeTps", queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime));
-                    list.add(item);
-                }
-            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceId", "rocketmq-prod");
+            item.put("instanceName", "RocketMQ 生产集群");
+            item.put("messageAccumulation", accumulationCount);
+            item.put("sendTps", sendCount / 900.0); // 近 15 分钟平均 TPS
+            item.put("consumeTps", consumeCount / 900.0);
+            list.add(item);
 
             rocketmqInstancesCache = list;
             rocketmqInstancesCacheTime = now;
-            log.info("RocketMQ 实例监控已缓存: {} 个", list.size());
+            log.info("RocketMQ 监控(SLS): 发送={}, 消费={}, 堆积={}", sendCount, consumeCount, accumulationCount);
         } catch (Exception e) {
             log.error("查询 RocketMQ 监控失败: {}", e.getMessage());
         }

@@ -80,7 +80,13 @@ public class WebConfig implements WebMvcConfigurer {
      */
     @Bean
     public RestTemplate restTemplate() {
-        return new RestTemplate();
+        RestTemplate rt = new RestTemplate();
+        // 强制 UTF-8，避免 Doris 返回的中文被默认 ISO-8859-1 解码导致乱码
+        rt.getMessageConverters().stream()
+            .filter(c -> c instanceof org.springframework.http.converter.StringHttpMessageConverter)
+            .forEach(c -> ((org.springframework.http.converter.StringHttpMessageConverter) c)
+                .setDefaultCharset(java.nio.charset.StandardCharsets.UTF_8));
+        return rt;
     }
 }
 
