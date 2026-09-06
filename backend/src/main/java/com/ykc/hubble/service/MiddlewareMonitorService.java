@@ -420,29 +420,28 @@ public class MiddlewareMonitorService {
                     "count by (instanceId) ({__name__=~\"AliyunKafka_.*\"})", aliyunDs);
 
             if (!instanceRows.isEmpty()) {
-                for (var row : instanceRows) {
-                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                    if (instanceId.isEmpty()) continue;
+                var lagRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunKafka_message_accumulation)", aliyunDs);
+                var produceRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunKafka_instance_message_input)", aliyunDs);
+                var consumeRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunKafka_instance_message_output)", aliyunDs);
 
+                Map<String, double[]> metrics = new LinkedHashMap<>();
+                collectByLabel(lagRows, "instanceId", metrics, 0);
+                collectByLabel(produceRows, "instanceId", metrics, 1);
+                collectByLabel(consumeRows, "instanceId", metrics, 2);
+
+                for (var entry : metrics.entrySet()) {
+                    String instanceId = entry.getKey();
+                    if (instanceId.isEmpty()) continue;
+                    double[] vals = entry.getValue();
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("instanceId", instanceId);
                     item.put("instanceName", instanceId);
-
-                    // 消息堆积
-                    var lagResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunKafka_message_accumulation{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("lag", extractValue(lagResults));
-
-                    // 生产 TPS
-                    var produceResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunKafka_instance_message_input{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("produceTps", extractValue(produceResults));
-
-                    // 消费 TPS
-                    var consumeResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunKafka_instance_message_output{instanceId=\"" + instanceId + "\"})", aliyunDs);
-                    item.put("consumeTps", extractValue(consumeResults));
-
+                    item.put("lag", vals[0]);
+                    item.put("produceTps", vals[1]);
+                    item.put("consumeTps", vals[2]);
                     list.add(item);
                 }
                 log.info("Kafka 实例监控(Prometheus): {} 个", list.size());
@@ -502,35 +501,33 @@ public class MiddlewareMonitorService {
                     "count by (instanceId) (AliyunLindorm_cpu_user)", aliyunDs);
 
             if (!instanceRows.isEmpty()) {
-                for (var row : instanceRows) {
-                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                    if (instanceId.isEmpty()) continue;
+                var cpuRows = grafanaClient.queryInstant(
+                        "avg by (instanceId) (AliyunLindorm_cpu_user{host=~\"lindormtable-.*\"})", aliyunDs);
+                var readRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunLindorm_read_ops{host=~\"lindormtable-.*\"})", aliyunDs);
+                var writeRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunLindorm_write_ops{host=~\"lindormtable-.*\"})", aliyunDs);
 
+                Map<String, double[]> metrics = new LinkedHashMap<>();
+                collectByLabel(cpuRows, "instanceId", metrics, 0);
+                collectByLabel(readRows, "instanceId", metrics, 1);
+                collectByLabel(writeRows, "instanceId", metrics, 2);
+
+                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
+                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+
+                for (var entry : metrics.entrySet()) {
+                    String instanceId = entry.getKey();
+                    if (instanceId.isEmpty()) continue;
+                    double[] vals = entry.getValue();
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("instanceId", instanceId);
                     item.put("instanceName", "lindorm-" + instanceId);
-
-                    // CPU：取所有 host 的平均值
-                    var cpuResults = grafanaClient.queryInstant(
-                            "avg by (instanceId) (AliyunLindorm_cpu_user{instanceId=\"" + instanceId + "\",host=~\"lindormtable-.*\"})", aliyunDs);
-                    item.put("cpuUsage", extractValue(cpuResults));
-
-                    // 读 QPS
-                    var readResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunLindorm_read_ops{instanceId=\"" + instanceId + "\",host=~\"lindormtable-.*\"})", aliyunDs);
-                    item.put("qps", extractValue(readResults));
-
-                    // 写 QPS
-                    var writeResults = grafanaClient.queryInstant(
-                            "sum by (instanceId) (AliyunLindorm_write_ops{instanceId=\"" + instanceId + "\",host=~\"lindormtable-.*\"})", aliyunDs);
-                    item.put("writeQps", extractValue(writeResults));
-
-                    // 磁盘使用率（CloudMonitor 补）
-                    String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-                    String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+                    item.put("cpuUsage", vals[0]);
+                    item.put("qps", vals[1]);
+                    item.put("writeQps", vals[2]);
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
                     item.put("diskUsage", queryLatestMetric("acs_lindorm", "DiskUsage", dim, startTime, endTime));
-
                     list.add(item);
                 }
                 log.info("Lindorm 实例监控(Prometheus): {} 个", list.size());
@@ -761,51 +758,57 @@ public class MiddlewareMonitorService {
         try {
             String ds = grafanaClient.getAliyunDsUid();
 
-            // RDS 实例（按 desc label 发现）
-            var rdsRows = grafanaClient.queryInstant(
-                    "count by (desc) (AliyunRds_CpuUsage{desc=~\"prod-.*\"})", ds);
-            for (var row : rdsRows) {
-                String desc = String.valueOf(row.getOrDefault("desc", ""));
-                if (desc.isEmpty()) continue;
+            var rdsCpuRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunRds_CpuUsage{desc=~\"prod-.*\"})", ds);
+            var rdsMemRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunRds_MemoryUsage{desc=~\"prod-.*\"})", ds);
+            var rdsIopsRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunRds_IOPSUsage{desc=~\"prod-.*\"})", ds);
+            var rdsSessRows = grafanaClient.queryInstant(
+                    "sum by (desc) (AliyunRds_MySQL_ActiveSessions{desc=~\"prod-.*\"})", ds);
 
+            Map<String, double[]> rdsMetrics = new LinkedHashMap<>();
+            collectByLabel(rdsCpuRows, "desc", rdsMetrics, 0);
+            collectByLabel(rdsMemRows, "desc", rdsMetrics, 1);
+            collectByLabel(rdsIopsRows, "desc", rdsMetrics, 2);
+            collectByLabel(rdsSessRows, "desc", rdsMetrics, 3);
+
+            for (var entry : rdsMetrics.entrySet()) {
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("instanceName", desc);
+                item.put("instanceName", entry.getKey());
                 item.put("engine", "RDS");
-
-                var cpu = grafanaClient.queryInstant("AliyunRds_CpuUsage{desc=\"" + desc + "\"}", ds);
-                var mem = grafanaClient.queryInstant("AliyunRds_MemoryUsage{desc=\"" + desc + "\"}", ds);
-                var iops = grafanaClient.queryInstant("AliyunRds_IOPSUsage{desc=\"" + desc + "\"}", ds);
-                var sess = grafanaClient.queryInstant("AliyunRds_MySQL_ActiveSessions{desc=\"" + desc + "\"}", ds);
-                item.put("cpuUsage", extractValue(cpu));
-                item.put("memoryUsage", extractValue(mem));
-                item.put("iops", extractValue(iops));
-                item.put("activeSessions", extractValue(sess));
+                item.put("cpuUsage", vals[0]);
+                item.put("memoryUsage", vals[1]);
+                item.put("iops", vals[2]);
+                item.put("activeSessions", vals[3]);
                 list.add(item);
             }
 
-            // PolarDB 实例（按 desc label 发现）
-            var polardbRows = grafanaClient.queryInstant(
-                    "count by (desc) (AliyunPolardb_cluster_cpu_utilization{desc=~\"prod-.*\"})", ds);
-            for (var row : polardbRows) {
-                String desc = String.valueOf(row.getOrDefault("desc", ""));
-                if (desc.isEmpty()) continue;
+            var pdbCpuRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunPolardb_cluster_cpu_utilization{desc=~\"prod-.*\"})", ds);
+            var pdbMemRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunPolardb_cluster_memory_utilization{desc=~\"prod-.*\"})", ds);
+            var pdbIopsRows = grafanaClient.queryInstant(
+                    "avg by (desc) (AliyunPolardb_cluster_iops_usage{desc=~\"prod-.*\"})", ds);
+            var pdbSessRows = grafanaClient.queryInstant(
+                    "sum by (desc) (AliyunPolardb_cluster_active_sessions{desc=~\"prod-.*\"})", ds);
 
+            Map<String, double[]> pdbMetrics = new LinkedHashMap<>();
+            collectByLabel(pdbCpuRows, "desc", pdbMetrics, 0);
+            collectByLabel(pdbMemRows, "desc", pdbMetrics, 1);
+            collectByLabel(pdbIopsRows, "desc", pdbMetrics, 2);
+            collectByLabel(pdbSessRows, "desc", pdbMetrics, 3);
+
+            for (var entry : pdbMetrics.entrySet()) {
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("instanceName", desc);
+                item.put("instanceName", entry.getKey());
                 item.put("engine", "PolarDB");
-
-                var cpu = grafanaClient.queryInstant(
-                        "avg by (desc) (AliyunPolardb_cluster_cpu_utilization{desc=\"" + desc + "\"})", ds);
-                var mem = grafanaClient.queryInstant(
-                        "avg by (desc) (AliyunPolardb_cluster_memory_utilization{desc=\"" + desc + "\"})", ds);
-                var iops = grafanaClient.queryInstant(
-                        "avg by (desc) (AliyunPolardb_cluster_iops_usage{desc=\"" + desc + "\"})", ds);
-                var sess = grafanaClient.queryInstant(
-                        "sum by (desc) (AliyunPolardb_cluster_active_sessions{desc=\"" + desc + "\"})", ds);
-                item.put("cpuUsage", extractValue(cpu));
-                item.put("memoryUsage", extractValue(mem));
-                item.put("iops", extractValue(iops));
-                item.put("activeSessions", extractValue(sess));
+                item.put("cpuUsage", vals[0]);
+                item.put("memoryUsage", vals[1]);
+                item.put("iops", vals[2]);
+                item.put("activeSessions", vals[3]);
                 list.add(item);
             }
 
@@ -831,36 +834,34 @@ public class MiddlewareMonitorService {
         try {
             String ds = grafanaClient.getDsUid();
 
-            // 发现有 Druid 指标的应用
-            var appRows = grafanaClient.queryInstant(
-                    "count by (application) (druid_active_count)", ds);
-            for (var row : appRows) {
-                String app = String.valueOf(row.getOrDefault("application", ""));
-                if (app.isEmpty()) continue;
+            var activeRows = grafanaClient.queryInstant(
+                    "sum by (application) (druid_active_count)", ds);
+            var maxRows = grafanaClient.queryInstant(
+                    "sum by (application) (druid_max_active)", ds);
+            var waitRows = grafanaClient.queryInstant(
+                    "sum by (application) (druid_wait_thread_count)", ds);
+            var execRows = grafanaClient.queryInstant(
+                    "sum by (application) (irate(druid_execute_count[2m]))", ds);
 
+            Map<String, double[]> metrics = new LinkedHashMap<>();
+            collectJvmMetric(activeRows, metrics, 0);
+            collectJvmMetric(maxRows, metrics, 1);
+            collectJvmMetric(waitRows, metrics, 2);
+            collectJvmMetric(execRows, metrics, 3);
+
+            for (var entry : metrics.entrySet()) {
+                String app = entry.getKey();
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("application", app);
-
-                var active = grafanaClient.queryInstant(
-                        "sum(druid_active_count{application=\"" + app + "\"})", ds);
-                var maxActive = grafanaClient.queryInstant(
-                        "sum(druid_max_active{application=\"" + app + "\"})", ds);
-                var wait = grafanaClient.queryInstant(
-                        "sum(druid_wait_thread_count{application=\"" + app + "\"})", ds);
-                var execRate = grafanaClient.queryInstant(
-                        "sum(irate(druid_execute_count{application=\"" + app + "\"}[2m]))", ds);
-
-                double activeVal = extractValue(active);
-                double maxVal = extractValue(maxActive);
-                item.put("activeCount", activeVal);
-                item.put("maxActive", maxVal);
-                item.put("waitThreadCount", extractValue(wait));
-                item.put("sqlExecuteRate", extractValue(execRate));
-                item.put("usageRate", maxVal > 0 ? activeVal / maxVal * 100 : 0);
+                item.put("activeCount", vals[0]);
+                item.put("maxActive", vals[1]);
+                item.put("waitThreadCount", vals[2]);
+                item.put("sqlExecuteRate", vals[3]);
+                item.put("usageRate", vals[1] > 0 ? vals[0] / vals[1] * 100 : 0);
                 list.add(item);
             }
 
-            // 按活动连接数降序
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("activeCount", 0)),
                     toDouble(a.getOrDefault("activeCount", 0))));
@@ -887,38 +888,34 @@ public class MiddlewareMonitorService {
         try {
             String ds = grafanaClient.getDsUid();
 
-            // 发现有 JVM 指标的应用
-            var appRows = grafanaClient.queryInstant(
-                    "count by (application) (jvm_memory_used_bytes{area=\"heap\"})", ds);
-            for (var row : appRows) {
-                String app = String.valueOf(row.getOrDefault("application", ""));
-                if (app.isEmpty()) continue;
+            var heapRows = grafanaClient.queryInstant(
+                    "(sum by (application) (jvm_memory_used_bytes{area=\"heap\"}) * 100) / " +
+                    "sum by (application) (jvm_memory_max_bytes{area=\"heap\"})", ds);
+            var gcRows = grafanaClient.queryInstant(
+                    "sum by (application) (rate(jvm_gc_pause_seconds_count[1m]))", ds);
+            var qpsRows = grafanaClient.queryInstant(
+                    "sum by (application) (rate(http_server_requests_seconds_count[1m]))", ds);
+            var cpuRows = grafanaClient.queryInstant(
+                    "avg by (application) (system_cpu_usage)*100", ds);
 
+            Map<String, double[]> metrics = new LinkedHashMap<>();
+            collectJvmMetric(heapRows, metrics, 0);
+            collectJvmMetric(gcRows, metrics, 1);
+            collectJvmMetric(qpsRows, metrics, 2);
+            collectJvmMetric(cpuRows, metrics, 3);
+
+            for (var entry : metrics.entrySet()) {
+                String app = entry.getKey();
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("application", app);
-
-                // 堆内存使用率
-                var heap = grafanaClient.queryInstant(
-                        "sum(jvm_memory_used_bytes{application=\"" + app + "\",area=\"heap\"})*100" +
-                        "/sum(jvm_memory_max_bytes{application=\"" + app + "\",area=\"heap\"})", ds);
-                // GC 频率
-                var gc = grafanaClient.queryInstant(
-                        "sum(rate(jvm_gc_pause_seconds_count{application=\"" + app + "\"}[1m]))", ds);
-                // QPS
-                var qps = grafanaClient.queryInstant(
-                        "sum(rate(http_server_requests_seconds_count{application=\"" + app + "\"}[1m]))", ds);
-                // 进程 CPU
-                var cpu = grafanaClient.queryInstant(
-                        "avg(system_cpu_usage{application=\"" + app + "\"})*100", ds);
-
-                item.put("heapUsage", extractValue(heap));
-                item.put("gcRate", extractValue(gc));
-                item.put("qps", extractValue(qps));
-                item.put("cpuUsage", extractValue(cpu));
+                item.put("heapUsage", vals[0]);
+                item.put("gcRate", vals[1]);
+                item.put("qps", vals[2]);
+                item.put("cpuUsage", vals[3]);
                 list.add(item);
             }
 
-            // 按堆内存使用率降序
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("heapUsage", 0)),
                     toDouble(a.getOrDefault("heapUsage", 0))));
@@ -930,6 +927,15 @@ public class MiddlewareMonitorService {
             log.error("查询 JVM 监控失败: {}", e.getMessage());
         }
         return list;
+    }
+
+    private void collectJvmMetric(List<Map<String, Object>> rows, Map<String, double[]> metrics, int idx) {
+        for (var row : rows) {
+            String app = String.valueOf(row.getOrDefault("application", ""));
+            if (app.isEmpty()) continue;
+            double val = toDouble(row.get("value"));
+            metrics.computeIfAbsent(app, k -> new double[4])[idx] = val;
+        }
     }
 
     /**
@@ -991,6 +997,27 @@ public class MiddlewareMonitorService {
             if (app.isEmpty() || pool.isEmpty()) continue;
             double val = toDouble(row.get("value"));
             metrics.computeIfAbsent(app + "\0" + pool, k -> new double[4])[idx] = val;
+        }
+    }
+
+    private void collectByLabel(List<Map<String, Object>> rows, String labelKey,
+                                Map<String, double[]> metrics, int idx) {
+        for (var row : rows) {
+            String key = String.valueOf(row.getOrDefault(labelKey, ""));
+            if (key.isEmpty()) continue;
+            double val = toDouble(row.get("value"));
+            metrics.computeIfAbsent(key, k -> new double[4])[idx] = val;
+        }
+    }
+
+    private void collectByDualLabel(List<Map<String, Object>> rows, String idKey, String nameKey,
+                                    Map<String, double[]> metrics, int idx) {
+        for (var row : rows) {
+            String id = String.valueOf(row.getOrDefault(idKey, ""));
+            if (id.isEmpty()) continue;
+            String name = String.valueOf(row.getOrDefault(nameKey, id));
+            double val = toDouble(row.get("value"));
+            metrics.computeIfAbsent(id + "\0" + name, k -> new double[4])[idx] = val;
         }
     }
 
@@ -1241,46 +1268,46 @@ public class MiddlewareMonitorService {
         try {
             String ds = grafanaClient.getAliyunDsUid();
 
-            var rdsInstances = grafanaClient.queryInstant(
-                    "count by (instanceId, instanceName) ({__name__=~\"AliyunRds_.*\"})", ds);
-            for (var row : rdsInstances) {
-                String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                if (instanceId.isEmpty()) continue;
-                String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+            var rdsCpuRows = grafanaClient.queryInstant(
+                    "avg by (instanceId, instanceName) (AliyunRds_CpuUsage)", ds);
+            var rdsMemRows = grafanaClient.queryInstant(
+                    "avg by (instanceId, instanceName) (AliyunRds_MemoryUsage)", ds);
 
-                var cpu = grafanaClient.queryInstant(
-                        "AliyunRds_CpuUsage{instanceId=\"" + instanceId + "\"}", ds);
-                var mem = grafanaClient.queryInstant(
-                        "AliyunRds_MemoryUsage{instanceId=\"" + instanceId + "\"}", ds);
+            Map<String, double[]> rdsMetrics = new LinkedHashMap<>();
+            collectByDualLabel(rdsCpuRows, "instanceId", "instanceName", rdsMetrics, 0);
+            collectByDualLabel(rdsMemRows, "instanceId", "instanceName", rdsMetrics, 1);
 
+            for (var entry : rdsMetrics.entrySet()) {
+                String[] keys = entry.getKey().split("\0", 2);
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("tableName", instanceName);
-                item.put("instanceId", instanceId);
+                item.put("tableName", keys.length > 1 ? keys[1] : keys[0]);
+                item.put("instanceId", keys[0]);
                 item.put("engine", "RDS");
-                item.put("cpuUsage", extractValue(cpu));
-                item.put("memoryUsage", extractValue(mem));
+                item.put("cpuUsage", vals[0]);
+                item.put("memoryUsage", vals[1]);
                 item.put("diskUsage", 0.0);
                 list.add(item);
             }
 
-            var polardbInstances = grafanaClient.queryInstant(
-                    "count by (instanceId, instanceName) ({__name__=~\"AliyunPolardb_.*\"})", ds);
-            for (var row : polardbInstances) {
-                String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                if (instanceId.isEmpty()) continue;
-                String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
+            var pdbCpuRows = grafanaClient.queryInstant(
+                    "avg by (instanceId, instanceName) (AliyunPolardb_cluster_cpu_utilization)", ds);
+            var pdbMemRows = grafanaClient.queryInstant(
+                    "avg by (instanceId, instanceName) (AliyunPolardb_cluster_memory_utilization)", ds);
 
-                var cpu = grafanaClient.queryInstant(
-                        "AliyunPolardb_cluster_cpu_utilization{instanceId=\"" + instanceId + "\"}", ds);
-                var mem = grafanaClient.queryInstant(
-                        "AliyunPolardb_cluster_memory_utilization{instanceId=\"" + instanceId + "\"}", ds);
+            Map<String, double[]> pdbMetrics = new LinkedHashMap<>();
+            collectByDualLabel(pdbCpuRows, "instanceId", "instanceName", pdbMetrics, 0);
+            collectByDualLabel(pdbMemRows, "instanceId", "instanceName", pdbMetrics, 1);
 
+            for (var entry : pdbMetrics.entrySet()) {
+                String[] keys = entry.getKey().split("\0", 2);
+                double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("tableName", instanceName);
-                item.put("instanceId", instanceId);
+                item.put("tableName", keys.length > 1 ? keys[1] : keys[0]);
+                item.put("instanceId", keys[0]);
                 item.put("engine", "PolarDB");
-                item.put("cpuUsage", extractValue(cpu));
-                item.put("memoryUsage", extractValue(mem));
+                item.put("cpuUsage", vals[0]);
+                item.put("memoryUsage", vals[1]);
                 item.put("diskUsage", 0.0);
                 list.add(item);
             }

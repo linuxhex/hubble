@@ -52,8 +52,8 @@ export function getHourlyDistribution(days = 7) {
   return request.get('/biz-analysis/hourly-distribution', { params: { days } })
 }
 
-export function getRealtimeOrder() {
-  return request.get('/biz-analysis/realtime-order')
+export function getHourlyOrderComparison() {
+  return request.get('/biz-analysis/hourly-order-comparison')
 }
 
 export function getIdleStationRanking(days = 30, limit = 20) {

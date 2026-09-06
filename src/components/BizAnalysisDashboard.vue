@@ -8,12 +8,11 @@
     <!-- 1. 汇总卡片 -->
     <div class="summary-cards">
       <div class="summary-card">
-        <div class="card-label">今日订单量</div>
+        <div class="card-label">累计订单量</div>
         <div class="card-value">{{ formatNum(overview.orderCnt) }}</div>
-        <div class="card-date">{{ overview.date || '-' }}</div>
       </div>
       <div class="summary-card">
-        <div class="card-label">今日电量(kWh)</div>
+        <div class="card-label">累计电量(kWh)</div>
         <div class="card-value">{{ formatNum(overview.chargedPower) }}</div>
       </div>
       <div class="summary-card">
@@ -32,6 +31,17 @@
         <div class="card-label">广告点击数</div>
         <div class="card-value">{{ formatNum(overview.adClick) }}</div>
       </div>
+    </div>
+
+    <!-- 1.5 今日 vs 昨日 小时订单对比 -->
+    <div class="chart-section" v-if="hourlyCompData.hours && hourlyCompData.hours.length > 0">
+      <div class="section-title">
+        今日 vs 昨日 小时订单实时对比（{{ hourlyCompData.todayDate || '-' }} vs {{ hourlyCompData.yesterdayDate || '-' }}）
+        <span v-if="hourlyCompData.alertCount > 0" class="yoy-badge down" style="margin-left:12px">
+          {{ hourlyCompData.alertCount }} 个时段落后 50%+
+        </span>
+      </div>
+      <div ref="hourlyCompChartRef" class="chart-container"></div>
     </div>
 
     <!-- 2. 趋势区：月度趋势 + 年度同比 并排 -->
@@ -190,7 +200,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getIdleStationRanking } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getHourlyOrderComparison, getIdleStationRanking } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
@@ -207,6 +217,7 @@ const utilizationData = ref([])
 const regionData = ref([])
 const stationData = ref([])
 const hourlyData = ref([])
+const hourlyCompData = ref({})
 
 const monthlyChartRef = ref(null)
 const yearlyChartRef = ref(null)
@@ -216,6 +227,7 @@ const mauChartRef = ref(null)
 const revenueChartRef = ref(null)
 const utilizationChartRef = ref(null)
 const hourlyChartRef = ref(null)
+const hourlyCompChartRef = ref(null)
 
 let monthlyChart = null
 let yearlyChart = null
@@ -225,6 +237,7 @@ let mauChart = null
 let revenueChart = null
 let utilizationChart = null
 let hourlyChart = null
+let hourlyCompChart = null
 
 const formatNum = (v) => {
   if (v == null) return '-'
@@ -420,13 +433,49 @@ const renderHourlyChart = () => {
   })
 }
 
+const renderHourlyCompChart = () => {
+  if (!hourlyCompChartRef.value || !hourlyCompData.value.hours || hourlyCompData.value.hours.length === 0) return
+  if (hourlyCompChart) hourlyCompChart.dispose()
+  hourlyCompChart = echarts.init(hourlyCompChartRef.value)
+  const hours = hourlyCompData.value.hours
+  const labels = hours.map(h => h.hour + ':00')
+  const todayOrders = hours.map(h => Number(h.todayOrder || 0))
+  const yesterdayOrders = hours.map(h => Number(h.yesterdayOrder || 0))
+  const alertBgColors = hours.map(h => h.alert ? 'rgba(245,108,108,0.15)' : 'transparent')
+  hourlyCompChart.setOption({
+    tooltip: { trigger: 'axis', formatter: (params) => {
+      const idx = params[0].dataIndex
+      const h = hours[idx]
+      let s = `${params[0].name}<br/>`
+      params.forEach(p => { s += `${p.marker}${p.seriesName}: ${Number(p.value).toLocaleString()}<br/>` })
+      if (h.alert) s += '<span style="color:#F56C6C;font-weight:bold">⚠ 落后 50%+</span>'
+      return s
+    }},
+    legend: { data: ['今日订单', '昨日订单'], top: 0 },
+    grid: { top: 40, bottom: 30, left: 50, right: 20 },
+    xAxis: { type: 'category', data: labels },
+    yAxis: { type: 'value', name: '订单量' },
+    series: [
+      {
+        name: '今日订单', type: 'bar', data: todayOrders,
+        itemStyle: {
+          color: (params) => hours[params.dataIndex].alert ? '#F56C6C' : '#409EFF',
+          borderRadius: [4, 4, 0, 0]
+        }
+      },
+      { name: '昨日订单', type: 'bar', data: yesterdayOrders, itemStyle: { color: '#C0C4CC', borderRadius: [4, 4, 0, 0] } }
+    ],
+    markArea: { silent: true, data: hours.map((h, i) => h.alert ? [{ xAxis: i, itemStyle: { color: 'rgba(245,108,108,0.08)' } }, { xAxis: i }] : null).filter(Boolean) }
+  })
+}
+
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, idleRes] = await Promise.all([
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, hcRes, idleRes] = await Promise.all([
       getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
       getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
-      getIdleStationRanking(30, 20)
+      getHourlyOrderComparison(), getIdleStationRanking(30, 20)
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -441,6 +490,7 @@ const fetchAll = async () => {
     regionData.value = regRes.data || []
     stationData.value = staRes.data || []
     hourlyData.value = hrRes.data || []
+    hourlyCompData.value = hcRes.data || {}
     idleStationData.value = idleRes.data || []
 
     await nextTick()
@@ -452,6 +502,7 @@ const fetchAll = async () => {
     renderRevenueChart()
     renderUtilizationChart()
     renderHourlyChart()
+    renderHourlyCompChart()
   } catch (e) {
     console.error('经营分析加载失败:', e)
   } finally {
@@ -468,6 +519,7 @@ const handleResize = () => {
   revenueChart?.resize()
   utilizationChart?.resize()
   hourlyChart?.resize()
+  hourlyCompChart?.resize()
 }
 
 onMounted(() => {
@@ -485,6 +537,7 @@ onUnmounted(() => {
   revenueChart?.dispose()
   utilizationChart?.dispose()
   hourlyChart?.dispose()
+  hourlyCompChart?.dispose()
 })
 </script>
 
@@ -493,6 +546,7 @@ onUnmounted(() => {
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .page-header h2 { margin: 0; font-size: 20px; }
 .summary-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
+.summary-cards.four-col { grid-template-columns: repeat(4, 1fr); }
 .summary-card {
   background: #fff; border: 1px solid #ebeef5; border-radius: 8px;
   padding: 16px; text-align: center;

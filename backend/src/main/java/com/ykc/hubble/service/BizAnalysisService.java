@@ -347,6 +347,12 @@ public class BizAnalysisService {
             () -> doHourlyDistribution(d));
     }
 
+    public Map<String, Object> hourlyOrderComparison() {
+        return getCachedOrRefresh("hourlyOrderComp", "hourlyOrderComp",
+            new TypeReference<Map<String, Object>>() {},
+            this::doHourlyOrderComparison);
+    }
+
     // ─── 实际查询方法（doXxx） ───
 
     private Map<String, Object> doDailyOverview() {
@@ -656,6 +662,57 @@ public class BizAnalysisService {
             "FROM internal.ads.ads_order_history_agg_dt_da " +
             "WHERE dt >= '" + startDate + "' AND dt < '" + endDate + "' " +
             "GROUP BY dt_hour ORDER BY dt_hour");
+    }
+
+    private Map<String, Object> doHourlyOrderComparison() {
+        String today = latestDate();
+        String yesterday = LocalDate.parse(today, DT).minusDays(1).format(DT);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("todayDate", today);
+        result.put("yesterdayDate", yesterday);
+
+        List<Map<String, Object>> todayRows = dorisQueryClient.query(
+            "SELECT dt_hour as `hour`, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "WHERE dt = '" + today + "' GROUP BY dt_hour ORDER BY dt_hour");
+
+        List<Map<String, Object>> yesterdayRows = dorisQueryClient.query(
+            "SELECT dt_hour as `hour`, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "WHERE dt = '" + yesterday + "' GROUP BY dt_hour ORDER BY dt_hour");
+
+        Map<Integer, double[]> todayMap = new LinkedHashMap<>();
+        for (var row : todayRows) {
+            int h = (int) toDouble(row.get("hour"), 0);
+            todayMap.put(h, new double[]{toDouble(row.get("orderCnt"), 0), toDouble(row.get("chargedPower"), 0)});
+        }
+        Map<Integer, double[]> yesterdayMap = new LinkedHashMap<>();
+        for (var row : yesterdayRows) {
+            int h = (int) toDouble(row.get("hour"), 0);
+            yesterdayMap.put(h, new double[]{toDouble(row.get("orderCnt"), 0), toDouble(row.get("chargedPower"), 0)});
+        }
+
+        List<Map<String, Object>> hours = new ArrayList<>();
+        int alertCount = 0;
+        for (int h = 0; h < 24; h++) {
+            double tOrder = todayMap.containsKey(h) ? todayMap.get(h)[0] : 0;
+            double tPower = todayMap.containsKey(h) ? todayMap.get(h)[1] : 0;
+            double yOrder = yesterdayMap.containsKey(h) ? yesterdayMap.get(h)[0] : 0;
+            double yPower = yesterdayMap.containsKey(h) ? yesterdayMap.get(h)[1] : 0;
+            boolean alert = (yOrder > 0 && tOrder < yOrder * 0.5) || (yPower > 0 && tPower < yPower * 0.5);
+            if (alert) alertCount++;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("hour", h);
+            item.put("todayOrder", tOrder);
+            item.put("yesterdayOrder", yOrder);
+            item.put("todayPower", tPower);
+            item.put("yesterdayPower", yPower);
+            item.put("alert", alert);
+            hours.add(item);
+        }
+        result.put("hours", hours);
+        result.put("alertCount", alertCount);
+        return result;
     }
 
     public Map<String, Object> realtimeOrderOverview() {

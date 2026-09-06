@@ -107,6 +107,12 @@ public class BizAnalysisController {
         return Result.success(bizAnalysisService.hourlyDistribution(days));
     }
 
+    @GetMapping("/hourly-order-comparison")
+    @Operation(summary = "今日vs昨日小时订单对比")
+    public Result<Map<String, Object>> hourlyOrderComparison() {
+        return Result.success(bizAnalysisService.hourlyOrderComparison());
+    }
+
     @GetMapping("/realtime-order")
     @Operation(summary = "实时订单概览（各状态订单数）")
     public Result<Map<String, Object>> realtimeOrder() {

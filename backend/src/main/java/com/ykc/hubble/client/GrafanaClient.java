@@ -44,7 +44,7 @@ public class GrafanaClient {
     private String bizDsUid;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(java.time.Duration.ofSeconds(5))
+            .connectTimeout(java.time.Duration.ofSeconds(10))
             .build();
 
     /**
@@ -71,6 +71,7 @@ public class GrafanaClient {
                     .uri(URI.create(grafanaUrl + "/api/ds/query"))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Basic " + auth)
+                    .timeout(java.time.Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
