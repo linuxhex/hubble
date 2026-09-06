@@ -293,7 +293,7 @@ public class MiddlewareMonitorService {
             for (var item : results) {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("pod", item.getOrDefault("pod", "unknown"));
-                double bytes = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                double bytes = toDouble(item.getOrDefault("value", 0));
                 row.put("memoryMB", Math.round(bytes / 1024 / 1024 * 10) / 10.0);
                 list.add(row);
             }
@@ -329,14 +329,14 @@ public class MiddlewareMonitorService {
             Map<String, Double> cpuMap = new HashMap<>();
             for (var item : cpuResults) {
                 String node = String.valueOf(item.getOrDefault("instance", "unknown"));
-                double cpu = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                double cpu = toDouble(item.getOrDefault("value", 0));
                 cpuMap.put(node, cpu);
             }
 
             Map<String, double[]> nodeMap = new LinkedHashMap<>();
             for (var item : memResults) {
                 String node = String.valueOf(item.getOrDefault("instance", "unknown"));
-                double mem = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                double mem = toDouble(item.getOrDefault("value", 0));
                 nodeMap.put(node, new double[]{cpuMap.getOrDefault(node, 0.0), mem});
             }
 
@@ -348,8 +348,8 @@ public class MiddlewareMonitorService {
                 list.add(row);
             }
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("cpuUsage", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("cpuUsage", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("cpuUsage", 0)),
+                    toDouble(a.getOrDefault("cpuUsage", 0))));
             nodeCache = list;
             nodeCacheTime = now;
             log.info("Node 概览: {} 个节点（已缓存）", list.size());
@@ -743,6 +743,20 @@ public class MiddlewareMonitorService {
         if (results == null || results.isEmpty()) return 0;
         Object v = results.get(0).get("value");
         if (v instanceof Number) return ((Number) v).doubleValue();
+        if (v instanceof String) {
+            try { return Double.parseDouble((String) v); } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    /**
+     * 安全地将对象转为 double（处理 Number/String 混合类型，避免 ClassCastException）
+     */
+    private double toDouble(Object v) {
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        if (v instanceof String) {
+            try { return Double.parseDouble((String) v); } catch (Exception ignored) {}
+        }
         return 0;
     }
 
@@ -862,8 +876,8 @@ public class MiddlewareMonitorService {
 
             // 按活动连接数降序
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("activeCount", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("activeCount", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("activeCount", 0)),
+                    toDouble(a.getOrDefault("activeCount", 0))));
 
             druidInstancesCache = list;
             druidInstancesCacheTime = now;
@@ -920,8 +934,8 @@ public class MiddlewareMonitorService {
 
             // 按堆内存使用率降序
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("heapUsage", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("heapUsage", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("heapUsage", 0)),
+                    toDouble(a.getOrDefault("heapUsage", 0))));
 
             jvmInstancesCache = list;
             jvmInstancesCacheTime = now;
@@ -984,8 +998,8 @@ public class MiddlewareMonitorService {
             }
 
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("messageAccumulation", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("messageAccumulation", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("messageAccumulation", 0)),
+                    toDouble(a.getOrDefault("messageAccumulation", 0))));
 
             rocketmqTopTopicsCache = list.size() > 20 ? list.subList(0, 20) : list;
             rocketmqTopTopicsCacheTime = now;
@@ -1014,7 +1028,7 @@ public class MiddlewareMonitorService {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("topic", item.getOrDefault("topic", "unknown"));
                 row.put("instanceName", item.getOrDefault("application", "unknown"));
-                double lag = ((Number) item.getOrDefault("value", 0)).doubleValue();
+                double lag = toDouble(item.getOrDefault("value", 0));
                 row.put("lag", lag);
                 row.put("produceTps", 0);
                 row.put("consumeTps", 0);
@@ -1022,8 +1036,8 @@ public class MiddlewareMonitorService {
             }
 
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("lag", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("lag", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("lag", 0)),
+                    toDouble(a.getOrDefault("lag", 0))));
 
             kafkaTopPartitionsCache = list.size() > 20 ? list.subList(0, 20) : list;
             kafkaTopPartitionsCacheTime = now;
@@ -1066,8 +1080,8 @@ public class MiddlewareMonitorService {
             }
 
             list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("memoryBytes", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("memoryBytes", 0)).doubleValue()));
+                    toDouble(b.getOrDefault("memoryBytes", 0)),
+                    toDouble(a.getOrDefault("memoryBytes", 0))));
 
             redisBigKeysCache = list.size() > 20 ? list.subList(0, 20) : list;
             redisBigKeysCacheTime = now;
@@ -1153,8 +1167,8 @@ public class MiddlewareMonitorService {
             }
 
             list.sort((a, b) -> Long.compare(
-                    ((Number) b.getOrDefault("slowCount", 0)).longValue(),
-                    ((Number) a.getOrDefault("slowCount", 0)).longValue()));
+                    (long) toDouble(b.getOrDefault("slowCount", 0)),
+                    (long) toDouble(a.getOrDefault("slowCount", 0))));
 
             redisSlowQueriesCache = list.size() > 50 ? list.subList(0, 50) : list;
             redisSlowQueriesCacheTime = now;
@@ -1166,7 +1180,8 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * MySQL Top Tables：从 Aliyun Prometheus 获取 RDS/PolarDB 各实例的磁盘使用率
+     * MySQL Top Tables：从 Aliyun Prometheus 获取 RDS/PolarDB 各实例的资源使用率
+     * 注：Prometheus 无 DiskUsage 指标，改用 CPU + Memory 使用率作为排序依据
      */
     public List<Map<String, Object>> mysqlTopTables() {
         long now = System.currentTimeMillis();
@@ -1185,17 +1200,18 @@ public class MiddlewareMonitorService {
                 if (instanceId.isEmpty()) continue;
                 String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
 
-                var disk = grafanaClient.queryInstant(
-                        "AliyunRds_DiskUsage{instanceId=\"" + instanceId + "\"}", ds);
-                if (disk.isEmpty()) {
-                    disk = grafanaClient.queryInstant(
-                            "AliyunRds_disk_usage{instanceId=\"" + instanceId + "\"}", ds);
-                }
+                var cpu = grafanaClient.queryInstant(
+                        "AliyunRds_CpuUsage{instanceId=\"" + instanceId + "\"}", ds);
+                var mem = grafanaClient.queryInstant(
+                        "AliyunRds_MemoryUsage{instanceId=\"" + instanceId + "\"}", ds);
+
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("tableName", instanceName);
                 item.put("instanceId", instanceId);
                 item.put("engine", "RDS");
-                item.put("diskUsage", extractValue(disk));
+                item.put("cpuUsage", extractValue(cpu));
+                item.put("memoryUsage", extractValue(mem));
+                item.put("diskUsage", 0.0);
                 list.add(item);
             }
 
@@ -1206,23 +1222,28 @@ public class MiddlewareMonitorService {
                 if (instanceId.isEmpty()) continue;
                 String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
 
-                var disk = grafanaClient.queryInstant(
-                        "AliyunPolardb_cluster_disk_utilization{instanceId=\"" + instanceId + "\"}", ds);
-                if (disk.isEmpty()) {
-                    disk = grafanaClient.queryInstant(
-                            "AliyunPolardb_DiskUsage{instanceId=\"" + instanceId + "\"}", ds);
-                }
+                var cpu = grafanaClient.queryInstant(
+                        "AliyunPolardb_cluster_cpu_utilization{instanceId=\"" + instanceId + "\"}", ds);
+                var mem = grafanaClient.queryInstant(
+                        "AliyunPolardb_cluster_memory_utilization{instanceId=\"" + instanceId + "\"}", ds);
+
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("tableName", instanceName);
                 item.put("instanceId", instanceId);
                 item.put("engine", "PolarDB");
-                item.put("diskUsage", extractValue(disk));
+                item.put("cpuUsage", extractValue(cpu));
+                item.put("memoryUsage", extractValue(mem));
+                item.put("diskUsage", 0.0);
                 list.add(item);
             }
 
-            list.sort((a, b) -> Double.compare(
-                    ((Number) b.getOrDefault("diskUsage", 0)).doubleValue(),
-                    ((Number) a.getOrDefault("diskUsage", 0)).doubleValue()));
+            list.sort((a, b) -> {
+                double aScore = ((Number) a.getOrDefault("cpuUsage", 0)).doubleValue()
+                        + ((Number) a.getOrDefault("memoryUsage", 0)).doubleValue();
+                double bScore = ((Number) b.getOrDefault("cpuUsage", 0)).doubleValue()
+                        + ((Number) b.getOrDefault("memoryUsage", 0)).doubleValue();
+                return Double.compare(bScore, aScore);
+            });
 
             mysqlTopTablesCache = list.size() > 50 ? list.subList(0, 50) : list;
             mysqlTopTablesCacheTime = now;
@@ -1283,8 +1304,8 @@ public class MiddlewareMonitorService {
             }
 
             list.sort((a, b) -> Long.compare(
-                    ((Number) b.getOrDefault("slowCount", 0)).longValue(),
-                    ((Number) a.getOrDefault("slowCount", 0)).longValue()));
+                    (long) toDouble(b.getOrDefault("slowCount", 0)),
+                    (long) toDouble(a.getOrDefault("slowCount", 0))));
 
             mysqlSlowQueriesCache = list.size() > 50 ? list.subList(0, 50) : list;
             mysqlSlowQueriesCacheTime = now;
