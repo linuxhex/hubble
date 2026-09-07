@@ -31,6 +31,9 @@ public class GrafanaClient {
     @Value("${grafana.pass:}")
     private String grafanaPass;
 
+    @Value("${grafana.api-key:}")
+    private String grafanaApiKey;
+
     @Value("${grafana.ds-uid:6A__NzsMk}")
     private String dsUid;
 
@@ -64,13 +67,18 @@ public class GrafanaClient {
                     "{\"queries\":[{\"refId\":\"A\",\"datasource\":{\"type\":\"prometheus\",\"uid\":\"%s\"},\"expr\":%s,\"instant\":true}],\"from\":\"now-1h\",\"to\":\"now\"}",
                     targetDsUid, JSON.toJSONString(promql));
 
-            String auth = Base64.getEncoder().encodeToString(
-                    (grafanaUser + ":" + grafanaPass).getBytes(StandardCharsets.UTF_8));
+            String authHeader;
+            if (grafanaApiKey != null && !grafanaApiKey.isEmpty()) {
+                authHeader = "Bearer " + grafanaApiKey;
+            } else {
+                authHeader = "Basic " + Base64.getEncoder().encodeToString(
+                        (grafanaUser + ":" + grafanaPass).getBytes(StandardCharsets.UTF_8));
+            }
 
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(grafanaUrl + "/api/ds/query"))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Basic " + auth)
+                    .header("Authorization", authHeader)
                     .timeout(java.time.Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();

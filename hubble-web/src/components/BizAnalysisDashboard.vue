@@ -247,7 +247,7 @@ const formatNum = (v) => {
 }
 
 const tradeModeLabel = (mode) => {
-  const map = { '1': '直连', '2': '互联A', '3': '互联B', 1: '直连', 2: '互联A', 3: '互联B' }
+  const map = { '1': '交易模式', '2': '佣金模式', '3': '不结算模式', 1: '交易模式', 2: '佣金模式', 3: '不结算模式' }
   return map[mode] || `模式${mode}`
 }
 

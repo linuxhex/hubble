@@ -69,6 +69,7 @@ grafana:
   url: ${GRAFANA_URL:https://graf.ykccn.net}
   user: ${GRAFANA_USER:caomunian}
   pass: ${GRAFANA_PASS:}
+  api-key: ${GRAFANA_API_KEY:}
   ds-uid: ${GRAFANA_DS_UID:6A__NzsMk}
   node-ds-uid: ${GRAFANA_NODE_DS_UID:cem0jt0mij668b}
   aliyun-ds-uid: ${GRAFANA_ALIYUN_DS_UID:l9II0lm4z}

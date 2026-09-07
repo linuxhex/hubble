@@ -62,9 +62,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .addResolver(new PathResourceResolver() {
                     @Override
                     protected Resource getResource(@NonNull String resourcePath, @NonNull Resource location) throws IOException {
-                        // API 路径不处理静态资源
-                        if (resourcePath.startsWith("api/")) {
-                            return null;
+                        if (resourcePath.startsWith("api/") || resourcePath.isEmpty()) {
+                            return resourcePath.isEmpty() ? location.createRelative("index.html") : null;
                         }
                         Resource requested = location.createRelative(resourcePath);
                         if (requested.exists() && requested.isReadable()) {

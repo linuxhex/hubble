@@ -143,9 +143,19 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetric("acs_kvstore", "CpuUsage", dim, startTime, endTime));
-                    item.put("connections", queryLatestMetric("acs_kvstore", "ConnectionUsage", dim, startTime, endTime));
-                    item.put("memoryUsage", queryLatestMetric("acs_kvstore", "MemoryUsage", dim, startTime, endTime));
+                    item.put("cpuUsage", queryLatestMetricWithFallback("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime));
+                    
+                    // 连接数：尝试多个可能的指标名称
+                    double connections = queryLatestMetricWithFallback("acs_kvstore", "ConnectionUsage", "ShardingConnectionCount", dim, startTime, endTime);
+                    if (connections == 0) {
+                        connections = queryLatestMetric("acs_kvstore", "ShardingUsedConnection", dim, startTime, endTime);
+                    }
+                    if (connections == 0) {
+                        connections = queryLatestMetric("acs_kvstore", "UsedConnection", dim, startTime, endTime);
+                    }
+                    item.put("connections", connections);
+                    
+                    item.put("memoryUsage", queryLatestMetricWithFallback("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime));
                     item.put("qps", queryLatestMetric("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
                     return item;
                 })
@@ -600,9 +610,18 @@ public class MiddlewareMonitorService {
                 item.put("instanceName", desc);
 
                 String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                item.put("cpuUsage", queryLatestMetric("acs_elasticsearch", "NodeCPUUtilization", dim, startTime, endTime));
-                item.put("diskUsage", queryLatestMetric("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime));
-                item.put("jvmMemory", queryLatestMetric("acs_elasticsearch", "NodeJVMMemoryUsedPercent", dim, startTime, endTime));
+                item.put("cpuUsage", queryLatestMetric("acs_elasticsearch", "NodeCPUUtilization", dim, startTime, endTime, true));
+                item.put("diskUsage", queryLatestMetric("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime, true));
+                
+                // JVM 内存：尝试多个可能的指标名称
+                double jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMMemoryUsedPercent", dim, startTime, endTime, true);
+                if (jvmMemory == 0) {
+                    jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMHeapUtilization", dim, startTime, endTime, true);
+                }
+                if (jvmMemory == 0) {
+                    jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMUtilization", dim, startTime, endTime, true);
+                }
+                item.put("jvmMemory", jvmMemory);
                 list.add(item);
             }
 
@@ -703,20 +722,44 @@ public class MiddlewareMonitorService {
      */
     private double queryLatestMetric(String namespace, String metric, String dimensions,
                                      String startTime, String endTime) {
+        return queryLatestMetric(namespace, metric, dimensions, startTime, endTime, false);
+    }
+
+    /**
+     * 查询最新指标值，支持求和或求平均。
+     * 利用率类指标（CPU/内存等）多节点时应求平均，QPS 类指标应求和。
+     */
+    private double queryLatestMetric(String namespace, String metric, String dimensions,
+                                     String startTime, String endTime, boolean average) {
         List<double[]> points = cloudMonitorClient.queryMetric(namespace, metric, dimensions, 60, startTime, endTime);
         if (points.isEmpty()) return 0;
 
-        // 找最新时间戳
         double maxTs = 0;
         for (double[] p : points) {
             if (p[0] > maxTs) maxTs = p[0];
         }
-        // 同一时间戳内所有序列求和（QPS 类多序列指标需要汇总，单序列指标不受影响）
         double sum = 0;
+        int count = 0;
         for (double[] p : points) {
-            if (p[0] == maxTs) sum += p[1];
+            if (p[0] == maxTs) {
+                sum += p[1];
+                count++;
+            }
         }
-        return sum;
+        return average && count > 0 ? sum / count : sum;
+    }
+
+    /**
+     * 先查主指标，返回 0 则查备选指标（Redis 集群版需 Sharding* 前缀指标）。
+     */
+    private double queryLatestMetricWithFallback(String namespace, String primaryMetric,
+                                                  String fallbackMetric, String dimensions,
+                                                  String startTime, String endTime) {
+        double val = queryLatestMetric(namespace, primaryMetric, dimensions, startTime, endTime);
+        if (val == 0) {
+            val = queryLatestMetric(namespace, fallbackMetric, dimensions, startTime, endTime);
+        }
+        return val;
     }
 
     /**
