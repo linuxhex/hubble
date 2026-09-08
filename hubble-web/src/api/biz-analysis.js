@@ -56,6 +56,10 @@ export function getHourlyOrderComparison() {
   return request.get('/biz-analysis/hourly-order-comparison')
 }
 
+export function getHourlyChargingOrderComparison() {
+  return request.get('/biz-analysis/hourly-charging-order-comparison')
+}
+
 export function getIdleStationRanking(days = 30, limit = 20) {
   return request.get('/biz-analysis/idle-station-ranking', { params: { days, limit } })
 }

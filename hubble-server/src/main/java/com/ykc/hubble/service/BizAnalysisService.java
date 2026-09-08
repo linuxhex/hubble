@@ -728,6 +728,65 @@ public class BizAnalysisService {
         return result;
     }
 
+    public Map<String, Object> hourlyChargingOrderComparison() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            String bizDs = grafanaClient.getBizDsUid();
+            long now = System.currentTimeMillis();
+            long todayStart = now - (now % 86400000) - 28800000;
+            long yesterdayStart = todayStart - 86400000;
+
+            List<Map<String, Object>> allData = grafanaClient.queryRange(
+                    "realtimeOrder{id=\"7\"}", "now-48h", "now", bizDs);
+
+            Map<Integer, Double> todayHourly = new LinkedHashMap<>();
+            Map<Integer, Double> yesterdayHourly = new LinkedHashMap<>();
+            for (int h = 0; h < 24; h++) {
+                todayHourly.put(h, 0.0);
+                yesterdayHourly.put(h, 0.0);
+            }
+
+            for (var point : allData) {
+                long ts = toLong(point.get("time"), 0);
+                double val = toDouble(point.get("value"), 0);
+                int hour = (int) ((ts % 86400000) / 3600000 + 8) % 24;
+                if (ts >= todayStart) {
+                    todayHourly.merge(hour, val, Math::max);
+                } else if (ts >= yesterdayStart) {
+                    yesterdayHourly.merge(hour, val, Math::max);
+                }
+            }
+
+            java.time.LocalDate todayDate = java.time.LocalDate.now();
+            java.time.LocalDate yesterdayDate = todayDate.minusDays(1);
+            result.put("todayDate", todayDate.toString());
+            result.put("yesterdayDate", yesterdayDate.toString());
+
+            int currentHour = (int) ((now % 86400000) / 3600000 + 8) % 24;
+
+            List<Map<String, Object>> hours = new ArrayList<>();
+            int alertCount = 0;
+            for (int h = 0; h < 24; h++) {
+                double todayVal = todayHourly.getOrDefault(h, 0.0);
+                double yesterdayVal = yesterdayHourly.getOrDefault(h, 0.0);
+                boolean alert = h < currentHour && Math.abs(todayVal - yesterdayVal) >= 10000;
+                if (alert) alertCount++;
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("hour", h);
+                item.put("todayCharging", todayVal);
+                item.put("yesterdayCharging", yesterdayVal);
+                item.put("alert", alert);
+                hours.add(item);
+            }
+            result.put("hours", hours);
+            result.put("alertCount", alertCount);
+            result.put("timestamp", now);
+        } catch (Exception e) {
+            log.error("查询充电中订单小时对比失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
     public List<Map<String, Object>> idleStationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
         if (limit <= 0 || limit > 100) limit = 20;

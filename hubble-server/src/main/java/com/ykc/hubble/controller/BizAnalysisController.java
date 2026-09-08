@@ -2,6 +2,7 @@ package com.ykc.hubble.controller;
 
 import com.ykc.hubble.common.Result;
 import com.ykc.hubble.service.BizAnalysisService;
+import com.ykc.hubble.service.DailyReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,14 @@ import java.util.Map;
 public class BizAnalysisController {
 
     private final BizAnalysisService bizAnalysisService;
+    private final DailyReportService dailyReportService;
+
+    @PostMapping("/test-daily-report")
+    @Operation(summary = "测试发送每日经营分析报告")
+    public Result<String> testDailyReport() {
+        dailyReportService.sendDailyReport();
+        return Result.success("已触发测试发送");
+    }
 
     @GetMapping("/overview")
     @Operation(summary = "汇总卡片")
@@ -111,6 +120,12 @@ public class BizAnalysisController {
     @Operation(summary = "今日vs昨日小时订单对比")
     public Result<Map<String, Object>> hourlyOrderComparison() {
         return Result.success(bizAnalysisService.hourlyOrderComparison());
+    }
+
+    @GetMapping("/hourly-charging-order-comparison")
+    @Operation(summary = "今日vs昨日小时充电中订单对比")
+    public Result<Map<String, Object>> hourlyChargingOrderComparison() {
+        return Result.success(bizAnalysisService.hourlyChargingOrderComparison());
     }
 
     @GetMapping("/realtime-order")

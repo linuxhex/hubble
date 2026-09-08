@@ -1,13 +1,17 @@
 package com.ykc.hubble.service;
 
 import com.ykc.hubble.client.DingTalkClient;
+import com.ykc.hubble.config.DingtalkProperties;
+import com.ykc.hubble.entity.DingtalkRobot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -17,16 +21,54 @@ public class DailyReportService {
 
     private final BizAnalysisService bizAnalysisService;
     private final DingTalkClient dingTalkClient;
+    private final DingtalkProperties dingtalkProperties;
+    private final DingtalkRobotService dingtalkRobotService;
 
     private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-    @Scheduled(cron = "0 0 11 * * ?")
+    @Scheduled(cron = "0 0 13 * * ?")
     public void sendDailyReport() {
         log.info("开始发送每日经营分析报告");
         try {
             String content = buildReportContent();
-            dingTalkClient.sendRobotMarkdown("每日经营分析报告", content);
-            log.info("每日经营分析报告发送成功");
+            String title = "每日经营分析报告";
+            int sentCount = 0;
+
+            // 1. 发送到全局配置的 webhook
+            if (StringUtils.hasText(dingtalkProperties.getRobotWebhook())) {
+                try {
+                    dingTalkClient.sendRobotMarkdown(title, content);
+                    sentCount++;
+                    log.info("每日报告已发送到全局 webhook");
+                } catch (Exception e) {
+                    log.warn("发送到全局 webhook 失败: {}", e.getMessage());
+                }
+            }
+
+            // 2. 发送到告警配置里的所有启用机器人
+            List<DingtalkRobot> robots = dingtalkRobotService.listEnabled();
+            for (DingtalkRobot robot : robots) {
+                if (!StringUtils.hasText(robot.getWebhook())) {
+                    continue;
+                }
+                try {
+                    dingTalkClient.sendRobotActionCard(
+                            robot.getWebhook(),
+                            robot.getSecret(),
+                            title,
+                            content,
+                            "查看详情",
+                            dingtalkProperties.getRedirectUrl(),
+                            true
+                    );
+                    sentCount++;
+                    log.info("每日报告已发送到机器人: {}", robot.getName());
+                } catch (Exception e) {
+                    log.warn("发送到机器人 {} 失败: {}", robot.getName(), e.getMessage());
+                }
+            }
+
+            log.info("每日经营分析报告发送完成，共发送 {} 个机器人", sentCount);
         } catch (Exception e) {
             log.error("发送每日经营分析报告失败: {}", e.getMessage(), e);
         }

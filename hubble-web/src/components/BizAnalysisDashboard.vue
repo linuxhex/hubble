@@ -44,6 +44,15 @@
       <div ref="hourlyCompChartRef" class="chart-container"></div>
     </div>
 
+    <!-- 1.6 今日 vs 昨日 小时充电中订单 -->
+    <div class="chart-section" v-if="hourlyChargingCompData.hours && hourlyChargingCompData.hours.length > 0">
+      <div class="section-title">
+        小时充电中订单对比（{{ hourlyChargingCompData.todayDate }} vs {{ hourlyChargingCompData.yesterdayDate }}）
+        <span v-if="hourlyChargingCompData.alertCount > 0" class="alert-badge">⚠ {{ hourlyChargingCompData.alertCount }}个时段差异≥10000</span>
+      </div>
+      <div ref="hourlyChargingCompChartRef" class="chart-container"></div>
+    </div>
+
     <!-- 2. 趋势区：月度趋势 + 年度同比 并排 -->
     <div class="chart-row two-col" v-if="monthlyData.length > 0 || (yearlyData.comparison && yearlyData.comparison.length > 0)">
       <div class="chart-section" v-if="monthlyData.length > 0">
@@ -200,7 +209,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getHourlyOrderComparison, getIdleStationRanking } from '@/api/biz-analysis.js'
+import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getHourlyOrderComparison, getHourlyChargingOrderComparison, getIdleStationRanking } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
 const overview = ref({})
@@ -218,6 +227,7 @@ const regionData = ref([])
 const stationData = ref([])
 const hourlyData = ref([])
 const hourlyCompData = ref({})
+const hourlyChargingCompData = ref({})
 
 const monthlyChartRef = ref(null)
 const yearlyChartRef = ref(null)
@@ -228,6 +238,7 @@ const revenueChartRef = ref(null)
 const utilizationChartRef = ref(null)
 const hourlyChartRef = ref(null)
 const hourlyCompChartRef = ref(null)
+const hourlyChargingCompChartRef = ref(null)
 
 let monthlyChart = null
 let yearlyChart = null
@@ -238,6 +249,7 @@ let revenueChart = null
 let utilizationChart = null
 let hourlyChart = null
 let hourlyCompChart = null
+let hourlyChargingCompChart = null
 
 const formatNum = (v) => {
   if (v == null) return '-'
@@ -469,13 +481,47 @@ const renderHourlyCompChart = () => {
   })
 }
 
+const renderHourlyChargingCompChart = () => {
+  if (!hourlyChargingCompChartRef.value || !hourlyChargingCompData.value.hours || hourlyChargingCompData.value.hours.length === 0) return
+  if (hourlyChargingCompChart) hourlyChargingCompChart.dispose()
+  hourlyChargingCompChart = echarts.init(hourlyChargingCompChartRef.value)
+  const hours = hourlyChargingCompData.value.hours
+  const labels = hours.map(h => h.hour + ':00')
+  const todayCharging = hours.map(h => Number(h.todayCharging || 0))
+  const yesterdayCharging = hours.map(h => Number(h.yesterdayCharging || 0))
+  hourlyChargingCompChart.setOption({
+    tooltip: { trigger: 'axis', formatter: (params) => {
+      const idx = params[0].dataIndex
+      const h = hours[idx]
+      let s = `${params[0].name}<br/>`
+      params.forEach(p => { s += `${p.marker}${p.seriesName}: ${Number(p.value).toLocaleString()}<br/>` })
+      if (h.alert) s += '<span style="color:#F56C6C;font-weight:bold">⚠ 差异≥10000</span>'
+      return s
+    }},
+    legend: { data: ['今日充电中', '昨日充电中'], top: 0 },
+    grid: { top: 40, bottom: 30, left: 50, right: 20 },
+    xAxis: { type: 'category', data: labels },
+    yAxis: { type: 'value', name: '充电中订单数' },
+    series: [
+      {
+        name: '今日充电中', type: 'bar', data: todayCharging,
+        itemStyle: {
+          color: (params) => hours[params.dataIndex].alert ? '#F56C6C' : '#67C23A',
+          borderRadius: [4, 4, 0, 0]
+        }
+      },
+      { name: '昨日充电中', type: 'bar', data: yesterdayCharging, itemStyle: { color: '#C0C4CC', borderRadius: [4, 4, 0, 0] } }
+    ]
+  })
+}
+
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, hcRes, idleRes] = await Promise.all([
+    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, hcRes, hccRes, idleRes] = await Promise.all([
       getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
       getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
-      getHourlyOrderComparison(), getIdleStationRanking(30, 20)
+      getHourlyOrderComparison(), getHourlyChargingOrderComparison(), getIdleStationRanking(30, 20)
     ])
     overview.value = ovRes.data || {}
     monthlyData.value = mtRes.data || []
@@ -491,6 +537,7 @@ const fetchAll = async () => {
     stationData.value = staRes.data || []
     hourlyData.value = hrRes.data || []
     hourlyCompData.value = hcRes.data || {}
+    hourlyChargingCompData.value = hccRes.data || {}
     idleStationData.value = idleRes.data || []
 
     await nextTick()
@@ -503,6 +550,7 @@ const fetchAll = async () => {
     renderUtilizationChart()
     renderHourlyChart()
     renderHourlyCompChart()
+    renderHourlyChargingCompChart()
   } catch (e) {
     console.error('经营分析加载失败:', e)
   } finally {

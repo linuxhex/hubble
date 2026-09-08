@@ -162,4 +162,96 @@ public class GrafanaClient {
     public String getBizDsUid() {
         return bizDsUid;
     }
+
+    /**
+     * 执行 PromQL range 查询（指定时间范围和数据源）
+     * 返回时间序列数据：[{time: timestamp, value: number, labels: {...}}, ...]
+     */
+    public List<Map<String, Object>> queryRange(String promql, String from, String to, String targetDsUid) {
+        List<Map<String, Object>> results = new ArrayList<>();
+        try {
+            String body = String.format(
+                    "{\"queries\":[{\"refId\":\"A\",\"datasource\":{\"type\":\"prometheus\",\"uid\":\"%s\"},\"expr\":%s}],\"from\":\"%s\",\"to\":\"%s\"}",
+                    targetDsUid, JSON.toJSONString(promql), from, to);
+
+            String authHeader;
+            if (grafanaApiKey != null && !grafanaApiKey.isEmpty()) {
+                authHeader = "Bearer " + grafanaApiKey;
+            } else {
+                authHeader = "Basic " + Base64.getEncoder().encodeToString(
+                        (grafanaUser + ":" + grafanaPass).getBytes(StandardCharsets.UTF_8));
+            }
+
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(grafanaUrl + "/api/ds/query"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", authHeader)
+                    .timeout(java.time.Duration.ofSeconds(30))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.warn("Grafana range 查询失败: status={}, promql={}", resp.statusCode(), promql);
+                return results;
+            }
+
+            JSONObject json = JSON.parseObject(resp.body());
+            JSONObject resultA = json.getJSONObject("results").getJSONObject("A");
+            if (resultA == null) return results;
+
+            JSONArray frames = resultA.getJSONArray("frames");
+            if (frames == null) return results;
+
+            for (int i = 0; i < frames.size(); i++) {
+                JSONObject frame = frames.getJSONObject(i);
+                JSONObject schema = frame.getJSONObject("schema");
+                JSONObject data = frame.getJSONObject("data");
+                if (schema == null || data == null) continue;
+
+                JSONArray fields = schema.getJSONArray("fields");
+                JSONArray values = data.getJSONArray("values");
+                if (fields == null || fields.isEmpty() || values == null || values.isEmpty()) continue;
+
+                // 找 time field 和 value field
+                int timeFieldIdx = -1;
+                int valueFieldIdx = -1;
+                for (int f = 0; f < fields.size(); f++) {
+                    JSONObject field = fields.getJSONObject(f);
+                    String fieldType = field.getString("type");
+                    JSONObject labels = field.getJSONObject("labels");
+                    if ("time".equals(fieldType)) {
+                        timeFieldIdx = f;
+                    } else if (labels != null && !labels.isEmpty()) {
+                        valueFieldIdx = f;
+                    }
+                }
+                if (timeFieldIdx == -1) timeFieldIdx = 0;
+                if (valueFieldIdx == -1) valueFieldIdx = fields.size() - 1;
+                if (timeFieldIdx < 0 || valueFieldIdx < 0) continue;
+
+                JSONArray timeArr = values.getJSONArray(timeFieldIdx);
+                JSONArray valArr = values.getJSONArray(valueFieldIdx);
+                if (timeArr == null || valArr == null || timeArr.isEmpty() || valArr.isEmpty()) continue;
+
+                JSONObject field = fields.getJSONObject(valueFieldIdx);
+                JSONObject labels = field.getJSONObject("labels");
+
+                for (int j = 0; j < timeArr.size() && j < valArr.size(); j++) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("time", timeArr.get(j));
+                    item.put("value", valArr.get(j));
+                    if (labels != null) {
+                        for (String key : labels.keySet()) {
+                            item.put(key, labels.getString(key));
+                        }
+                    }
+                    results.add(item);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Grafana range 查询异常: promql={}, error={}", promql, e.getMessage());
+        }
+        return results;
+    }
 }
