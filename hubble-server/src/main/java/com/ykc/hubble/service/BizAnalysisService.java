@@ -49,17 +49,11 @@ public class BizAnalysisService {
     @PostConstruct
     public void initCache() {
         CompletableFuture.runAsync(() -> {
-            log.info("经营分析：启动预热缓存...");
-            try {
-                refreshAll();
-                log.info("经营分析：缓存预热完成");
-            } catch (Exception e) {
-                log.error("经营分析：缓存预热失败", e);
-            }
+            log.info("经营分析：缓存预热已禁用，改为懒加载");
         });
     }
 
-    @Scheduled(fixedRate = 5 * 60 * 1000)
+    @Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 60000)
     public void refreshAll() {
         try {
             memoryCache.put("overview", new CacheEntry(doDailyOverview()));

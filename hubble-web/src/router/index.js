@@ -140,7 +140,7 @@ router.beforeEach((to, from, next) => {
     return
   }
 
-  if (to.path === '/biz-analysis') {
+  if (to.path === '/biz-analysis' || to.path === '/abnormal') {
     const user = JSON.parse(localStorage.getItem('auth_user') || '{}')
     if (user.nickname !== 'lianzi') {
       next('/unauthorized')

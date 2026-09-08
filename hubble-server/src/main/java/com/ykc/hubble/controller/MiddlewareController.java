@@ -113,6 +113,11 @@ public class MiddlewareController {
         return Result.success(middlewareMonitorService.lindormTopTables());
     }
 
+    @GetMapping("/lindorm/metrics-discovery")
+    public Result<Map<String, Object>> lindormMetricsDiscovery() {
+        return Result.success(middlewareMonitorService.lindormMetricsDiscovery());
+    }
+
     @GetMapping("/elasticsearch/top-indices")
     public Result<List<Map<String, Object>>> elasticsearchTopIndices() {
         return Result.success(middlewareMonitorService.elasticsearchTopIndices());

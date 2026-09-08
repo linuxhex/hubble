@@ -2,6 +2,7 @@ package com.ykc.hubble.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ykc.hubble.client.DingTalkClient;
+import com.ykc.hubble.config.MonitorProperties;
 import com.ykc.hubble.entity.MiddlewareAlertConfig;
 import com.ykc.hubble.mapper.MiddlewareAlertConfigMapper;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ public class MiddlewareAlertService {
     private final MiddlewareAlertConfigMapper alertConfigMapper;
     private final DingTalkClient dingTalkClient;
     private final AlertPushService alertPushService;
+    private final MonitorProperties monitorProperties;
 
     private List<MiddlewareAlertConfig> configCache = null;
     private long configCacheTime = 0;
@@ -172,7 +174,7 @@ public class MiddlewareAlertService {
         }
 
         try {
-            String dashboardUrl = "http://localhost:5173/#/middleware";
+            String dashboardUrl = monitorProperties.getDashboardUrl() + "/#/middleware";
             dingTalkClient.sendRobotActionCard("中间件告警", md.toString(), "查看详情", dashboardUrl, true);
         } catch (Exception e) {
             log.warn("中间件告警钉钉推送失败: {}", e.getMessage());

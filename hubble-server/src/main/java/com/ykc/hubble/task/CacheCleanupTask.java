@@ -21,7 +21,7 @@ public class CacheCleanupTask {
     /**
      * 每小时清理一次过期缓存
      */
-    @Scheduled(fixedRate = 3600000) // 1小时 = 3600000毫秒
+    @Scheduled(fixedRate = 3600000, initialDelay = 300000) // 1小时一次，启动后5分钟再开始
     public void cleanExpiredCache() {
         log.debug("开始执行缓存清理任务...");
         int deleted = pageDataCacheService.cleanExpired();

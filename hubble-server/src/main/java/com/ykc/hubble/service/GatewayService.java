@@ -85,6 +85,10 @@ public class GatewayService {
 
     @jakarta.annotation.PostConstruct
     public void initCache() {
+        if (slsConfig.getAccessKeyId() == null || slsConfig.getAccessKeyId().isBlank()) {
+            log.info("SLS 凭证未配置，跳过网关缓存初始化");
+            return;
+        }
         CompletableFuture.runAsync(() -> {
             log.info("异步初始化所有网关页面缓存...");
             long start = System.currentTimeMillis();

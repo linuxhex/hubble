@@ -494,8 +494,9 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * Lindorm 实例监控（CPU/读QPS/写QPS），5 分钟缓存。
-     * 优先从 Aliyun Prometheus 获取（CloudMonitor API 返回 0 实例），CloudMonitor 作 fallback。
+     * Lindorm 实例监控（丰富指标），5 分钟缓存。
+     * Prometheus: CPU User/IOWait、读/写 QPS、读/写 RT、磁盘读流量
+     * CloudMonitor: 网络流入/流出、热/冷存储用量、Get RT/P99、Compaction/Handler队列
      */
     public List<Map<String, Object>> lindormInstances() {
         long now = System.currentTimeMillis();
@@ -505,7 +506,6 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            // 优先：Aliyun Prometheus 发现实例 + 查指标
             String aliyunDs = grafanaClient.getAliyunDsUid();
             var instanceRows = grafanaClient.queryInstant(
                     "count by (instanceId) (AliyunLindorm_cpu_user)", aliyunDs);
@@ -513,15 +513,27 @@ public class MiddlewareMonitorService {
             if (!instanceRows.isEmpty()) {
                 var cpuRows = grafanaClient.queryInstant(
                         "avg by (instanceId) (AliyunLindorm_cpu_user{host=~\"lindormtable-.*\"})", aliyunDs);
+                var cpuWioRows = grafanaClient.queryInstant(
+                        "avg by (instanceId) (AliyunLindorm_cpu_wio{host=~\"lindormtable-.*\"})", aliyunDs);
                 var readRows = grafanaClient.queryInstant(
                         "sum by (instanceId) (AliyunLindorm_read_ops{host=~\"lindormtable-.*\"})", aliyunDs);
                 var writeRows = grafanaClient.queryInstant(
                         "sum by (instanceId) (AliyunLindorm_write_ops{host=~\"lindormtable-.*\"})", aliyunDs);
+                var readRtRows = grafanaClient.queryInstant(
+                        "avg by (instanceId) (AliyunLindorm_read_rt{host=~\"lindormtable-.*\"})", aliyunDs);
+                var writeRtRows = grafanaClient.queryInstant(
+                        "avg by (instanceId) (AliyunLindorm_write_rt{host=~\"lindormtable-.*\"})", aliyunDs);
+                var diskReadRows = grafanaClient.queryInstant(
+                        "sum by (instanceId) (AliyunLindorm_disk_readbytes{host=~\"lindormtable-.*\"})", aliyunDs);
 
                 Map<String, double[]> metrics = new LinkedHashMap<>();
                 collectByLabel(cpuRows, "instanceId", metrics, 0);
                 collectByLabel(readRows, "instanceId", metrics, 1);
                 collectByLabel(writeRows, "instanceId", metrics, 2);
+                collectByLabel(cpuWioRows, "instanceId", metrics, 3);
+                collectByLabel(readRtRows, "instanceId", metrics, 4);
+                collectByLabel(writeRtRows, "instanceId", metrics, 5);
+                collectByLabel(diskReadRows, "instanceId", metrics, 6);
 
                 String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
                 String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
@@ -534,15 +546,30 @@ public class MiddlewareMonitorService {
                     item.put("instanceId", instanceId);
                     item.put("instanceName", "lindorm-" + instanceId);
                     item.put("cpuUsage", vals[0]);
+                    item.put("cpuWio", vals[3]);
                     item.put("qps", vals[1]);
                     item.put("writeQps", vals[2]);
+                    item.put("readRt", vals[4]);
+                    item.put("writeRt", vals[5]);
+                    item.put("diskReadBytes", vals[6]);
+
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                    item.put("diskUsage", queryLatestMetric("acs_lindorm", "DiskUsage", dim, startTime, endTime));
+                    double hotStoragePct = queryLatestMetric("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
+                    double coldStoragePct = queryLatestMetric("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
+                    item.put("diskUsage", hotStoragePct);
+                    item.put("bytesIn", queryLatestMetric("acs_lindorm", "bytes_in", dim, startTime, endTime));
+                    item.put("bytesOut", queryLatestMetric("acs_lindorm", "bytes_out", dim, startTime, endTime));
+                    item.put("hotStorageUsedPercent", hotStoragePct);
+                    item.put("hotStorageUsedBytes", queryLatestMetric("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
+                    item.put("coldStorageUsedPercent", coldStoragePct);
+                    item.put("getRtAvg", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                    item.put("getRtP99", queryLatestMetric("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
+                    item.put("compactionQueueSize", queryLatestMetric("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
+                    item.put("handlerQueueSize", queryLatestMetric("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
                     list.add(item);
                 }
                 log.info("Lindorm 实例监控(Prometheus): {} 个", list.size());
             } else {
-                // Fallback: CloudMonitor API
                 var allInstances = cloudMonitorClient.listLindormInstances();
                 var instances = allInstances.stream()
                         .filter(inst -> {
@@ -563,9 +590,25 @@ public class MiddlewareMonitorService {
                     item.put("instanceName", alias);
 
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                    item.put("cpuUsage", queryLatestMetric("acs_lindorm", "CpuUsage", dim, startTime, endTime));
-                    item.put("diskUsage", queryLatestMetric("acs_lindorm", "DiskUsage", dim, startTime, endTime));
+                    item.put("cpuUsage", queryLatestMetric("acs_lindorm", "CpuUsage", dim, startTime, endTime, true));
+                    item.put("cpuWio", queryLatestMetric("acs_lindorm", "cpu_wio", dim, startTime, endTime, true));
+                    double hotStoragePct = queryLatestMetric("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
+                    double coldStoragePct = queryLatestMetric("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
+                    item.put("diskUsage", hotStoragePct);
                     item.put("qps", queryLatestMetric("acs_lindorm", "Qps", dim, startTime, endTime));
+                    item.put("writeQps", queryLatestMetric("acs_lindorm", "WriteQps", dim, startTime, endTime));
+                    item.put("readRt", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                    item.put("writeRt", 0.0);
+                    item.put("diskReadBytes", queryLatestMetric("acs_lindorm", "disk_readbytes", dim, startTime, endTime));
+                    item.put("bytesIn", queryLatestMetric("acs_lindorm", "bytes_in", dim, startTime, endTime));
+                    item.put("bytesOut", queryLatestMetric("acs_lindorm", "bytes_out", dim, startTime, endTime));
+                    item.put("hotStorageUsedPercent", hotStoragePct);
+                    item.put("hotStorageUsedBytes", queryLatestMetric("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
+                    item.put("coldStorageUsedPercent", coldStoragePct);
+                    item.put("getRtAvg", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                    item.put("getRtP99", queryLatestMetric("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
+                    item.put("compactionQueueSize", queryLatestMetric("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
+                    item.put("handlerQueueSize", queryLatestMetric("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
                     list.add(item);
                 }
             }
@@ -1049,7 +1092,7 @@ public class MiddlewareMonitorService {
             String key = String.valueOf(row.getOrDefault(labelKey, ""));
             if (key.isEmpty()) continue;
             double val = toDouble(row.get("value"));
-            metrics.computeIfAbsent(key, k -> new double[4])[idx] = val;
+            metrics.computeIfAbsent(key, k -> new double[8])[idx] = val;
         }
     }
 
@@ -1435,7 +1478,7 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * Lindorm Top Tables（按 QPS 排序，使用 CloudMonitor 实例级指标）
+     * Lindorm Top 实例（按 QPS 排序，复用 lindormInstances 的丰富指标）
      */
     public List<Map<String, Object>> lindormTopTables() {
         long now = System.currentTimeMillis();
@@ -1446,24 +1489,23 @@ public class MiddlewareMonitorService {
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             var instances = lindormInstances();
-            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
             for (var inst : instances) {
-                String instanceId = (String) inst.get("instanceId");
                 String instanceName = (String) inst.get("instanceName");
-
-                String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                double readQps = queryLatestMetric("acs_lindorm", "ReadQps", dim, startTime, endTime);
-                double writeQps = queryLatestMetric("acs_lindorm", "WriteQps", dim, startTime, endTime);
-                double storageUsage = queryLatestMetric("acs_lindorm", "StorageUsage", dim, startTime, endTime);
 
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("tableName", instanceName);
+                item.put("instanceId", inst.get("instanceId"));
                 item.put("description", "Lindorm 实例");
-                item.put("readQps", readQps);
-                item.put("writeQps", writeQps);
-                item.put("storageMB", storageUsage / 1024 / 1024);
+                item.put("readQps", inst.getOrDefault("qps", 0));
+                item.put("writeQps", inst.getOrDefault("writeQps", 0));
+                item.put("readRt", inst.getOrDefault("readRt", 0));
+                item.put("writeRt", inst.getOrDefault("writeRt", 0));
+                item.put("cpuUsage", inst.getOrDefault("cpuUsage", 0));
+                item.put("hotStorageUsedBytes", inst.getOrDefault("hotStorageUsedBytes", 0));
+                item.put("hotStorageUsedPercent", inst.getOrDefault("hotStorageUsedPercent", 0));
+                item.put("compactionQueueSize", inst.getOrDefault("compactionQueueSize", 0));
+                item.put("handlerQueueSize", inst.getOrDefault("handlerQueueSize", 0));
                 list.add(item);
             }
 
@@ -1482,6 +1524,41 @@ public class MiddlewareMonitorService {
             log.error("查询 Lindorm Top Tables 失败: {}", e.getMessage());
         }
         return list;
+    }
+
+    /**
+     * 诊断：发现 Lindorm 所有可用指标（Prometheus + CloudMonitor）
+     */
+    public Map<String, Object> lindormMetricsDiscovery() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            String aliyunDs = grafanaClient.getAliyunDsUid();
+            var promRows = grafanaClient.queryInstant(
+                    "count by (__name__) ({__name__=~\"AliyunLindorm_.*\"})", aliyunDs);
+            List<String> promMetrics = new ArrayList<>();
+            for (var row : promRows) {
+                promMetrics.add(String.valueOf(row.getOrDefault("__name__", "")));
+            }
+            Collections.sort(promMetrics);
+            result.put("prometheusMetrics", promMetrics);
+            result.put("prometheusCount", promMetrics.size());
+        } catch (Exception e) {
+            result.put("prometheusError", e.getMessage());
+        }
+        try {
+            List<String> cmMetrics = cloudMonitorClient.listMetricMeta("acs_lindorm");
+            result.put("cloudMonitorMetrics", cmMetrics);
+            result.put("cloudMonitorCount", cmMetrics.size());
+        } catch (Exception e) {
+            result.put("cloudMonitorError", e.getMessage());
+        }
+        try {
+            var instances = cloudMonitorClient.listLindormInstances();
+            result.put("lindormInstances", instances);
+        } catch (Exception e) {
+            result.put("instancesError", e.getMessage());
+        }
+        return result;
     }
 
     /**

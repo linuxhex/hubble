@@ -22,12 +22,12 @@ export default defineConfig({
     port: 82,
     proxy: {
       '/api/ws': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:18081',
         ws: true,
         changeOrigin: true
       },
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:18081',
         changeOrigin: true
       }
     }

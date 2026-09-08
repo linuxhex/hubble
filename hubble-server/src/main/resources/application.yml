@@ -1,9 +1,11 @@
 server:
-  port: 8080
+  port: 18081
 
 spring:
   application:
     name: cloud-eyes-api
+  config:
+    import: optional:classpath:.env[.properties]
 
   datasource:
     driver-class-name: org.h2.Driver
@@ -11,9 +13,9 @@ spring:
     username: sa
     password:
     hikari:
-      maximum-pool-size: 5
-      minimum-idle: 2
-      connection-timeout: 5000
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
   sql:
     init:
       mode: always
@@ -41,15 +43,15 @@ monitor:
   error-scan-lines: 200
   minute-red-threshold: 50
   minute-yellow-threshold: 20
-  dashboard-url: ${MONITOR_DASHBOARD_URL:http://localhost:5173}
+  dashboard-url: ${MONITOR_DASHBOARD_URL:http://localhost:82}
 
 # 阿里云SLS配置
 aliyun:
   sls:
-    access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID}
-    access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET}
+    access-key-id: ${ALIYUN_SLS_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:}
     endpoint: ${ALIYUN_SLS_ENDPOINT:cn-hangzhou.log.aliyuncs.com}
-    project: ${ALIYUN_SLS_PROJECT}
+    project: ${ALIYUN_SLS_PROJECT:}
     query:
       max-results: 100
       timeout-seconds: 30

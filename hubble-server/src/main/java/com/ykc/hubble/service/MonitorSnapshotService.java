@@ -58,8 +58,11 @@ public class MonitorSnapshotService {
         log.info("MonitorSnapshotService 初始化完成");
     }
 
-    @Scheduled(fixedDelayString = "${monitor.scan-interval-seconds:5}000")
+    @Scheduled(fixedDelayString = "${monitor.scan-interval-seconds:5}000", initialDelayString = "30000")
     public void scan() {
+        if (slsQueryClient.isDisabled()) {
+            return;
+        }
         log.info("MonitorSnapshotService scan 开始");
         List<AlertConfig> configs;
         try {

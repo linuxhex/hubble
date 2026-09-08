@@ -39,6 +39,10 @@ public class SlsQueryClient {
     private final SlsConfig slsConfig;
     private final Executor queryExecutor;
 
+    public boolean isDisabled() {
+        return slsConfig.getAccessKeyId() == null || slsConfig.getAccessKeyId().isBlank();
+    }
+
     /**
      * 并行查询多个节点
      *

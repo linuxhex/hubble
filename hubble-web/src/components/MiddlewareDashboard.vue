@@ -318,36 +318,77 @@
           </template>
         </el-table-column>
         <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
-        <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="instanceName" />
-        <el-table-column label="CPU%" width="120" align="right">
+        <el-table-column label="实例名称" min-width="160" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="CPU%" width="100" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="磁盘%" width="120" align="right">
+        <el-table-column label="IOWait%" width="100" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
+            <span :style="{ color: row.cpuWio > 10 ? '#f56c6c' : row.cpuWio > 5 ? '#e6a23c' : '' }">{{ row.cpuWio.toFixed(2) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="QPS" width="120" align="right">
-          <template #default="{ row }">{{ Math.round(row.qps) }}</template>
+        <el-table-column label="热存储%" width="100" align="right">
+          <template #default="{ row }">
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.hotStorageUsedPercent.toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="读 QPS" width="100" align="right">
+          <template #default="{ row }">{{ Math.round(row.qps).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column label="写 QPS" width="100" align="right">
+          <template #default="{ row }">{{ Math.round(row.writeQps).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column label="读 RT" width="90" align="right">
+          <template #default="{ row }">
+            <span :style="{ color: row.readRt > 10 ? '#f56c6c' : row.readRt > 5 ? '#e6a23c' : '' }">{{ row.readRt.toFixed(2) }}ms</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="写 RT" width="90" align="right">
+          <template #default="{ row }">
+            <span :style="{ color: row.writeRt > 10 ? '#f56c6c' : row.writeRt > 5 ? '#e6a23c' : '' }">{{ row.writeRt.toFixed(2) }}ms</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="网络流入/流出" width="160" align="right">
+          <template #default="{ row }">
+            <span>{{ formatBytes(row.bytesIn) }}/s</span>
+            <span style="color: #909399; margin: 0 4px">/</span>
+            <span>{{ formatBytes(row.bytesOut) }}/s</span>
+          </template>
         </el-table-column>
       </el-table>
 
       <div class="sub-section">
-        <div class="sub-title">Top 读写表（按 QPS 排序）</div>
+        <div class="sub-title">Top 实例详情（按 QPS 排序）</div>
         <el-table :data="lindormTopTablesData" stripe border size="small" style="width: 100%">
           <el-table-column label="#" width="50" prop="rank" align="center" />
-          <el-table-column label="表名" min-width="200" show-overflow-tooltip prop="tableName" />
-          <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
-          <el-table-column label="读 QPS" width="110" align="right">
+          <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="tableName" />
+          <el-table-column label="CPU%" width="90" align="right">
+            <template #default="{ row }">{{ Number(row.cpuUsage).toFixed(1) }}%</template>
+          </el-table-column>
+          <el-table-column label="读 QPS" width="100" align="right">
             <template #default="{ row }">{{ Math.round(row.readQps).toLocaleString() }}</template>
           </el-table-column>
-          <el-table-column label="写 QPS" width="110" align="right">
+          <el-table-column label="写 QPS" width="100" align="right">
             <template #default="{ row }">{{ Math.round(row.writeQps).toLocaleString() }}</template>
           </el-table-column>
-          <el-table-column label="存储" width="110" align="right">
-            <template #default="{ row }">{{ row.storageMB.toFixed(0) }} MB</template>
+          <el-table-column label="读 RT" width="90" align="right">
+            <template #default="{ row }">{{ Number(row.readRt).toFixed(2) }}ms</template>
+          </el-table-column>
+          <el-table-column label="写 RT" width="90" align="right">
+            <template #default="{ row }">{{ Number(row.writeRt).toFixed(2) }}ms</template>
+          </el-table-column>
+          <el-table-column label="热存储%" width="100" align="right">
+            <template #default="{ row }">{{ Number(row.hotStorageUsedPercent).toFixed(1) }}%</template>
+          </el-table-column>
+          <el-table-column label="热存储" width="110" align="right">
+            <template #default="{ row }">{{ formatBytes(row.hotStorageUsedBytes) }}</template>
+          </el-table-column>
+          <el-table-column label="Compaction" width="110" align="right">
+            <template #default="{ row }">
+              <span :style="{ color: row.compactionQueueSize > 10 ? '#f56c6c' : row.compactionQueueSize > 5 ? '#e6a23c' : '' }">{{ Math.round(row.compactionQueueSize) }}</span>
+            </template>
           </el-table-column>
         </el-table>
       </div>

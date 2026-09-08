@@ -96,7 +96,7 @@ onUnmounted(() => {
             <el-icon><DataLine /></el-icon>
             <span>网关概览</span>
           </el-menu-item>
-          <el-menu-item index="/abnormal">
+          <el-menu-item v-if="authStore.user?.nickname === 'lianzi'" index="/abnormal">
             <el-icon><Warning /></el-icon>
             <span>异常大盘</span>
           </el-menu-item>

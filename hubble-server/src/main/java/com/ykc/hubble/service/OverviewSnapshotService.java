@@ -34,7 +34,7 @@ public class OverviewSnapshotService {
     /**
      * 定时采集：周期由 monitor.scan-interval-seconds 控制（默认 60s）
      */
-    @Scheduled(fixedDelayString = "${monitor.scan-interval-seconds:60}000")
+    @Scheduled(fixedDelayString = "${monitor.scan-interval-seconds:60}000", initialDelayString = "60000")
     public void collect() {
         long now = System.currentTimeMillis() / 1000;
         
