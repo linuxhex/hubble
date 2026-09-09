@@ -27,6 +27,7 @@ public class MiddlewareMonitorService {
     private final MiddlewareProperties middlewareProperties;
     private final PageDataCacheService pageDataCacheService;
     private final com.ykc.hubble.client.SlsQueryClient slsQueryClient;
+    private final com.ykc.hubble.client.ArmsClient armsClient;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final java.util.concurrent.Executor queryExecutor;
 
@@ -143,7 +144,7 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetricWithFallback("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime));
+                    item.put("cpuUsage", queryLatestMetricWithFallback("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime, true));
                     
                     // 连接数：尝试多个可能的指标名称
                     double connections = queryLatestMetricWithFallback("acs_kvstore", "ConnectionUsage", "ShardingConnectionCount", dim, startTime, endTime);
@@ -155,7 +156,7 @@ public class MiddlewareMonitorService {
                     }
                     item.put("connections", connections);
                     
-                    item.put("memoryUsage", queryLatestMetricWithFallback("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime));
+                    item.put("memoryUsage", queryLatestMetricWithFallback("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime, true));
                     item.put("qps", queryLatestMetric("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
                     return item;
                 })
@@ -398,9 +399,14 @@ public class MiddlewareMonitorService {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("instanceId", "rocketmq-prod");
             item.put("instanceName", "RocketMQ 生产集群");
+            item.put("region", "cn-hangzhou");
+            item.put("status", "Running");
+            item.put("version", "SLS");
             item.put("messageAccumulation", accumulationCount);
-            item.put("sendTps", sendCount / 900.0); // 近 15 分钟平均 TPS
+            item.put("sendTps", sendCount / 900.0);
             item.put("consumeTps", consumeCount / 900.0);
+            item.put("alertLevel", accumulationCount > 10000 ? "red" : accumulationCount > 1000 ? "yellow" : "normal");
+            item.put("alertDetails", List.of());
             list.add(item);
 
             rocketmqInstancesCache = list;
@@ -449,6 +455,9 @@ public class MiddlewareMonitorService {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("instanceId", instanceId);
                     item.put("instanceName", instanceId);
+                    item.put("region", "cn-hangzhou");
+                    item.put("status", "Running");
+                    item.put("version", "Prometheus");
                     item.put("lag", vals[0]);
                     item.put("produceTps", vals[1]);
                     item.put("consumeTps", vals[2]);
@@ -475,6 +484,9 @@ public class MiddlewareMonitorService {
                     String name = (String) inst.get("name");
                     item.put("instanceId", instanceId);
                     item.put("instanceName", name);
+                    item.put("region", "cn-hangzhou");
+                    item.put("status", "Running");
+                    item.put("version", "CloudMonitor");
 
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
                     item.put("lag", queryLatestMetric("acs_kafka", "Lag", dim, startTime, endTime));
@@ -708,10 +720,14 @@ public class MiddlewareMonitorService {
                         String dim = "[{\"BucketName\":\"" + bucket.getName() + "\"}]";
                         item.put("totalRequests", queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime));
                         item.put("successRate", queryLatestMetric("acs_oss", "SuccessRate", dim, startTime, endTime));
+                        item.put("errorRate4xx", 0.0);
+                        item.put("errorRate5xx", 0.0);
                     } catch (Exception e) {
                         log.warn("查询 OSS Bucket {} 指标失败: {}", bucket.getName(), e.getMessage());
                         item.put("totalRequests", 0.0);
                         item.put("successRate", 0.0);
+                        item.put("errorRate4xx", 0.0);
+                        item.put("errorRate5xx", 0.0);
                     }
                     return item;
                 }))
@@ -798,9 +814,15 @@ public class MiddlewareMonitorService {
     private double queryLatestMetricWithFallback(String namespace, String primaryMetric,
                                                   String fallbackMetric, String dimensions,
                                                   String startTime, String endTime) {
-        double val = queryLatestMetric(namespace, primaryMetric, dimensions, startTime, endTime);
+        return queryLatestMetricWithFallback(namespace, primaryMetric, fallbackMetric, dimensions, startTime, endTime, false);
+    }
+
+    private double queryLatestMetricWithFallback(String namespace, String primaryMetric,
+                                                  String fallbackMetric, String dimensions,
+                                                  String startTime, String endTime, boolean average) {
+        double val = queryLatestMetric(namespace, primaryMetric, dimensions, startTime, endTime, average);
         if (val == 0) {
-            val = queryLatestMetric(namespace, fallbackMetric, dimensions, startTime, endTime);
+            val = queryLatestMetric(namespace, fallbackMetric, dimensions, startTime, endTime, average);
         }
         return val;
     }
@@ -1122,38 +1144,48 @@ public class MiddlewareMonitorService {
         try {
             var allInstances = cloudMonitorClient.listRocketMQInstances();
             if (allInstances.isEmpty()) {
-                log.info("RocketMQ: 未找到任何实例");
-                return list;
-            }
-
-            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
-
-            for (var inst : allInstances) {
-                String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
-                double accumulation = queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime);
-                double sendTps = queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime);
-                double consumeTps = queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime);
-
-                var topics = cloudMonitorClient.listRocketMQTopics(inst.getInstanceId());
-                if (topics.isEmpty()) {
+                var slsInstances = rocketmqInstances();
+                for (var inst : slsInstances) {
                     Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("rank", list.size() + 1);
                     item.put("topic", "(实例级汇总)");
-                    item.put("instanceName", inst.getInstanceName());
-                    item.put("messageAccumulation", accumulation);
-                    item.put("sendTps", sendTps);
-                    item.put("consumeTps", consumeTps);
+                    item.put("instanceName", inst.getOrDefault("instanceName", ""));
+                    item.put("messageAccumulation", inst.getOrDefault("messageAccumulation", 0));
+                    item.put("sendTps", inst.getOrDefault("sendTps", 0));
+                    item.put("consumeTps", inst.getOrDefault("consumeTps", 0));
                     list.add(item);
-                } else {
-                    for (var topicInfo : topics) {
-                        String topic = (String) topicInfo.get("topic");
+                }
+                log.info("RocketMQ Top Topics: CloudMonitor 无实例，使用 SLS 数据 {} 条", list.size());
+            } else {
+                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
+                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+
+                for (var inst : allInstances) {
+                    String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
+                    double accumulation = queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime);
+                    double sendTps = queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime);
+                    double consumeTps = queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime);
+
+                    var topics = cloudMonitorClient.listRocketMQTopics(inst.getInstanceId());
+                    if (topics.isEmpty()) {
                         Map<String, Object> item = new LinkedHashMap<>();
-                        item.put("topic", topic);
+                        item.put("topic", "(实例级汇总)");
                         item.put("instanceName", inst.getInstanceName());
                         item.put("messageAccumulation", accumulation);
                         item.put("sendTps", sendTps);
                         item.put("consumeTps", consumeTps);
                         list.add(item);
+                    } else {
+                        for (var topicInfo : topics) {
+                            String topic = (String) topicInfo.get("topic");
+                            Map<String, Object> item = new LinkedHashMap<>();
+                            item.put("topic", topic);
+                            item.put("instanceName", inst.getInstanceName());
+                            item.put("messageAccumulation", accumulation);
+                            item.put("sendTps", sendTps);
+                            item.put("consumeTps", consumeTps);
+                            list.add(item);
+                        }
                     }
                 }
             }
@@ -1161,6 +1193,10 @@ public class MiddlewareMonitorService {
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("messageAccumulation", 0)),
                     toDouble(a.getOrDefault("messageAccumulation", 0))));
+
+            for (int i = 0; i < list.size(); i++) {
+                list.get(i).put("rank", i + 1);
+            }
 
             rocketmqTopTopicsCache = list.size() > 20 ? list.subList(0, 20) : list;
             rocketmqTopTopicsCacheTime = now;
@@ -1199,6 +1235,10 @@ public class MiddlewareMonitorService {
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("lag", 0)),
                     toDouble(a.getOrDefault("lag", 0))));
+
+            for (int i = 0; i < list.size(); i++) {
+                list.get(i).put("rank", i + 1);
+            }
 
             kafkaTopPartitionsCache = list.size() > 20 ? list.subList(0, 20) : list;
             kafkaTopPartitionsCacheTime = now;
@@ -1254,7 +1294,7 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * Redis Slow Queries：优先从 Aliyun Prometheus 获取，CloudMonitor 作 fallback
+     * Redis Slow Queries：从 SLS 日志查询应用级别的 Redis 慢查询
      */
     public List<Map<String, Object>> redisSlowQueries() {
         long now = System.currentTimeMillis();
@@ -1264,76 +1304,63 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            String aliyunDs = grafanaClient.getAliyunDsUid();
+            long toTime = now / 1000;
+            long fromTime = toTime - 86400; // 最近 24 小时
 
-            var slowRows = grafanaClient.queryInstant(
-                    "sum by (instanceId, instanceName) (AliyunRedis_SlowRequests)", aliyunDs);
-            if (slowRows.isEmpty()) {
-                slowRows = grafanaClient.queryInstant(
-                        "sum by (instanceId, instanceName) (AliyunKvstore_SlowRequests)", aliyunDs);
-            }
+            // 查询 SLS 中的 Redis 慢查询日志
+            var logs = slsQueryClient.queryLogstore("all", "slow execution", fromTime, toTime, 0, 50);
 
-            if (!slowRows.isEmpty()) {
-                for (var row : slowRows) {
-                    String instanceId = String.valueOf(row.getOrDefault("instanceId", ""));
-                    if (instanceId.isEmpty()) continue;
-                    String instanceName = String.valueOf(row.getOrDefault("instanceName", instanceId));
-                    Object val = row.getOrDefault("value", 0);
-                    double slowCount = val instanceof Number ? ((Number) val).doubleValue() : 0;
-                    if (slowCount <= 0) continue;
-
+            int rank = 0;
+            for (var logEntry : logs) {
+                String message = logEntry.getMessage();
+                if (message != null && message.contains("Redis mget slow")) {
+                    rank++;
                     Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("instanceId", instanceId);
-                    item.put("instanceName", instanceName);
-                    item.put("timestamp", now);
-                    item.put("slowCount", (long) slowCount);
-                    item.put("metric", "Prometheus");
+                    item.put("rank", rank);
+                    item.put("instanceName", logEntry.getContainerName());
+                    item.put("timestamp", logEntry.getTime());
+
+                    // 解析耗时
+                    try {
+                        int costIdx = message.lastIndexOf("cost:");
+                        if (costIdx > 0) {
+                            String costStr = message.substring(costIdx + 5).trim();
+                            costStr = costStr.replace("ms", "").trim();
+                            item.put("durationMicros", Double.parseDouble(costStr) * 1000); // ms -> micros
+                        }
+                    } catch (Exception e) {
+                        item.put("durationMicros", 0.0);
+                    }
+
+                    // 解析 keys 数量
+                    try {
+                        int sizeIdx = message.lastIndexOf("size:");
+                        if (sizeIdx > 0) {
+                            String sizeStr = message.substring(sizeIdx + 5).trim();
+                            sizeStr = sizeStr.split(",")[0].trim();
+                            item.put("keysCount", Integer.parseInt(sizeStr));
+                        }
+                    } catch (Exception e) {
+                        item.put("keysCount", 0);
+                    }
+
                     list.add(item);
                 }
-                log.info("Redis Slow Queries(Prometheus): {} 个", list.size());
             }
 
-            if (list.isEmpty()) {
-                log.info("Prometheus 无 Redis 慢查数据，尝试 CloudMonitor");
-                var instances = redisInstances();
-                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusHours(1).format(FMT);
+            // 按耗时排序
+            list.sort((a, b) -> Double.compare(
+                    toDouble(b.getOrDefault("durationMicros", 0)),
+                    toDouble(a.getOrDefault("durationMicros", 0))));
 
-                String[] possibleMetrics = {"SlowRequests", "slow_requests", "Redis_SlowRequests", "slowlog"};
-                for (var inst : instances) {
-                    String instanceId = (String) inst.get("instanceId");
-                    String instanceName = (String) inst.getOrDefault("instanceName", instanceId);
-                    String dimensions = String.format("[{\"instanceId\":\"%s\"}]", instanceId);
-
-                    for (String metricName : possibleMetrics) {
-                        var dataPoints = cloudMonitorClient.queryMetric("acs_kvstore", metricName,
-                                dimensions, 60, startTime, endTime);
-                        if (!dataPoints.isEmpty()) {
-                            for (var point : dataPoints) {
-                                if (point[1] > 0) {
-                                    Map<String, Object> item = new LinkedHashMap<>();
-                                    item.put("instanceId", instanceId);
-                                    item.put("instanceName", instanceName);
-                                    item.put("timestamp", (long) point[0]);
-                                    item.put("slowCount", (long) point[1]);
-                                    item.put("metric", metricName);
-                                    list.add(item);
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-                log.info("Redis Slow Queries(CloudMonitor): {} 个", list.size());
+            // 重新设置排名
+            for (int i = 0; i < list.size(); i++) {
+                list.get(i).put("rank", i + 1);
             }
-
-            list.sort((a, b) -> Long.compare(
-                    (long) toDouble(b.getOrDefault("slowCount", 0)),
-                    (long) toDouble(a.getOrDefault("slowCount", 0))));
 
             redisSlowQueriesCache = list.size() > 50 ? list.subList(0, 50) : list;
             redisSlowQueriesCacheTime = now;
-            log.info("Redis Slow Queries: {} 个（已缓存）", redisSlowQueriesCache.size());
+            log.info("Redis Slow Queries: {} 条（从 SLS 查询，已缓存）", redisSlowQueriesCache.size());
         } catch (Exception e) {
             log.error("查询 Redis Slow Queries 失败: {}", e.getMessage());
         }
@@ -1416,7 +1443,8 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * MySQL Slow Queries（使用 CloudMonitor 指标，因 API 权限不足）
+     * MySQL Slow Queries：从 ARMS 链路追踪查询应用级别的慢 SQL
+     * 思路：查询指定应用的 trace → 对每条 trace 查询详情 → 提取 SQL 类型的 span → 按耗时排序
      */
     public List<Map<String, Object>> mysqlSlowQueries() {
         long now = System.currentTimeMillis();
@@ -1426,51 +1454,145 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            var instances = mysqlInstances();
-            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusHours(1).format(FMT);
+            long toMs = now;
+            long fromMs = toMs - 3600_000; // 最近 1 小时
 
-            String[] possibleMetrics = {"SlowQueries", "slow_queries", "MySQL_SlowQueries", "mysql_slow_queries_per_second"};
-            String workingMetric = null;
-
-            for (var inst : instances) {
-                String instanceId = (String) inst.get("instanceId");
-                String instanceName = (String) inst.getOrDefault("instanceName", instanceId);
-                String dimensions = String.format("[{\"instanceId\":\"%s\"}]", instanceId);
-
-                for (String metricName : possibleMetrics) {
-                    var dataPoints = cloudMonitorClient.queryMetric("acs_rds_dashboard", metricName,
-                            dimensions, 60, startTime, endTime);
-
-                    if (!dataPoints.isEmpty()) {
-                        workingMetric = metricName;
-                        for (var point : dataPoints) {
-                            if (point[1] > 0) {
-                                Map<String, Object> item = new LinkedHashMap<>();
-                                item.put("instanceId", instanceId);
-                                item.put("instanceName", instanceName);
-                                item.put("timestamp", (long) point[0]);
-                                item.put("slowCount", (long) point[1]);
-                                item.put("metric", metricName);
-                                list.add(item);
-                            }
-                        }
+            // 1. 获取 ARMS 应用列表，找到有数据库调用的应用（如 order-prod）
+            String targetAppName = null;
+            var appsResp = armsClient.listApps();
+            if (appsResp.getTraceApps() != null) {
+                for (var app : appsResp.getTraceApps()) {
+                    String appName = app.getAppName();
+                    if (appName != null && (appName.contains("order-prod") || appName.contains("charge-prod"))) {
+                        targetAppName = appName;
+                        log.info("找到目标应用: {}", appName);
                         break;
                     }
                 }
             }
 
-            if (workingMetric != null) {
-                log.info("MySQL 慢查询使用指标: {}", workingMetric);
+            if (targetAppName == null) {
+                log.warn("未找到目标应用（order-prod/charge-prod），无法查询慢 SQL");
+                return list;
             }
 
-            list.sort((a, b) -> Long.compare(
-                    (long) toDouble(b.getOrDefault("slowCount", 0)),
-                    (long) toDouble(a.getOrDefault("slowCount", 0))));
+            // 2. 搜索该应用的 trace（按 ServiceName 过滤）
+            var searchResp = armsClient.searchTraces(targetAppName, fromMs, toMs);
+            var traceItems = searchResp.getTraceInfos();
+            if (traceItems == null || traceItems.isEmpty()) {
+                log.info("ARMS 无 trace 数据");
+                return list;
+            }
 
-            mysqlSlowQueriesCache = list.size() > 50 ? list.subList(0, 50) : list;
+            // 3. 对每条 trace 查询详情，提取 SQL span
+            int traceCount = 0;
+            int totalSpans = 0;
+            int sqlSpans = 0;
+            for (var traceItem : traceItems) {
+                if (traceCount >= 50) break; // 最多查 50 条 trace
+                String traceId = traceItem.getTraceID();
+                if (traceId == null || traceId.isEmpty()) continue;
+
+                try {
+                    var traceResp = armsClient.getTrace(traceId, fromMs, toMs);
+                    var spans = traceResp.getSpans();
+                    if (spans == null) continue;
+                    
+                    totalSpans += spans.size();
+
+                    // 4. 从 span 树中提取 SQL 类型的 span
+                    int spanIdx = 0;
+                    for (var span : spans) {
+                        // 输出前 10 个 span 的完整信息（调试用）
+                        if (spanIdx < 10 && traceCount == 0) {
+                            Integer rpcType = span.getRpcType();
+                            var tags = span.getTagEntryList();
+                            StringBuilder tagStr = new StringBuilder();
+                            if (tags != null) {
+                                for (var tag : tags) {
+                                    tagStr.append(tag.getKey()).append("=").append(tag.getValue()).append(", ");
+                                }
+                            }
+                            log.info("Span[{}]: rpcType={}, operation={}, service={}, duration={}, tags=[{}]", 
+                                spanIdx, rpcType, span.getOperationName(), span.getServiceName(), 
+                                span.getDuration(), tagStr);
+                        }
+                        spanIdx++;
+                        
+                        // SQL 类型识别：检查多个标识
+                        Integer rpcType = span.getRpcType();
+                        boolean isSql = false;
+                        String sql = null;
+                        String dbType = null;
+                        
+                        var tags = span.getTagEntryList();
+                        if (tags != null) {
+                            for (var tag : tags) {
+                                String key = tag.getKey();
+                                String value = tag.getValue();
+                                
+                                // 识别 SQL 的多种方式
+                                if ("db.system.name".equals(key) && value != null && 
+                                    (value.toLowerCase().contains("mysql") || value.toLowerCase().contains("postgresql") || 
+                                     value.toLowerCase().contains("oracle") || value.toLowerCase().contains("sql"))) {
+                                    isSql = true;
+                                    dbType = value;
+                                }
+                                if ("db.statement".equals(key) || "db.query.text".equals(key)) {
+                                    sql = value;
+                                }
+                                if ("call.type".equals(key) && value != null && 
+                                    (value.toLowerCase().contains("sql") || value.toLowerCase().contains("jdbc"))) {
+                                    isSql = true;
+                                }
+                            }
+                        }
+                        
+                        // rpcType=14 也是 SQL
+                        if (rpcType != null && rpcType == 14) {
+                            isSql = true;
+                        }
+
+                        if (!isSql) continue;
+                        sqlSpans++;
+
+                        // 6. 提取耗时和时间戳
+                        String serviceName = span.getServiceName();
+                        long duration = span.getDuration() != null ? span.getDuration() : 0;
+                        String timestamp = span.getTimestamp() != null ? String.valueOf(span.getTimestamp()) : null;
+
+                        if (sql == null || sql.isEmpty()) continue;
+                        if (duration < 10) continue; // 过滤掉耗时 < 10ms 的 SQL
+
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("instanceName", serviceName);
+                        item.put("sql", sql.length() > 500 ? sql.substring(0, 500) + "..." : sql);
+                        item.put("durationMs", (double) duration);
+                        item.put("timestamp", timestamp);
+                        list.add(item);
+                    }
+                    traceCount++;
+                } catch (Exception e) {
+                    log.warn("查询 trace 详情失败: traceId={}, error={}", traceId, e.getMessage());
+                }
+            }
+            
+            log.info("ARMS trace 统计: 查询 {} 条 trace, 共 {} 个 span, 其中 {} 个 SQL span", traceCount, totalSpans, sqlSpans);
+
+            // 6. 按耗时降序排序
+            list.sort((a, b) -> Double.compare(
+                    toDouble(b.getOrDefault("durationMs", 0)),
+                    toDouble(a.getOrDefault("durationMs", 0))));
+
+            // 7. 设置排名并限制返回数量
+            int limit = Math.min(list.size(), 50);
+            for (int i = 0; i < limit; i++) {
+                list.get(i).put("rank", i + 1);
+            }
+
+            mysqlSlowQueriesCache = limit > 0 ? list.subList(0, limit) : list;
             mysqlSlowQueriesCacheTime = now;
-            log.info("MySQL Slow Queries: {} 个（已缓存）", mysqlSlowQueriesCache.size());
+            log.info("MySQL Slow Queries: {} 条（从 ARMS 查询 {} 条 trace，已缓存）", mysqlSlowQueriesCache.size(), traceCount);
         } catch (Exception e) {
             log.error("查询 MySQL Slow Queries 失败: {}", e.getMessage());
         }
@@ -1516,6 +1638,10 @@ public class MiddlewareMonitorService {
                         + ((Number) b.getOrDefault("writeQps", 0)).doubleValue();
                 return Double.compare(totalB, totalA);
             });
+
+            for (int i = 0; i < list.size(); i++) {
+                list.get(i).put("rank", i + 1);
+            }
 
             lindormTopTablesCache = list.size() > 20 ? list.subList(0, 20) : list;
             lindormTopTablesCacheTime = now;
@@ -1596,6 +1722,10 @@ public class MiddlewareMonitorService {
             list.sort((a, b) -> Double.compare(
                     ((Number) b.getOrDefault("storageGB", 0)).doubleValue(),
                     ((Number) a.getOrDefault("storageGB", 0)).doubleValue()));
+
+            for (int i = 0; i < list.size(); i++) {
+                list.get(i).put("rank", i + 1);
+            }
 
             elasticsearchTopIndicesCache = list.size() > 20 ? list.subList(0, 20) : list;
             elasticsearchTopIndicesCacheTime = now;

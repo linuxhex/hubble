@@ -55,19 +55,19 @@
         </el-table-column>
         <el-table-column label="CPU%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="连接数" width="90" align="right">
-          <template #default="{ row }">{{ Math.round(row.connections) }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.connections)) }}</template>
         </el-table-column>
         <el-table-column label="内存%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'memoryUsage')">{{ row.memoryUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'memoryUsage')">{{ num(row.memoryUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="QPS" width="90" align="right">
-          <template #default="{ row }">{{ Math.round(row.qps) }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.qps)) }}</template>
         </el-table-column>
       </el-table>
 
@@ -88,14 +88,20 @@
             </el-table>
           </el-tab-pane>
           <el-tab-pane label="慢查询 Top10" name="slowQueries">
-            <el-table :data="redisSlowQueriesData" stripe border size="small" style="width: 100%">
+            <el-alert v-if="redisSlowQueriesData.length === 0" type="info" :closable="false" show-icon style="margin-bottom: 12px">
+              <template #title>最近 24 小时无 Redis 慢查询日志</template>
+              慢查询数据从 SLS 日志中获取（应用级别）
+            </el-alert>
+            <el-table v-else :data="redisSlowQueriesData" stripe border size="small" style="width: 100%">
               <el-table-column label="#" width="50" prop="rank" align="center" />
-              <el-table-column label="命令" min-width="300" show-overflow-tooltip prop="command" />
-              <el-table-column label="耗时" width="110" align="right">
-                <template #default="{ row }">{{ (row.durationMicros / 1000).toFixed(1) }} ms</template>
+              <el-table-column label="服务" width="180" show-overflow-tooltip prop="instanceName" />
+              <el-table-column label="耗时" width="120" align="right">
+                <template #default="{ row }">{{ (num(row.durationMicros) / 1000).toFixed(1) }} ms</template>
               </el-table-column>
-              <el-table-column label="客户端" width="140" prop="clientAddr" />
-              <el-table-column label="时间" width="160">
+              <el-table-column label="Keys数" width="100" align="right">
+                <template #default="{ row }">{{ num(row.keysCount) }}</template>
+              </el-table-column>
+              <el-table-column label="时间" min-width="180">
                 <template #default="{ row }">{{ formatTime(row.timestamp) }}</template>
               </el-table-column>
             </el-table>
@@ -124,18 +130,18 @@
         </el-table-column>
         <el-table-column label="CPU%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="连接数" width="90" align="right">
-          <template #default="{ row }">{{ Math.round(row.connections) }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.connections)) }}</template>
         </el-table-column>
         <el-table-column label="IOPS" width="80" align="right">
-          <template #default="{ row }">{{ Math.round(row.iops) }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.iops)) }}</template>
         </el-table-column>
         <el-table-column label="磁盘%" width="90" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ num(row.diskUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -143,18 +149,19 @@
       <div class="sub-section">
         <el-tabs v-model="mysqlSubTab" type="card" size="small">
           <el-tab-pane label="慢查询 Top10" name="slowQueries">
-            <el-table :data="mysqlSlowQueriesData" stripe border size="small" style="width: 100%">
+            <el-alert v-if="mysqlSlowQueriesData.length === 0" type="info" :closable="false" show-icon style="margin-bottom: 12px">
+              <template #title>最近 1 小时无 MySQL 慢查询</template>
+              慢查询数据从 ARMS 链路追踪中获取（SQL span 耗时 ≥ 10ms），当前未发现慢查询
+            </el-alert>
+            <el-table v-else :data="mysqlSlowQueriesData" stripe border size="small" style="width: 100%">
               <el-table-column label="#" width="50" prop="rank" align="center" />
+              <el-table-column label="服务" width="180" show-overflow-tooltip prop="instanceName" />
               <el-table-column label="SQL" min-width="300" show-overflow-tooltip prop="sql" />
-              <el-table-column label="说明" width="130" show-overflow-tooltip prop="description" />
-              <el-table-column label="耗时" width="100" align="right">
-                <template #default="{ row }">{{ row.durationMs.toLocaleString() }} ms</template>
+              <el-table-column label="耗时" width="120" align="right">
+                <template #default="{ row }">{{ num(row.durationMs).toFixed(0) }} ms</template>
               </el-table-column>
-              <el-table-column label="扫描行" width="110" align="right">
-                <template #default="{ row }">{{ Number(row.rowsExamined).toLocaleString() }}</template>
-              </el-table-column>
-              <el-table-column label="返回行" width="100" align="right">
-                <template #default="{ row }">{{ Number(row.rowsReturned).toLocaleString() }}</template>
+              <el-table-column label="时间" min-width="180">
+                <template #default="{ row }">{{ formatTime(row.timestamp) }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
@@ -165,19 +172,19 @@
               <el-table-column label="引擎" width="100" prop="engine" />
               <el-table-column label="CPU%" width="100" align="right">
                 <template #default="{ row }">
-                  <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+                  <span :class="metricClass(row.cpuUsage)">{{ num(row.cpuUsage).toFixed(1) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column label="内存%" width="100" align="right">
                 <template #default="{ row }">
-                  <span :class="metricClass(row.memoryUsage)">{{ row.memoryUsage.toFixed(1) }}%</span>
+                  <span :class="metricClass(row.memoryUsage)">{{ num(row.memoryUsage).toFixed(1) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column label="IOPS%" width="100" align="right">
-                <template #default="{ row }">{{ row.iops.toFixed(1) }}%</template>
+                <template #default="{ row }">{{ num(row.iops).toFixed(1) }}%</template>
               </el-table-column>
               <el-table-column label="活跃会话" width="120" align="right">
-                <template #default="{ row }">{{ row.activeSessions.toFixed(1) }}</template>
+                <template #default="{ row }">{{ num(row.activeSessions).toFixed(1) }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
@@ -189,12 +196,12 @@
               <el-table-column label="最大连接" width="110" align="right" prop="maxActive" />
               <el-table-column label="使用率%" width="110" align="right">
                 <template #default="{ row }">
-                  <span :class="metricClass(row.usageRate)">{{ row.usageRate.toFixed(1) }}%</span>
+                  <span :class="metricClass(row.usageRate)">{{ num(row.usageRate).toFixed(1) }}%</span>
                 </template>
               </el-table-column>
               <el-table-column label="等待线程" width="110" align="right" prop="waitThreadCount" />
               <el-table-column label="SQL执行/s" width="120" align="right">
-                <template #default="{ row }">{{ row.sqlExecuteRate.toFixed(1) }}</template>
+                <template #default="{ row }">{{ num(row.sqlExecuteRate).toFixed(1) }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
@@ -224,15 +231,15 @@
         <el-table-column label="消息堆积" width="110" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'messageAccumulation')">
-              {{ Math.round(row.messageAccumulation || 0).toLocaleString() }}
+              {{ Math.round(num(row.messageAccumulation)).toLocaleString() }}
             </span>
           </template>
         </el-table-column>
         <el-table-column label="生产 TPS" width="100" align="right">
-          <template #default="{ row }">{{ (row.sendTps || 0).toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.sendTps).toFixed(1) }}</template>
         </el-table-column>
         <el-table-column label="消费 TPS" width="100" align="right">
-          <template #default="{ row }">{{ (row.consumeTps || 0).toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.consumeTps).toFixed(1) }}</template>
         </el-table-column>
       </el-table>
 
@@ -243,13 +250,13 @@
           <el-table-column label="Topic" min-width="200" show-overflow-tooltip prop="topic" />
           <el-table-column label="实例" width="150" show-overflow-tooltip prop="instanceName" />
           <el-table-column label="消息堆积" width="120" align="right">
-            <template #default="{ row }">{{ Math.round(row.messageAccumulation).toLocaleString() }}</template>
+            <template #default="{ row }">{{ Math.round(num(row.messageAccumulation)).toLocaleString() }}</template>
           </el-table-column>
           <el-table-column label="生产 TPS" width="110" align="right">
-            <template #default="{ row }">{{ row.sendTps.toFixed(1) }}</template>
+            <template #default="{ row }">{{ num(row.sendTps).toFixed(1) }}</template>
           </el-table-column>
           <el-table-column label="消费 TPS" width="110" align="right">
-            <template #default="{ row }">{{ row.consumeTps.toFixed(1) }}</template>
+            <template #default="{ row }">{{ num(row.consumeTps).toFixed(1) }}</template>
           </el-table-column>
         </el-table>
       </div>
@@ -277,15 +284,15 @@
         <el-table-column label="Lag" width="110" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'lag')">
-              {{ Math.round(row.lag || 0).toLocaleString() }}
+              {{ Math.round(num(row.lag)).toLocaleString() }}
             </span>
           </template>
         </el-table-column>
         <el-table-column label="生产 TPS" width="100" align="right">
-          <template #default="{ row }">{{ (row.produceTps || 0).toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.produceTps).toFixed(1) }}</template>
         </el-table-column>
         <el-table-column label="消费 TPS" width="100" align="right">
-          <template #default="{ row }">{{ (row.consumeTps || 0).toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.consumeTps).toFixed(1) }}</template>
         </el-table-column>
       </el-table>
 
@@ -296,13 +303,13 @@
           <el-table-column label="Topic" min-width="200" show-overflow-tooltip prop="topic" />
           <el-table-column label="实例" width="150" show-overflow-tooltip prop="instanceName" />
           <el-table-column label="Lag" width="120" align="right">
-            <template #default="{ row }">{{ Math.round(row.lag).toLocaleString() }}</template>
+            <template #default="{ row }">{{ Math.round(num(row.lag)).toLocaleString() }}</template>
           </el-table-column>
           <el-table-column label="生产 TPS" width="110" align="right">
-            <template #default="{ row }">{{ row.produceTps.toFixed(1) }}</template>
+            <template #default="{ row }">{{ num(row.produceTps).toFixed(1) }}</template>
           </el-table-column>
           <el-table-column label="消费 TPS" width="110" align="right">
-            <template #default="{ row }">{{ row.consumeTps.toFixed(1) }}</template>
+            <template #default="{ row }">{{ num(row.consumeTps).toFixed(1) }}</template>
           </el-table-column>
         </el-table>
       </div>
@@ -321,33 +328,33 @@
         <el-table-column label="实例名称" min-width="160" show-overflow-tooltip prop="instanceName" />
         <el-table-column label="CPU%" width="100" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="IOWait%" width="100" align="right">
           <template #default="{ row }">
-            <span :style="{ color: row.cpuWio > 10 ? '#f56c6c' : row.cpuWio > 5 ? '#e6a23c' : '' }">{{ row.cpuWio.toFixed(2) }}%</span>
+            <span :style="{ color: num(row.cpuWio) > 10 ? '#f56c6c' : num(row.cpuWio) > 5 ? '#e6a23c' : '' }">{{ num(row.cpuWio).toFixed(2) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="热存储%" width="100" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.hotStorageUsedPercent.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ num(row.hotStorageUsedPercent).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="读 QPS" width="100" align="right">
-          <template #default="{ row }">{{ Math.round(row.qps).toLocaleString() }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.qps)).toLocaleString() }}</template>
         </el-table-column>
         <el-table-column label="写 QPS" width="100" align="right">
-          <template #default="{ row }">{{ Math.round(row.writeQps).toLocaleString() }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.writeQps)).toLocaleString() }}</template>
         </el-table-column>
         <el-table-column label="读 RT" width="90" align="right">
           <template #default="{ row }">
-            <span :style="{ color: row.readRt > 10 ? '#f56c6c' : row.readRt > 5 ? '#e6a23c' : '' }">{{ row.readRt.toFixed(2) }}ms</span>
+            <span :style="{ color: num(row.readRt) > 10 ? '#f56c6c' : num(row.readRt) > 5 ? '#e6a23c' : '' }">{{ num(row.readRt).toFixed(2) }}ms</span>
           </template>
         </el-table-column>
         <el-table-column label="写 RT" width="90" align="right">
           <template #default="{ row }">
-            <span :style="{ color: row.writeRt > 10 ? '#f56c6c' : row.writeRt > 5 ? '#e6a23c' : '' }">{{ row.writeRt.toFixed(2) }}ms</span>
+            <span :style="{ color: num(row.writeRt) > 10 ? '#f56c6c' : num(row.writeRt) > 5 ? '#e6a23c' : '' }">{{ num(row.writeRt).toFixed(2) }}ms</span>
           </template>
         </el-table-column>
         <el-table-column label="网络流入/流出" width="160" align="right">
@@ -365,29 +372,29 @@
           <el-table-column label="#" width="50" prop="rank" align="center" />
           <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="tableName" />
           <el-table-column label="CPU%" width="90" align="right">
-            <template #default="{ row }">{{ Number(row.cpuUsage).toFixed(1) }}%</template>
+            <template #default="{ row }">{{ num(row.cpuUsage).toFixed(1) }}%</template>
           </el-table-column>
           <el-table-column label="读 QPS" width="100" align="right">
-            <template #default="{ row }">{{ Math.round(row.readQps).toLocaleString() }}</template>
+            <template #default="{ row }">{{ Math.round(num(row.readQps)).toLocaleString() }}</template>
           </el-table-column>
           <el-table-column label="写 QPS" width="100" align="right">
-            <template #default="{ row }">{{ Math.round(row.writeQps).toLocaleString() }}</template>
+            <template #default="{ row }">{{ Math.round(num(row.writeQps)).toLocaleString() }}</template>
           </el-table-column>
           <el-table-column label="读 RT" width="90" align="right">
-            <template #default="{ row }">{{ Number(row.readRt).toFixed(2) }}ms</template>
+            <template #default="{ row }">{{ num(row.readRt).toFixed(2) }}ms</template>
           </el-table-column>
           <el-table-column label="写 RT" width="90" align="right">
-            <template #default="{ row }">{{ Number(row.writeRt).toFixed(2) }}ms</template>
+            <template #default="{ row }">{{ num(row.writeRt).toFixed(2) }}ms</template>
           </el-table-column>
           <el-table-column label="热存储%" width="100" align="right">
-            <template #default="{ row }">{{ Number(row.hotStorageUsedPercent).toFixed(1) }}%</template>
+            <template #default="{ row }">{{ num(row.hotStorageUsedPercent).toFixed(1) }}%</template>
           </el-table-column>
           <el-table-column label="热存储" width="110" align="right">
             <template #default="{ row }">{{ formatBytes(row.hotStorageUsedBytes) }}</template>
           </el-table-column>
           <el-table-column label="Compaction" width="110" align="right">
             <template #default="{ row }">
-              <span :style="{ color: row.compactionQueueSize > 10 ? '#f56c6c' : row.compactionQueueSize > 5 ? '#e6a23c' : '' }">{{ Math.round(row.compactionQueueSize) }}</span>
+              <span :style="{ color: num(row.compactionQueueSize) > 10 ? '#f56c6c' : num(row.compactionQueueSize) > 5 ? '#e6a23c' : '' }">{{ Math.round(num(row.compactionQueueSize)) }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -407,17 +414,17 @@
         <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="instanceName" />
         <el-table-column label="CPU%" width="120" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'cpuUsage')">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="磁盘%" width="120" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'diskUsage')">{{ row.diskUsage.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'diskUsage')">{{ num(row.diskUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="JVM 内存%" width="130" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'jvmMemory')">{{ row.jvmMemory.toFixed(1) }}%</span>
+            <span :class="alertMetricClass(row, 'jvmMemory')">{{ num(row.jvmMemory).toFixed(1) }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -429,10 +436,10 @@
           <el-table-column label="索引名" min-width="220" show-overflow-tooltip prop="indexName" />
           <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
           <el-table-column label="文档数" width="120" align="right">
-            <template #default="{ row }">{{ Number(row.docCount).toLocaleString() }}</template>
+            <template #default="{ row }">{{ Number(num(row.docCount)).toLocaleString() }}</template>
           </el-table-column>
           <el-table-column label="存储" width="100" align="right">
-            <template #default="{ row }">{{ row.storageGB.toFixed(0) }} GB</template>
+            <template #default="{ row }">{{ num(row.storageGB).toFixed(0) }} GB</template>
           </el-table-column>
           <el-table-column label="分片" width="80" align="right" prop="shardCount" />
           <el-table-column label="副本" width="80" align="right" prop="replicaCount" />
@@ -452,16 +459,16 @@
         <el-table-column label="Bucket" width="220" show-overflow-tooltip prop="bucketName" />
         <el-table-column label="名称" min-width="160" show-overflow-tooltip prop="instanceName" />
         <el-table-column label="请求数" width="110" align="right">
-          <template #default="{ row }">{{ Math.round(row.totalRequests).toLocaleString() }}</template>
+          <template #default="{ row }">{{ Math.round(num(row.totalRequests)).toLocaleString() }}</template>
         </el-table-column>
         <el-table-column label="4xx 错误率" width="110" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'errorRate4xx')">{{ row.errorRate4xx.toFixed(2) }}%</span>
+            <span :class="alertMetricClass(row, 'errorRate4xx')">{{ num(row.errorRate4xx).toFixed(2) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="5xx 错误率" width="110" align="right">
           <template #default="{ row }">
-            <span :class="alertMetricClass(row, 'errorRate5xx')">{{ row.errorRate5xx.toFixed(2) }}%</span>
+            <span :class="alertMetricClass(row, 'errorRate5xx')">{{ num(row.errorRate5xx).toFixed(2) }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -477,7 +484,7 @@
             <el-table-column label="排名" width="60" type="index" />
             <el-table-column label="Pod" min-width="250" show-overflow-tooltip prop="pod" />
             <el-table-column label="CPU" width="100" align="right">
-              <template #default="{ row }">{{ Number(row.cpu).toFixed(3) }}</template>
+              <template #default="{ row }">{{ num(row.cpu).toFixed(3) }}</template>
             </el-table-column>
           </el-table>
         </div>
@@ -502,12 +509,12 @@
         <el-table-column label="节点" min-width="300" show-overflow-tooltip prop="node" />
         <el-table-column label="CPU%" width="120" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="metricClass(row.cpuUsage)">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="内存%" width="120" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.memoryUsage)">{{ row.memoryUsage.toFixed(1) }}%</span>
+            <span :class="metricClass(row.memoryUsage)">{{ num(row.memoryUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -521,18 +528,18 @@
         <el-table-column label="应用" min-width="200" show-overflow-tooltip prop="application" />
         <el-table-column label="堆内存%" width="110" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.heapUsage)">{{ row.heapUsage.toFixed(1) }}%</span>
+            <span :class="metricClass(row.heapUsage)">{{ num(row.heapUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="GC/s" width="100" align="right">
-          <template #default="{ row }">{{ row.gcRate.toFixed(2) }}</template>
+          <template #default="{ row }">{{ num(row.gcRate).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="QPS" width="110" align="right">
-          <template #default="{ row }">{{ row.qps.toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.qps).toFixed(1) }}</template>
         </el-table-column>
         <el-table-column label="CPU%" width="100" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.cpuUsage)">{{ row.cpuUsage.toFixed(1) }}%</span>
+            <span :class="metricClass(row.cpuUsage)">{{ num(row.cpuUsage).toFixed(1) }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -549,12 +556,12 @@
         <el-table-column label="最大线程" width="100" align="right" prop="maxSize" />
         <el-table-column label="使用率%" width="100" align="right">
           <template #default="{ row }">
-            <span :class="metricClass(row.usageRate)">{{ row.usageRate.toFixed(1) }}%</span>
+            <span :class="metricClass(row.usageRate)">{{ num(row.usageRate).toFixed(1) }}%</span>
           </template>
         </el-table-column>
         <el-table-column label="队列大小" width="100" align="right" prop="queueSize" />
         <el-table-column label="拒绝/分钟" width="110" align="right">
-          <template #default="{ row }">{{ row.rejectPerMin.toFixed(1) }}</template>
+          <template #default="{ row }">{{ num(row.rejectPerMin).toFixed(1) }}</template>
         </el-table-column>
       </el-table>
       <el-empty v-if="!loading && threadPoolData.length === 0" description="暂无线程池数据" />
@@ -639,12 +646,26 @@ const formatTime = (ts) => {
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+const num = (val, fallback = 0) => {
+  const n = Number(val)
+  return Number.isFinite(n) ? n : fallback
+}
+
 const fetchAlerts = async (type, dataRef) => {
   try {
     const res = await checkMiddlewareAlerts(type)
-    if (res.data && res.data.instances) {
-      dataRef.value = res.data.instances
+    if (res.data) {
       alertSummary.value = res.data.summary || { total: 0, redCount: 0, yellowCount: 0, normalCount: 0 }
+      if (res.data.instances && Array.isArray(res.data.instances)) {
+        const alertMap = new Map(res.data.instances.map(i => [i.instanceId, i]))
+        dataRef.value = dataRef.value.map(item => {
+          const alert = alertMap.get(item.instanceId)
+          if (alert) {
+            return { ...item, alertLevel: alert.alertLevel, alertDetails: alert.alertDetails }
+          }
+          return item
+        })
+      }
     }
   } catch (e) {
     console.warn('Alert check failed:', e)

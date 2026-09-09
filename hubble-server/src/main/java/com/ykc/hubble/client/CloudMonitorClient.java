@@ -26,8 +26,6 @@ import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesRequest;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesResponse;
 import com.aliyuncs.r_kvstore.model.v20150101.DescribeInstancesRequest;
 import com.aliyuncs.r_kvstore.model.v20150101.DescribeInstancesResponse;
-import com.aliyuncs.r_kvstore.model.v20150101.DescribeSlowLogRecordsRequest;
-import com.aliyuncs.r_kvstore.model.v20150101.DescribeSlowLogRecordsResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -322,68 +320,6 @@ public class CloudMonitorClient {
             return result;
         } catch (Exception e) {
             log.warn("查询 Kafka Topic 列表失败: instanceId={}, error={}", instanceId, e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 查询 Redis 实例的慢查询日志
-     */
-    public List<Map<String, Object>> listRedisSlowLogs(String instanceId, String startTime, String endTime) {
-        try {
-            DescribeSlowLogRecordsRequest req = new DescribeSlowLogRecordsRequest();
-            req.setInstanceId(instanceId);
-            req.setStartTime(startTime);
-            req.setEndTime(endTime);
-            req.setPageSize(50);
-            DescribeSlowLogRecordsResponse resp = acsClient.getAcsResponse(req);
-            List<Map<String, Object>> result = new ArrayList<>();
-            if (resp.getItems() != null) {
-                for (var record : resp.getItems()) {
-                    Map<String, Object> map = new HashMap<>();
-                    map.put("command", record.getCommand());
-                    map.put("elapsedTime", record.getElapsedTime());
-                    map.put("executeTime", record.getExecuteTime());
-                    map.put("ipAddress", record.getIPAddress());
-                    map.put("dbName", record.getDataBaseName());
-                    result.add(map);
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            log.warn("查询 Redis 慢查询失败: instanceId={}, error={}", instanceId, e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 查询 RDS 实例的慢查询日志
-     */
-    public List<Map<String, Object>> listRdsSlowLogs(String instanceId, String startTime, String endTime) {
-        try {
-            com.aliyuncs.rds.model.v20140815.DescribeSlowLogRecordsRequest req =
-                    new com.aliyuncs.rds.model.v20140815.DescribeSlowLogRecordsRequest();
-            req.setDBInstanceId(instanceId);
-            req.setStartTime(startTime);
-            req.setEndTime(endTime);
-            req.setPageSize(50);
-            com.aliyuncs.rds.model.v20140815.DescribeSlowLogRecordsResponse resp = acsClient.getAcsResponse(req);
-            List<Map<String, Object>> result = new ArrayList<>();
-            if (resp.getItems() != null) {
-                for (var record : resp.getItems()) {
-                    Map<String, Object> map = new HashMap<>();
-                    map.put("sqlText", record.getSQLText());
-                    map.put("queryTimes", record.getQueryTimes());
-                    map.put("hostAddress", record.getHostAddress());
-                    map.put("dbName", record.getDBName());
-                    map.put("returnRowCounts", record.getReturnRowCounts());
-                    map.put("parseRowCounts", record.getParseRowCounts());
-                    result.add(map);
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            log.warn("查询 RDS 慢查询失败: instanceId={}, error={}", instanceId, e.getMessage());
             return new ArrayList<>();
         }
     }

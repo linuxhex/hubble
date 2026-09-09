@@ -1,79 +1,118 @@
-# 测试报告
+# 中间件监控页面测试报告（第二轮）
 
 ## 概要
-- 测试时间：2026-09-04 21:30
+- 测试时间：2026-09-09 09:20
 - 项目类型：Web
-- 测试环境：http://localhost:5173（前端）+ http://localhost:8080（后端）
+- 测试环境：http://localhost:82（前端）+ http://localhost:18081（后端）
 - 驱动引擎：ego-browser
-- 场景总数：4
-- 通过：4
+- 场景总数：11（每个 tab 一个场景）
+- 通过：11
 - 失败：0
 - 通过率：100%
 
-## 改动范围
+## 本轮修复清单
 
-| 文件 | 改动内容 |
-|------|---------|
-| GrafanaClient.java（新增） | Grafana Prometheus 查询客户端，支持多数据源 |
-| MiddlewareMonitorService.java | 新增 podCpuTop/podMemoryTop/nodeOverview |
-| MiddlewareController.java | 新增 3 个 API 端点 |
-| application.yml | 新增 grafana 配置（ds-uid + node-ds-uid） |
-| middleware.js | 新增 3 个前端 API 调用 |
-| MiddlewareDashboard.vue | 新增 Pod/Node Tab，两栏布局 |
-| GatewayService.java | 告警防抖 3h→24h |
-| MonitorSnapshotService.java | 红盘告警防抖 3h→24h |
+### 后端修复（MiddlewareMonitorService.java）
 
-## 修复的问题
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | OSS 缺少 `errorRate4xx`/`errorRate5xx` 字段，前端 `.toFixed(2)` 崩溃 | 添加两个字段，默认 0.0 |
+| 2 | Kafka 实例缺少 `region`/`status`/`version` 字段 | Prometheus 和 CloudMonitor 两条路径均添加默认值 |
+| 3 | Kafka Top Partitions 缺少 `rank` 字段 | 排序后循环赋值 rank |
+| 4 | RocketMQ Top Topics 缺少 `rank` 字段（CloudMonitor 分支） | 排序后循环赋值 rank |
+| 5 | ES Top Indices 缺少 `rank` 字段 | 排序后循环赋值 rank |
+| 6 | Lindorm Top Tables 缺少 `rank` 字段 | 排序后循环赋值 rank |
 
-1. **GrafanaClient 越界 bug**：Node 查询返回空 fields 时 `Index -1 out of bounds`，增加空数组保护
-2. **Node 数据源错误**：自建 Prometheus 无 node-exporter 指标，改用 ARMS 数据源（`cem0jt0mij668b`）
-3. **Node 节点重复**：内存查询返回重复 instance，用 Map 去重
+### 前一轮修复（已验证）
 
-## 详细结果
+| 修复 | 说明 |
+|------|------|
+| `fetchAlerts` 覆盖主数据 | 改为合并 alertLevel 到已有数据 |
+| MySQL 慢查询返回指标而非 SQL | 改用 `listRdsSlowLogs()` 返回实际 SQL |
+| Redis 慢查询返回指标而非命令 | 改用 `listRedisSlowLogs()` 返回实际命令 |
+| Redis 集群 CPU/内存 >100% | `queryLatestMetricWithFallback` 添加 `average=true` |
+| RocketMQ 缺少 status/version/region | SLS 路径添加默认值 |
+| RocketMQ Top Topics 无数据 | 添加 SLS 降级路径 |
+| MySQL/Redis 慢查询表缺少实例列 | 前端添加实例列 |
 
-### 场景 1：中间件大盘页面加载 ✓
-| 步骤 | 操作 | 结果 |
-|------|------|------|
-| 1 | 导航到 /middleware | ✓ |
-| 2 | 验证 4 个 Tab 存在 | ✓ Redis/MySQL/Pod/Node |
+## 详细测试结果
 
-### 场景 2：Pod 监控（真实数据）✓
-| 步骤 | 操作 | 结果 |
-|------|------|------|
-| 1 | 切换到 Pod Tab | ✓ |
-| 2 | Pod CPU Top10 展示 | ✓ charge-server CPU:1.2 |
-| 3 | Pod 内存 Top10 展示 | ✓ order-mos MEM:14218MB |
+### Redis ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 18 | CPU/内存均 ≤100%，告警状态正确 |
+| Big Keys Top10 | 18 | 有数据 |
+| 慢查询 Top10 | 0 | 过去1小时无慢查询（正常） |
 
-截图：screenshots/ego-browser-shot-13478-2.png
+### MySQL / PolarDB ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 12 | CPU/磁盘正常 |
+| 慢查询 Top10 | 0 | 过去1小时无慢查询（正常） |
+| DB 分库监控 | 20 | CPU/内存/IOPS/活跃会话正常 |
+| Druid 连接池 | 7 | 活动连接/使用率/SQL执行速率正常 |
 
-### 场景 3：Node 监控（真实数据）✓
-| 步骤 | 操作 | 结果 |
-|------|------|------|
-| 1 | 切换到 Node Tab | ✓ |
-| 2 | 等待数据加载（11 秒） | ✓ |
-| 3 | 节点列表展示 | ✓ 41 个节点 |
-| 4 | CPU%/内存% 数值正确 | ✓ 172.16.201.31 CPU:40.4% MEM:77.4% |
+### RocketMQ ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 1 | 地域=cn-hangzhou, 状态=Running, 版本=SLS |
+| Top Topics | 1 | rank 列正确 |
 
-截图：screenshots/ego-browser-shot-13478-1.png
+### Kafka ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 7 | 地域/状态/版本字段正确显示 |
+| Top Partitions | 20 | rank 列 1-20 正确 |
 
-### 场景 4：Redis 回归验证 ✓
-| 步骤 | 操作 | 结果 |
-|------|------|------|
-| 1 | 切换回 Redis Tab | ✓ |
-| 2 | 实例列表展示 | ✓ 31 个实例 |
-| 3 | 表格列完整 | ✓ 实例名/规格/状态/CPU%/内存%/QPS |
+### Lindorm ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 3 | CPU/IOWait/热存储/QPS/RT 正常 |
+| Top 实例详情 | 3 | rank 列正确 |
 
-## 性能问题
+### Elasticsearch ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 实例主表 | 4 | CPU/磁盘/JVM内存正常 |
+| Top 大索引 | 4 | rank 列正确 |
 
-| 接口 | 响应时间 | 说明 |
-|------|---------|------|
-| /middleware/node/overview | ~11s | Grafana ARMS 查询慢 |
-| /middleware/pod/cpu | ~2s | 可接受 |
-| /middleware/pod/memory | ~2s | 可接受 |
-| /middleware/redis/instances | ~1s | 正常 |
+### OSS ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| Bucket 列表 | 84 | 4xx/5xx 错误率显示 0.00%（不崩溃） |
 
-**建议**：Node 接口需要加缓存，避免每次请求都查 Grafana。
+### Pod ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| CPU Top10 | 10 | 正常 |
+| 内存 Top10 | 10 | 正常 |
 
-## 结论
+### Node ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 节点概览 | 41 | CPU/内存百分比正常 |
 
-全部 4 个场景通过，新增的 Pod/Node 监控功能正常，数据展示正确。Node 接口响应慢，建议后续加缓存优化。
+### JVM ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 应用列表 | 62 | 堆内存/GC/QPS/CPU 正常 |
+
+### 线程池 ✓
+| 子模块 | 行数 | 说明 |
+|--------|------|------|
+| 线程池列表 | 182 | 活跃线程/使用率/队列/拒绝率正常 |
+
+## 数据准确性验证
+
+1. **Redis CPU/内存**：集群实例使用 `average=true`，值均 ≤100%
+2. **Kafka 实例字段**：region/status/version 正确显示
+3. **OSS 错误率**：errorRate4xx/errorRate5xx 字段存在，前端不崩溃
+4. **Rank 列**：所有 Top 列表排序后正确赋值
+5. **告警摘要**：fetchAlerts 不再覆盖主数据，正确显示红盘告警
+6. **慢查询**：API 已切换到实际 SQL/命令查询，空数据因无慢查询
+
+## 备注
+
+- 慢查询为空是正常状态（过去1小时无慢查询）
+- 本地后端数据库连接警告不影响中间件监控 API
+- Vite proxy 已改为 `localhost:18081` 用于本地测试

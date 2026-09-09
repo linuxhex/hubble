@@ -66,12 +66,15 @@ public class ArmsClient {
      * 按时间窗搜索链路列表（2.7.21 版 SearchTracesRequest 无 setPid，按 region+时间窗搜索；
      * 可用 ServiceName/OperationName 进一步过滤）
      */
-    public SearchTracesResponse searchTraces(String pid, long fromMs, long toMs) throws Exception {
+    public SearchTracesResponse searchTraces(String serviceName, long fromMs, long toMs) throws Exception {
         SearchTracesRequest req = new SearchTracesRequest();
         req.setRegionId(armsConfig.getRegion());
         req.setStartTime(fromMs);
         req.setEndTime(toMs);
         req.setReverse(true);
+        if (serviceName != null && !serviceName.isEmpty()) {
+            req.setServiceName(serviceName);
+        }
         return client.getAcsResponse(req);
     }
 
@@ -82,6 +85,13 @@ public class ArmsClient {
         GetTraceRequest req = new GetTraceRequest();
         req.setRegionId(armsConfig.getRegion());
         req.setTraceID(traceId);
+        // 通过 QueryParam 设置时间参数（SDK 没有对应的 setter 方法）
+        if (fromMs != null) {
+            req.putQueryParameter("StartTime", fromMs);
+        }
+        if (toMs != null) {
+            req.putQueryParameter("EndTime", toMs);
+        }
         return client.getAcsResponse(req);
     }
 
