@@ -176,6 +176,12 @@
             <artifactId>aliyun-java-sdk-rds</artifactId>
             <version>2.7.58</version>
         </dependency>
+        <!-- 阿里云 PolarDB SDK — PolarDB 实例列表 -->
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>aliyun-java-sdk-polardb</artifactId>
+            <version>1.8.36</version>
+        </dependency>
         <!-- 阿里云 KVStore(Redis) SDK — Redis 实例列表 + 监控 -->
         <dependency>
             <groupId>com.aliyun</groupId>

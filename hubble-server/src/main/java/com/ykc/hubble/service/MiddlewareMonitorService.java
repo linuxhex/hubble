@@ -238,10 +238,18 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getDBInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetricThrottled("acs_rds_dashboard", "CpuUsage", dim, startTime, endTime));
-                    item.put("connections", queryLatestMetricThrottled("acs_rds_dashboard", "ConnectionUsage", dim, startTime, endTime));
-                    item.put("iops", queryLatestMetricThrottled("acs_rds_dashboard", "IOPSUsage", dim, startTime, endTime));
-                    item.put("diskUsage", queryLatestMetricThrottled("acs_rds_dashboard", "DiskUsage", dim, startTime, endTime));
+                    double[] cpu = queryLatestAndPeakMetricThrottled("acs_rds_dashboard", "CpuUsage", dim, startTime, endTime, false);
+                    double[] conn = queryLatestAndPeakMetricThrottled("acs_rds_dashboard", "ConnectionUsage", dim, startTime, endTime, false);
+                    double[] iops = queryLatestAndPeakMetricThrottled("acs_rds_dashboard", "IOPSUsage", dim, startTime, endTime, false);
+                    double[] disk = queryLatestAndPeakMetricThrottled("acs_rds_dashboard", "DiskUsage", dim, startTime, endTime, false);
+                    item.put("cpuUsage", cpu[0]);
+                    item.put("cpuUsagePeak", cpu[1]);
+                    item.put("connections", conn[0]);
+                    item.put("connectionsPeak", conn[1]);
+                    item.put("iops", iops[0]);
+                    item.put("iopsPeak", iops[1]);
+                    item.put("diskUsage", disk[0]);
+                    item.put("diskUsagePeak", disk[1]);
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -251,14 +259,56 @@ public class MiddlewareMonitorService {
                 list.add((Map<String, Object>) f.get());
             }
 
+            // PolarDB 集群
+            var allPolarClusters = cloudMonitorClient.listPolarDBClusters();
+            var polarClusters = allPolarClusters.stream()
+                    .filter(c -> c.getDBClusterDescription() != null && c.getDBClusterDescription().startsWith("prod-"))
+                    .toList();
+            log.info("PolarDB 集群数: 总{} 个, prod {} 个", allPolarClusters.size(), polarClusters.size());
+
+            var polarFutures = polarClusters.stream().map(cluster ->
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("instanceId", cluster.getDBClusterId());
+                    item.put("instanceName", cluster.getDBClusterDescription());
+                    item.put("engine", "PolarDB");
+                    item.put("engineVersion", cluster.getDBVersion());
+                    item.put("instanceType", cluster.getDBType());
+                    item.put("status", cluster.getDBClusterStatus());
+
+                    // 注意：acs_polardb 的维度键是 clusterId（dBClusterId 会导致维度过滤失效返回全账号数据），
+                    // CPU/连接/IOPS 为节点级指标，多节点需取平均
+                    String dim = "[{\"clusterId\":\"" + cluster.getDBClusterId() + "\"}]";
+
+                    double[] cpu = queryLatestAndPeakMetricThrottled("acs_polardb", "cluster_cpu_utilization", dim, startTime, endTime, true);
+                    double[] conn = queryLatestAndPeakMetricThrottled("acs_polardb", "cluster_connection_utilization", dim, startTime, endTime, true);
+                    double[] iops = queryLatestAndPeakMetricThrottled("acs_polardb", "cluster_iops_usage", dim, startTime, endTime, true);
+                    double[] disk = queryLatestAndPeakMetricThrottled("acs_polardb", "cluster_disk_utilization", dim, startTime, endTime, true);
+                    item.put("cpuUsage", cpu[0]);
+                    item.put("cpuUsagePeak", cpu[1]);
+                    item.put("connections", conn[0]);
+                    item.put("connectionsPeak", conn[1]);
+                    item.put("iops", iops[0]);
+                    item.put("iopsPeak", iops[1]);
+                    item.put("diskUsage", disk[0]);
+                    item.put("diskUsagePeak", disk[1]);
+                    return item;
+                })
+            ).toArray(java.util.concurrent.CompletableFuture[]::new);
+
+            java.util.concurrent.CompletableFuture.allOf(polarFutures).join();
+            for (var f : polarFutures) {
+                list.add((Map<String, Object>) f.get());
+            }
+
             mysqlInstancesCache = list;
             mysqlInstancesCacheTime = now;
             if (!list.isEmpty()) {
                 saveToDbCache("middleware_mysql", "instances", list);
             }
-            log.info("MySQL prod 实例监控已缓存: {} 个", list.size());
+            log.info("MySQL/PolarDB prod 实例监控已缓存: {} 个 (RDS {} + PolarDB {})", list.size(), instances.size(), polarClusters.size());
         } catch (Exception e) {
-            log.error("查询 MySQL 监控失败: {}", e.getMessage());
+            log.error("查询 MySQL/PolarDB 监控失败: {}", e.getMessage());
         }
         return list;
     }
@@ -847,6 +897,48 @@ public class MiddlewareMonitorService {
             val = queryLatestMetric(namespace, fallbackMetric, dimensions, startTime, endTime, average);
         }
         return val;
+    }
+
+    /**
+     * 单次查询同时返回 [最新值, 近5分钟峰值]。
+     * 告警巡检读峰值：定时巡检复用 5 分钟缓存且只看最新值时，短时尖峰（如持续 2 分钟的 CPU 打满）可能被完全跳过。
+     */
+    private double[] queryLatestAndPeakMetricThrottled(String namespace, String metric, String dimensions,
+                                                        String startTime, String endTime, boolean average) {
+        try {
+            EXTERNAL_CALL_SEM.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new double[]{0, 0};
+        }
+        try {
+            List<double[]> points = cloudMonitorClient.queryMetric(namespace, metric, dimensions, 60, startTime, endTime);
+            if (points.isEmpty()) return new double[]{0, 0};
+
+            double maxTs = 0;
+            for (double[] p : points) {
+                if (p[0] > maxTs) maxTs = p[0];
+            }
+            double sum = 0;
+            int count = 0;
+            for (double[] p : points) {
+                if (p[0] == maxTs) {
+                    sum += p[1];
+                    count++;
+                }
+            }
+            double latest = average && count > 0 ? sum / count : sum;
+
+            double peak = 0;
+            for (double[] p : points) {
+                if (p[0] >= maxTs - 5 * 60 * 1000.0 && p[1] > peak) {
+                    peak = p[1];
+                }
+            }
+            return new double[]{latest, peak};
+        } finally {
+            EXTERNAL_CALL_SEM.release();
+        }
     }
 
     private double queryLatestMetricThrottled(String namespace, String metric, String dimensions,

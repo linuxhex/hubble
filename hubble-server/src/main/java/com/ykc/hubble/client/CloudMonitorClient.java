@@ -22,6 +22,8 @@ import com.aliyuncs.ons.model.v20190214.OnsInstanceInServiceListResponse;
 import com.aliyuncs.ons.model.v20190214.OnsTopicListRequest;
 import com.aliyuncs.ons.model.v20190214.OnsTopicListResponse;
 import com.aliyuncs.profile.DefaultProfile;
+import com.aliyuncs.polardb.model.v20170801.DescribeDBClustersRequest;
+import com.aliyuncs.polardb.model.v20170801.DescribeDBClustersResponse;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesRequest;
 import com.aliyuncs.rds.model.v20140815.DescribeDBInstancesResponse;
 import com.aliyuncs.r_kvstore.model.v20150101.DescribeInstancesRequest;
@@ -123,6 +125,21 @@ public class CloudMonitorClient {
             return resp.getItems();
         } catch (Exception e) {
             log.warn("查询 RDS 实例列表失败: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 查询 PolarDB 集群列表
+     */
+    public List<DescribeDBClustersResponse.DBCluster> listPolarDBClusters() {
+        try {
+            DescribeDBClustersRequest req = new DescribeDBClustersRequest();
+            req.setPageSize(100);
+            DescribeDBClustersResponse resp = acsClient.getAcsResponse(req);
+            return resp.getItems();
+        } catch (Exception e) {
+            log.warn("查询 PolarDB 集群列表失败: {}", e.getMessage());
             return new ArrayList<>();
         }
     }

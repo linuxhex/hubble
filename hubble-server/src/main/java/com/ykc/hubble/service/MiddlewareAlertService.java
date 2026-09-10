@@ -84,7 +84,9 @@ public class MiddlewareAlertService {
 
             for (var entry : configsByMetric.entrySet()) {
                 String metricName = entry.getKey();
-                Object rawValue = inst.get(metricName);
+                // 告警读"近5分钟峰值"（短尖峰可能被 5 分钟展示缓存+最新值逻辑跳过），无峰值键时回退最新值
+                Object rawValue = inst.get(metricName + "Peak");
+                if (rawValue == null) rawValue = inst.get(metricName);
                 if (rawValue == null) continue;
 
                 double value;
