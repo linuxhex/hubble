@@ -7,6 +7,7 @@ import com.ykc.hubble.entity.MiddlewareAlertConfig;
 import com.ykc.hubble.mapper.MiddlewareAlertConfigMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -23,6 +24,7 @@ public class MiddlewareAlertService {
     private final DingTalkClient dingTalkClient;
     private final AlertPushService alertPushService;
     private final MonitorProperties monitorProperties;
+    private final MiddlewareMonitorService monitorService;
 
     private List<MiddlewareAlertConfig> configCache = null;
     private long configCacheTime = 0;
@@ -261,5 +263,53 @@ public class MiddlewareAlertService {
     private String getString(Map<String, Object> map, String key) {
         Object v = map.get(key);
         return v != null ? v.toString() : null;
+    }
+
+    /**
+     * 定时巡检：每 1 分钟检查所有中间件的告警状态，确保问题能在 1-2 分钟内被发现
+     */
+    @Scheduled(fixedRate = 60 * 1000)
+    public void scheduledAlertCheck() {
+        try {
+            String[] types = {"redis", "mysql", "db", "rocketmq", "kafka", "lindorm", "elasticsearch", "oss"};
+
+            var futures = new java.util.concurrent.CompletableFuture[types.length];
+            for (int i = 0; i < types.length; i++) {
+                String type = types[i];
+                futures[i] = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    List<Map<String, Object>> instances = fetchInstances(type);
+                    if (instances == null || instances.isEmpty()) return 0L;
+                    List<Map<String, Object>> checked = checkAlerts(type, instances);
+                    return checked.stream().filter(inst -> "red".equals(inst.get("alertLevel"))).count();
+                });
+            }
+
+            java.util.concurrent.CompletableFuture.allOf(futures).join();
+
+            long totalRed = 0;
+            for (var f : futures) {
+                try { totalRed += (long) f.get(); } catch (Exception ignored) {}
+            }
+
+            if (totalRed > 0) {
+                log.info("定时告警巡检完成：发现 {} 个红盘告警", totalRed);
+            }
+        } catch (Exception e) {
+            log.error("定时告警巡检异常: {}", e.getMessage(), e);
+        }
+    }
+
+    private List<Map<String, Object>> fetchInstances(String middlewareType) {
+        return switch (middlewareType) {
+            case "redis" -> new ArrayList<>(monitorService.redisInstances());
+            case "mysql" -> new ArrayList<>(monitorService.mysqlInstances());
+            case "db" -> new ArrayList<>(monitorService.dbInstances());
+            case "rocketmq" -> new ArrayList<>(monitorService.rocketmqInstances());
+            case "kafka" -> new ArrayList<>(monitorService.kafkaInstances());
+            case "lindorm" -> new ArrayList<>(monitorService.lindormInstances());
+            case "elasticsearch" -> new ArrayList<>(monitorService.elasticsearchInstances());
+            case "oss" -> new ArrayList<>(monitorService.ossBuckets());
+            default -> null;
+        };
     }
 }

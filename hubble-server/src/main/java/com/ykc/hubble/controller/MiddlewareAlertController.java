@@ -78,18 +78,31 @@ public class MiddlewareAlertController {
     @GetMapping("/check/all")
     @Operation(summary = "检查所有中间件告警状态")
     public Result<Map<String, Object>> checkAll() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        String[] types = {"redis", "mysql", "rocketmq", "kafka", "lindorm", "elasticsearch", "oss"};
+        String[] types = {"redis", "mysql", "db", "rocketmq", "kafka", "lindorm", "elasticsearch", "oss"};
 
+        var futures = new java.util.concurrent.CompletableFuture[types.length];
+        for (int i = 0; i < types.length; i++) {
+            String type = types[i];
+            futures[i] = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                List<Map<String, Object>> instances = fetchInstances(type);
+                if (instances == null) return null;
+                List<Map<String, Object>> checked = alertService.checkAlerts(type, instances);
+                return Map.entry(type, alertService.alertSummary(checked));
+            });
+        }
+
+        java.util.concurrent.CompletableFuture.allOf(futures).join();
+
+        Map<String, Object> result = new LinkedHashMap<>();
         int totalRed = 0, totalYellow = 0;
-        for (String type : types) {
-            List<Map<String, Object>> instances = fetchInstances(type);
-            if (instances == null) continue;
-            List<Map<String, Object>> checked = alertService.checkAlerts(type, instances);
-            Map<String, Object> summary = alertService.alertSummary(checked);
-            result.put(type, summary);
-            totalRed += (int) summary.getOrDefault("redCount", 0);
-            totalYellow += (int) summary.getOrDefault("yellowCount", 0);
+        for (var f : futures) {
+            try {
+                var entry = (Map.Entry<String, Map<String, Object>>) f.get();
+                if (entry == null) continue;
+                result.put(entry.getKey(), entry.getValue());
+                totalRed += (int) entry.getValue().getOrDefault("redCount", 0);
+                totalYellow += (int) entry.getValue().getOrDefault("yellowCount", 0);
+            } catch (Exception ignored) {}
         }
 
         result.put("totalRed", totalRed);
@@ -101,6 +114,7 @@ public class MiddlewareAlertController {
         return switch (middlewareType) {
             case "redis" -> new ArrayList<>(monitorService.redisInstances());
             case "mysql" -> new ArrayList<>(monitorService.mysqlInstances());
+            case "db" -> new ArrayList<>(monitorService.dbInstances());
             case "rocketmq" -> new ArrayList<>(monitorService.rocketmqInstances());
             case "kafka" -> new ArrayList<>(monitorService.kafkaInstances());
             case "lindorm" -> new ArrayList<>(monitorService.lindormInstances());

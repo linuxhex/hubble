@@ -33,6 +33,8 @@ public class MiddlewareMonitorService {
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+    private static final java.util.concurrent.Semaphore EXTERNAL_CALL_SEM = new java.util.concurrent.Semaphore(3);
+
     // Grafana 查询缓存（避免频繁查询，2 分钟过期）
     private List<Map<String, Object>> podCpuCache = null;
     private long podCpuCacheTime = 0;
@@ -144,20 +146,20 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetricWithFallback("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime, true));
-                    
+                    item.put("cpuUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime, true));
+
                     // 连接数：尝试多个可能的指标名称
-                    double connections = queryLatestMetricWithFallback("acs_kvstore", "ConnectionUsage", "ShardingConnectionCount", dim, startTime, endTime);
+                    double connections = queryLatestMetricWithFallbackThrottled("acs_kvstore", "ConnectionUsage", "ShardingConnectionCount", dim, startTime, endTime);
                     if (connections == 0) {
-                        connections = queryLatestMetric("acs_kvstore", "ShardingUsedConnection", dim, startTime, endTime);
+                        connections = queryLatestMetricThrottled("acs_kvstore", "ShardingUsedConnection", dim, startTime, endTime);
                     }
                     if (connections == 0) {
-                        connections = queryLatestMetric("acs_kvstore", "UsedConnection", dim, startTime, endTime);
+                        connections = queryLatestMetricThrottled("acs_kvstore", "UsedConnection", dim, startTime, endTime);
                     }
                     item.put("connections", connections);
-                    
-                    item.put("memoryUsage", queryLatestMetricWithFallback("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime, true));
-                    item.put("qps", queryLatestMetric("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
+
+                    item.put("memoryUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime, true));
+                    item.put("qps", queryLatestMetricThrottled("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -236,10 +238,10 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getDBInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetric("acs_rds_dashboard", "CpuUsage", dim, startTime, endTime));
-                    item.put("connections", queryLatestMetric("acs_rds_dashboard", "ConnectionUsage", dim, startTime, endTime));
-                    item.put("iops", queryLatestMetric("acs_rds_dashboard", "IOPSUsage", dim, startTime, endTime));
-                    item.put("diskUsage", queryLatestMetric("acs_rds_dashboard", "DiskUsage", dim, startTime, endTime));
+                    item.put("cpuUsage", queryLatestMetricThrottled("acs_rds_dashboard", "CpuUsage", dim, startTime, endTime));
+                    item.put("connections", queryLatestMetricThrottled("acs_rds_dashboard", "ConnectionUsage", dim, startTime, endTime));
+                    item.put("iops", queryLatestMetricThrottled("acs_rds_dashboard", "IOPSUsage", dim, startTime, endTime));
+                    item.put("diskUsage", queryLatestMetricThrottled("acs_rds_dashboard", "DiskUsage", dim, startTime, endTime));
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -489,9 +491,9 @@ public class MiddlewareMonitorService {
                     item.put("version", "CloudMonitor");
 
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                    item.put("lag", queryLatestMetric("acs_kafka", "Lag", dim, startTime, endTime));
-                    item.put("produceTps", queryLatestMetric("acs_kafka", "ProduceTps", dim, startTime, endTime));
-                    item.put("consumeTps", queryLatestMetric("acs_kafka", "ConsumeTps", dim, startTime, endTime));
+                    item.put("lag", queryLatestMetricThrottled("acs_kafka", "Lag", dim, startTime, endTime));
+                    item.put("produceTps", queryLatestMetricThrottled("acs_kafka", "ProduceTps", dim, startTime, endTime));
+                    item.put("consumeTps", queryLatestMetricThrottled("acs_kafka", "ConsumeTps", dim, startTime, endTime));
                     list.add(item);
                 }
             }
@@ -550,35 +552,42 @@ public class MiddlewareMonitorService {
                 String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
                 String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
-                for (var entry : metrics.entrySet()) {
-                    String instanceId = entry.getKey();
-                    if (instanceId.isEmpty()) continue;
-                    double[] vals = entry.getValue();
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("instanceId", instanceId);
-                    item.put("instanceName", "lindorm-" + instanceId);
-                    item.put("cpuUsage", vals[0]);
-                    item.put("cpuWio", vals[3]);
-                    item.put("qps", vals[1]);
-                    item.put("writeQps", vals[2]);
-                    item.put("readRt", vals[4]);
-                    item.put("writeRt", vals[5]);
-                    item.put("diskReadBytes", vals[6]);
+                var itemFutures = metrics.entrySet().stream()
+                    .filter(e -> !e.getKey().isEmpty())
+                    .map(entry -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                        String instanceId = entry.getKey();
+                        double[] vals = entry.getValue();
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("instanceId", instanceId);
+                        item.put("instanceName", "lindorm-" + instanceId);
+                        item.put("cpuUsage", vals[0]);
+                        item.put("cpuWio", vals[3]);
+                        item.put("qps", vals[1]);
+                        item.put("writeQps", vals[2]);
+                        item.put("readRt", vals[4]);
+                        item.put("writeRt", vals[5]);
+                        item.put("diskReadBytes", vals[6]);
 
-                    String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                    double hotStoragePct = queryLatestMetric("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
-                    double coldStoragePct = queryLatestMetric("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
-                    item.put("diskUsage", hotStoragePct);
-                    item.put("bytesIn", queryLatestMetric("acs_lindorm", "bytes_in", dim, startTime, endTime));
-                    item.put("bytesOut", queryLatestMetric("acs_lindorm", "bytes_out", dim, startTime, endTime));
-                    item.put("hotStorageUsedPercent", hotStoragePct);
-                    item.put("hotStorageUsedBytes", queryLatestMetric("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
-                    item.put("coldStorageUsedPercent", coldStoragePct);
-                    item.put("getRtAvg", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
-                    item.put("getRtP99", queryLatestMetric("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
-                    item.put("compactionQueueSize", queryLatestMetric("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
-                    item.put("handlerQueueSize", queryLatestMetric("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
-                    list.add(item);
+                        String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+                        double hotStoragePct = queryLatestMetricThrottled("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
+                        double coldStoragePct = queryLatestMetricThrottled("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
+                        item.put("diskUsage", hotStoragePct);
+                        item.put("bytesIn", queryLatestMetricThrottled("acs_lindorm", "bytes_in", dim, startTime, endTime));
+                        item.put("bytesOut", queryLatestMetricThrottled("acs_lindorm", "bytes_out", dim, startTime, endTime));
+                        item.put("hotStorageUsedPercent", hotStoragePct);
+                        item.put("hotStorageUsedBytes", queryLatestMetricThrottled("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
+                        item.put("coldStorageUsedPercent", coldStoragePct);
+                        item.put("getRtAvg", queryLatestMetricThrottled("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                        item.put("getRtP99", queryLatestMetricThrottled("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
+                        item.put("compactionQueueSize", queryLatestMetricThrottled("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
+                        item.put("handlerQueueSize", queryLatestMetricThrottled("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
+                        return item;
+                    }, queryExecutor))
+                    .toArray(java.util.concurrent.CompletableFuture[]::new);
+
+                java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+                for (var f : itemFutures) {
+                    try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
                 }
                 log.info("Lindorm 实例监控(Prometheus): {} 个", list.size());
             } else {
@@ -594,34 +603,41 @@ public class MiddlewareMonitorService {
                 String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
                 String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
-                for (var inst : instances) {
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    String instanceId = (String) inst.get("instanceId");
-                    String alias = (String) inst.get("instanceAlias");
-                    item.put("instanceId", instanceId);
-                    item.put("instanceName", alias);
+                var cmFutures = instances.stream()
+                    .map(inst -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        String instanceId = (String) inst.get("instanceId");
+                        String alias = (String) inst.get("instanceAlias");
+                        item.put("instanceId", instanceId);
+                        item.put("instanceName", alias);
 
-                    String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                    item.put("cpuUsage", queryLatestMetric("acs_lindorm", "CpuUsage", dim, startTime, endTime, true));
-                    item.put("cpuWio", queryLatestMetric("acs_lindorm", "cpu_wio", dim, startTime, endTime, true));
-                    double hotStoragePct = queryLatestMetric("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
-                    double coldStoragePct = queryLatestMetric("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
-                    item.put("diskUsage", hotStoragePct);
-                    item.put("qps", queryLatestMetric("acs_lindorm", "Qps", dim, startTime, endTime));
-                    item.put("writeQps", queryLatestMetric("acs_lindorm", "WriteQps", dim, startTime, endTime));
-                    item.put("readRt", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
-                    item.put("writeRt", 0.0);
-                    item.put("diskReadBytes", queryLatestMetric("acs_lindorm", "disk_readbytes", dim, startTime, endTime));
-                    item.put("bytesIn", queryLatestMetric("acs_lindorm", "bytes_in", dim, startTime, endTime));
-                    item.put("bytesOut", queryLatestMetric("acs_lindorm", "bytes_out", dim, startTime, endTime));
-                    item.put("hotStorageUsedPercent", hotStoragePct);
-                    item.put("hotStorageUsedBytes", queryLatestMetric("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
-                    item.put("coldStorageUsedPercent", coldStoragePct);
-                    item.put("getRtAvg", queryLatestMetric("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
-                    item.put("getRtP99", queryLatestMetric("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
-                    item.put("compactionQueueSize", queryLatestMetric("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
-                    item.put("handlerQueueSize", queryLatestMetric("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
-                    list.add(item);
+                        String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+                        item.put("cpuUsage", queryLatestMetricThrottled("acs_lindorm", "CpuUsage", dim, startTime, endTime, true));
+                        item.put("cpuWio", queryLatestMetricThrottled("acs_lindorm", "cpu_wio", dim, startTime, endTime, true));
+                        double hotStoragePct = queryLatestMetricThrottled("acs_lindorm", "hot_storage_used_percent", dim, startTime, endTime, true);
+                        double coldStoragePct = queryLatestMetricThrottled("acs_lindorm", "cold_storage_used_percent", dim, startTime, endTime, true);
+                        item.put("diskUsage", hotStoragePct);
+                        item.put("qps", queryLatestMetricThrottled("acs_lindorm", "Qps", dim, startTime, endTime));
+                        item.put("writeQps", queryLatestMetricThrottled("acs_lindorm", "WriteQps", dim, startTime, endTime));
+                        item.put("readRt", queryLatestMetricThrottled("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                        item.put("writeRt", 0.0);
+                        item.put("diskReadBytes", queryLatestMetricThrottled("acs_lindorm", "disk_readbytes", dim, startTime, endTime));
+                        item.put("bytesIn", queryLatestMetricThrottled("acs_lindorm", "bytes_in", dim, startTime, endTime));
+                        item.put("bytesOut", queryLatestMetricThrottled("acs_lindorm", "bytes_out", dim, startTime, endTime));
+                        item.put("hotStorageUsedPercent", hotStoragePct);
+                        item.put("hotStorageUsedBytes", queryLatestMetricThrottled("acs_lindorm", "hot_storage_used_bytes", dim, startTime, endTime));
+                        item.put("coldStorageUsedPercent", coldStoragePct);
+                        item.put("getRtAvg", queryLatestMetricThrottled("acs_lindorm", "get_rt_avg", dim, startTime, endTime, true));
+                        item.put("getRtP99", queryLatestMetricThrottled("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
+                        item.put("compactionQueueSize", queryLatestMetricThrottled("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
+                        item.put("handlerQueueSize", queryLatestMetricThrottled("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
+                        return item;
+                    }, queryExecutor))
+                    .toArray(java.util.concurrent.CompletableFuture[]::new);
+
+                java.util.concurrent.CompletableFuture.allOf(cmFutures).join();
+                for (var f : cmFutures) {
+                    try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
                 }
             }
 
@@ -657,27 +673,33 @@ public class MiddlewareMonitorService {
             String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
             String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
-            for (var inst : instances) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                String instanceId = (String) inst.get("instanceId");
-                String desc = (String) inst.get("description");
-                item.put("instanceId", instanceId);
-                item.put("instanceName", desc);
+            var itemFutures = instances.stream()
+                .map(inst -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    String instanceId = (String) inst.get("instanceId");
+                    String desc = (String) inst.get("description");
+                    item.put("instanceId", instanceId);
+                    item.put("instanceName", desc);
 
-                String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                item.put("cpuUsage", queryLatestMetric("acs_elasticsearch", "NodeCPUUtilization", dim, startTime, endTime, true));
-                item.put("diskUsage", queryLatestMetric("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime, true));
-                
-                // JVM 内存：尝试多个可能的指标名称
-                double jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMMemoryUsedPercent", dim, startTime, endTime, true);
-                if (jvmMemory == 0) {
-                    jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMHeapUtilization", dim, startTime, endTime, true);
-                }
-                if (jvmMemory == 0) {
-                    jvmMemory = queryLatestMetric("acs_elasticsearch", "NodeJVMUtilization", dim, startTime, endTime, true);
-                }
-                item.put("jvmMemory", jvmMemory);
-                list.add(item);
+                    String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+                    item.put("cpuUsage", queryLatestMetricThrottled("acs_elasticsearch", "NodeCPUUtilization", dim, startTime, endTime, true));
+                    item.put("diskUsage", queryLatestMetricThrottled("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime, true));
+
+                    double jvmMemory = queryLatestMetricThrottled("acs_elasticsearch", "NodeJVMMemoryUsedPercent", dim, startTime, endTime, true);
+                    if (jvmMemory == 0) {
+                        jvmMemory = queryLatestMetricThrottled("acs_elasticsearch", "NodeJVMHeapUtilization", dim, startTime, endTime, true);
+                    }
+                    if (jvmMemory == 0) {
+                        jvmMemory = queryLatestMetricThrottled("acs_elasticsearch", "NodeJVMUtilization", dim, startTime, endTime, true);
+                    }
+                    item.put("jvmMemory", jvmMemory);
+                    return item;
+                }, queryExecutor))
+                .toArray(java.util.concurrent.CompletableFuture[]::new);
+
+            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            for (var f : itemFutures) {
+                try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
             }
 
             elasticsearchInstancesCache = list;
@@ -718,8 +740,8 @@ public class MiddlewareMonitorService {
                     item.put("creationDate", String.valueOf(bucket.getCreationDate()));
                     try {
                         String dim = "[{\"BucketName\":\"" + bucket.getName() + "\"}]";
-                        item.put("totalRequests", queryLatestMetric("acs_oss", "TotalRequestCount", dim, startTime, endTime));
-                        item.put("successRate", queryLatestMetric("acs_oss", "SuccessRate", dim, startTime, endTime));
+                        item.put("totalRequests", queryLatestMetricThrottled("acs_oss", "TotalRequestCount", dim, startTime, endTime));
+                        item.put("successRate", queryLatestMetricThrottled("acs_oss", "SuccessRate", dim, startTime, endTime));
                         item.put("errorRate4xx", 0.0);
                         item.put("errorRate5xx", 0.0);
                     } catch (Exception e) {
@@ -827,6 +849,42 @@ public class MiddlewareMonitorService {
         return val;
     }
 
+    private double queryLatestMetricThrottled(String namespace, String metric, String dimensions,
+                                              String startTime, String endTime) {
+        return queryLatestMetricThrottled(namespace, metric, dimensions, startTime, endTime, false);
+    }
+
+    private double queryLatestMetricThrottled(String namespace, String metric, String dimensions,
+                                               String startTime, String endTime, boolean average) {
+        try {
+            EXTERNAL_CALL_SEM.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        }
+        try {
+            return queryLatestMetric(namespace, metric, dimensions, startTime, endTime, average);
+        } finally {
+            EXTERNAL_CALL_SEM.release();
+        }
+    }
+
+    private double queryLatestMetricWithFallbackThrottled(String namespace, String primaryMetric,
+                                                           String fallbackMetric, String dimensions,
+                                                           String startTime, String endTime) {
+        return queryLatestMetricWithFallbackThrottled(namespace, primaryMetric, fallbackMetric, dimensions, startTime, endTime, false);
+    }
+
+    private double queryLatestMetricWithFallbackThrottled(String namespace, String primaryMetric,
+                                                           String fallbackMetric, String dimensions,
+                                                           String startTime, String endTime, boolean average) {
+        double val = queryLatestMetricThrottled(namespace, primaryMetric, dimensions, startTime, endTime, average);
+        if (val == 0) {
+            val = queryLatestMetricThrottled(namespace, fallbackMetric, dimensions, startTime, endTime, average);
+        }
+        return val;
+    }
+
     /**
      * 从 Grafana queryInstant 结果中提取单个数值（取第一条结果的 value）
      */
@@ -884,6 +942,7 @@ public class MiddlewareMonitorService {
             for (var entry : rdsMetrics.entrySet()) {
                 double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
+                item.put("instanceId", entry.getKey());
                 item.put("instanceName", entry.getKey());
                 item.put("engine", "RDS");
                 item.put("cpuUsage", vals[0]);
@@ -911,6 +970,7 @@ public class MiddlewareMonitorService {
             for (var entry : pdbMetrics.entrySet()) {
                 double[] vals = entry.getValue();
                 Map<String, Object> item = new LinkedHashMap<>();
+                item.put("instanceId", entry.getKey());
                 item.put("instanceName", entry.getKey());
                 item.put("engine", "PolarDB");
                 item.put("cpuUsage", vals[0]);
@@ -1162,9 +1222,9 @@ public class MiddlewareMonitorService {
 
                 for (var inst : allInstances) {
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
-                    double accumulation = queryLatestMetric("acs_mq", "MessageAccumulation", dim, startTime, endTime);
-                    double sendTps = queryLatestMetric("acs_mq", "SendTps", dim, startTime, endTime);
-                    double consumeTps = queryLatestMetric("acs_mq", "ConsumeTps", dim, startTime, endTime);
+                    double accumulation = queryLatestMetricThrottled("acs_mq", "MessageAccumulation", dim, startTime, endTime);
+                    double sendTps = queryLatestMetricThrottled("acs_mq", "SendTps", dim, startTime, endTime);
+                    double consumeTps = queryLatestMetricThrottled("acs_mq", "ConsumeTps", dim, startTime, endTime);
 
                     var topics = cloudMonitorClient.listRocketMQTopics(inst.getInstanceId());
                     if (topics.isEmpty()) {
@@ -1261,23 +1321,30 @@ public class MiddlewareMonitorService {
         List<Map<String, Object>> list = new ArrayList<>();
         try {
             var instances = redisInstances();
-            for (var inst : instances) {
-                String instanceId = (String) inst.get("instanceId");
-                String instanceName = (String) inst.get("instanceName");
+            String endTimeStr = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
+            String startTimeStr = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
-                String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
-                String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
+            var itemFutures = instances.stream()
+                .map(inst -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    String instanceId = (String) inst.get("instanceId");
+                    String instanceName = (String) inst.get("instanceName");
 
-                double usedMemory = queryLatestMetric("acs_kvstore", "UsedMemory", dim, startTime, endTime);
+                    String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+                    double usedMemory = queryLatestMetricThrottled("acs_kvstore", "UsedMemory", dim, startTimeStr, endTimeStr);
 
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("key", instanceName);
-                item.put("type", "instance");
-                item.put("description", "Redis 实例内存使用");
-                item.put("memoryBytes", usedMemory);
-                item.put("ttl", -1);
-                list.add(item);
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("key", instanceName);
+                    item.put("type", "instance");
+                    item.put("description", "Redis 实例内存使用");
+                    item.put("memoryBytes", usedMemory);
+                    item.put("ttl", -1);
+                    return item;
+                }, queryExecutor))
+                .toArray(java.util.concurrent.CompletableFuture[]::new);
+
+            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            for (var f : itemFutures) {
+                try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
             }
 
             list.sort((a, b) -> Double.compare(
@@ -1294,7 +1361,8 @@ public class MiddlewareMonitorService {
     }
 
     /**
-     * Redis Slow Queries：从 SLS 日志查询应用级别的 Redis 慢查询
+     * Redis Slow Queries：从 ARMS 链路追踪查询应用级别的 Redis 慢调用
+     * 思路：与 MySQL 慢查一致，查询 trace → 提取 Redis 类型的 span → 按耗时排序
      */
     public List<Map<String, Object>> redisSlowQueries() {
         long now = System.currentTimeMillis();
@@ -1304,63 +1372,141 @@ public class MiddlewareMonitorService {
 
         List<Map<String, Object>> list = new ArrayList<>();
         try {
-            long toTime = now / 1000;
-            long fromTime = toTime - 86400; // 最近 24 小时
+            long toMs = now;
+            long fromMs = toMs - 3600_000; // 最近 1 小时
 
-            // 查询 SLS 中的 Redis 慢查询日志
-            var logs = slsQueryClient.queryLogstore("all", "slow execution", fromTime, toTime, 0, 50);
-
-            int rank = 0;
-            for (var logEntry : logs) {
-                String message = logEntry.getMessage();
-                if (message != null && message.contains("Redis mget slow")) {
-                    rank++;
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("rank", rank);
-                    item.put("instanceName", logEntry.getContainerName());
-                    item.put("timestamp", logEntry.getTime());
-
-                    // 解析耗时
-                    try {
-                        int costIdx = message.lastIndexOf("cost:");
-                        if (costIdx > 0) {
-                            String costStr = message.substring(costIdx + 5).trim();
-                            costStr = costStr.replace("ms", "").trim();
-                            item.put("durationMicros", Double.parseDouble(costStr) * 1000); // ms -> micros
-                        }
-                    } catch (Exception e) {
-                        item.put("durationMicros", 0.0);
+            // 1. 获取 ARMS 应用列表，找到目标应用
+            String targetAppName = null;
+            var appsResp = armsClient.listApps();
+            if (appsResp.getTraceApps() != null) {
+                for (var app : appsResp.getTraceApps()) {
+                    String appName = app.getAppName();
+                    if (appName != null && (appName.contains("order-prod") || appName.contains("charge-prod"))) {
+                        targetAppName = appName;
+                        log.info("Redis Slow Queries 找到目标应用: {}", appName);
+                        break;
                     }
-
-                    // 解析 keys 数量
-                    try {
-                        int sizeIdx = message.lastIndexOf("size:");
-                        if (sizeIdx > 0) {
-                            String sizeStr = message.substring(sizeIdx + 5).trim();
-                            sizeStr = sizeStr.split(",")[0].trim();
-                            item.put("keysCount", Integer.parseInt(sizeStr));
-                        }
-                    } catch (Exception e) {
-                        item.put("keysCount", 0);
-                    }
-
-                    list.add(item);
                 }
             }
 
-            // 按耗时排序
-            list.sort((a, b) -> Double.compare(
-                    toDouble(b.getOrDefault("durationMicros", 0)),
-                    toDouble(a.getOrDefault("durationMicros", 0))));
+            if (targetAppName == null) {
+                log.warn("未找到目标应用（order-prod/charge-prod），无法查询 Redis 慢调用");
+                return list;
+            }
 
-            // 重新设置排名
-            for (int i = 0; i < list.size(); i++) {
+            // 2. 搜索该应用的 trace
+            var searchResp = armsClient.searchTraces(targetAppName, fromMs, toMs);
+            var traceItems = searchResp.getTraceInfos();
+            if (traceItems == null || traceItems.isEmpty()) {
+                log.info("ARMS 无 trace 数据（Redis 慢查询）");
+                return list;
+            }
+
+            // 3. 并行查询 trace 详情，提取 Redis span（信号量控制最多 3 并发）
+            int maxTraces = Math.min(traceItems.size(), 20);
+            var traceFutures = new java.util.concurrent.CompletableFuture[maxTraces];
+            for (int i = 0; i < maxTraces; i++) {
+                var traceItem = traceItems.get(i);
+                traceFutures[i] = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    String traceId = traceItem.getTraceID();
+                    if (traceId == null || traceId.isEmpty()) return Collections.<Map<String, Object>>emptyList();
+
+                    try {
+                        EXTERNAL_CALL_SEM.acquire();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return Collections.<Map<String, Object>>emptyList();
+                    }
+                    try {
+                        var traceResp = armsClient.getTrace(traceId, fromMs, toMs);
+                        var spans = traceResp.getSpans();
+                        if (spans == null) return Collections.<Map<String, Object>>emptyList();
+
+                        List<Map<String, Object>> results = new ArrayList<>();
+                        for (var span : spans) {
+                            Integer rpcType = span.getRpcType();
+                            boolean isRedis = false;
+                            String redisCommand = null;
+
+                            var tags = span.getTagEntryList();
+                            if (tags != null) {
+                                for (var tag : tags) {
+                                    String key = tag.getKey();
+                                    String value = tag.getValue();
+
+                                    if ("db.system.name".equals(key) && value != null
+                                            && value.toLowerCase().contains("redis")) {
+                                        isRedis = true;
+                                    }
+                                    if ("db.statement".equals(key) || "db.query.text".equals(key)) {
+                                        redisCommand = value;
+                                    }
+                                    if ("call.type".equals(key) && value != null
+                                            && value.toLowerCase().contains("redis")) {
+                                        isRedis = true;
+                                    }
+                                }
+                            }
+
+                            if (rpcType != null && rpcType == 4) {
+                                isRedis = true;
+                            }
+
+                            if (!isRedis) continue;
+
+                            String serviceName = span.getServiceName();
+                            long duration = span.getDuration() != null ? span.getDuration() : 0;
+                            String timestamp = span.getTimestamp() != null ? String.valueOf(span.getTimestamp()) : null;
+
+                            if (duration < 5) continue;
+
+                            Map<String, Object> item = new LinkedHashMap<>();
+                            item.put("instanceName", serviceName);
+                            item.put("command", redisCommand != null
+                                    ? (redisCommand.length() > 500 ? redisCommand.substring(0, 500) + "..." : redisCommand)
+                                    : span.getOperationName());
+                            item.put("durationMs", (double) duration);
+                            item.put("timestamp", timestamp);
+                            results.add(item);
+                        }
+                        return results;
+                    } catch (Exception e) {
+                        log.warn("查询 trace 详情失败（Redis 慢查询）: traceId={}, error={}", traceId, e.getMessage());
+                        return Collections.<Map<String, Object>>emptyList();
+                    } finally {
+                        EXTERNAL_CALL_SEM.release();
+                    }
+                }, queryExecutor);
+            }
+
+            java.util.concurrent.CompletableFuture.allOf(traceFutures).join();
+            int traceCount = 0;
+            for (var f : traceFutures) {
+                try {
+                    var results = (List<Map<String, Object>>) f.get();
+                    if (!results.isEmpty()) {
+                        list.addAll(results);
+                        traceCount++;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            log.info("Redis Slow Queries: 从 ARMS 查询 {} 条 trace（已缓存）", traceCount);
+
+            // 4. 按耗时降序排序
+            list.sort((a, b) -> Double.compare(
+                    toDouble(b.getOrDefault("durationMs", 0)),
+                    toDouble(a.getOrDefault("durationMs", 0))));
+
+            // 5. 设置排名并限制返回数量
+            int limit = Math.min(list.size(), 50);
+            for (int i = 0; i < limit; i++) {
                 list.get(i).put("rank", i + 1);
             }
 
-            redisSlowQueriesCache = list.size() > 50 ? list.subList(0, 50) : list;
+            redisSlowQueriesCache = limit > 0 ? list.subList(0, limit) : list;
             redisSlowQueriesCacheTime = now;
-            log.info("Redis Slow Queries: {} 条（从 SLS 查询，已缓存）", redisSlowQueriesCache.size());
+            log.info("Redis Slow Queries: {} 条（从 ARMS 查询 {} 条 trace，已缓存）", redisSlowQueriesCache.size(), traceCount);
         } catch (Exception e) {
             log.error("查询 Redis Slow Queries 失败: {}", e.getMessage());
         }
@@ -1484,100 +1630,96 @@ public class MiddlewareMonitorService {
                 return list;
             }
 
-            // 3. 对每条 trace 查询详情，提取 SQL span
-            int traceCount = 0;
-            int totalSpans = 0;
-            int sqlSpans = 0;
-            for (var traceItem : traceItems) {
-                if (traceCount >= 50) break; // 最多查 50 条 trace
-                String traceId = traceItem.getTraceID();
-                if (traceId == null || traceId.isEmpty()) continue;
+            // 3. 并行查询 trace 详情，提取 SQL span（信号量控制最多 3 并发）
+            int maxTraces = Math.min(traceItems.size(), 20);
+            var traceFutures = new java.util.concurrent.CompletableFuture[maxTraces];
+            for (int i = 0; i < maxTraces; i++) {
+                var traceItem = traceItems.get(i);
+                traceFutures[i] = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    String traceId = traceItem.getTraceID();
+                    if (traceId == null || traceId.isEmpty()) return Collections.<Map<String, Object>>emptyList();
 
-                try {
-                    var traceResp = armsClient.getTrace(traceId, fromMs, toMs);
-                    var spans = traceResp.getSpans();
-                    if (spans == null) continue;
-                    
-                    totalSpans += spans.size();
+                    try {
+                        EXTERNAL_CALL_SEM.acquire();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return Collections.<Map<String, Object>>emptyList();
+                    }
+                    try {
+                        var traceResp = armsClient.getTrace(traceId, fromMs, toMs);
+                        var spans = traceResp.getSpans();
+                        if (spans == null) return Collections.<Map<String, Object>>emptyList();
 
-                    // 4. 从 span 树中提取 SQL 类型的 span
-                    int spanIdx = 0;
-                    for (var span : spans) {
-                        // 输出前 10 个 span 的完整信息（调试用）
-                        if (spanIdx < 10 && traceCount == 0) {
+                        List<Map<String, Object>> results = new ArrayList<>();
+                        for (var span : spans) {
                             Integer rpcType = span.getRpcType();
+                            boolean isSql = false;
+                            String sql = null;
+
                             var tags = span.getTagEntryList();
-                            StringBuilder tagStr = new StringBuilder();
                             if (tags != null) {
                                 for (var tag : tags) {
-                                    tagStr.append(tag.getKey()).append("=").append(tag.getValue()).append(", ");
+                                    String key = tag.getKey();
+                                    String value = tag.getValue();
+
+                                    if ("db.system.name".equals(key) && value != null &&
+                                        (value.toLowerCase().contains("mysql") || value.toLowerCase().contains("postgresql") ||
+                                         value.toLowerCase().contains("oracle") || value.toLowerCase().contains("sql"))) {
+                                        isSql = true;
+                                    }
+                                    if ("db.statement".equals(key) || "db.query.text".equals(key)) {
+                                        sql = value;
+                                    }
+                                    if ("call.type".equals(key) && value != null &&
+                                        (value.toLowerCase().contains("sql") || value.toLowerCase().contains("jdbc"))) {
+                                        isSql = true;
+                                    }
                                 }
                             }
-                            log.info("Span[{}]: rpcType={}, operation={}, service={}, duration={}, tags=[{}]", 
-                                spanIdx, rpcType, span.getOperationName(), span.getServiceName(), 
-                                span.getDuration(), tagStr);
-                        }
-                        spanIdx++;
-                        
-                        // SQL 类型识别：检查多个标识
-                        Integer rpcType = span.getRpcType();
-                        boolean isSql = false;
-                        String sql = null;
-                        String dbType = null;
-                        
-                        var tags = span.getTagEntryList();
-                        if (tags != null) {
-                            for (var tag : tags) {
-                                String key = tag.getKey();
-                                String value = tag.getValue();
-                                
-                                // 识别 SQL 的多种方式
-                                if ("db.system.name".equals(key) && value != null && 
-                                    (value.toLowerCase().contains("mysql") || value.toLowerCase().contains("postgresql") || 
-                                     value.toLowerCase().contains("oracle") || value.toLowerCase().contains("sql"))) {
-                                    isSql = true;
-                                    dbType = value;
-                                }
-                                if ("db.statement".equals(key) || "db.query.text".equals(key)) {
-                                    sql = value;
-                                }
-                                if ("call.type".equals(key) && value != null && 
-                                    (value.toLowerCase().contains("sql") || value.toLowerCase().contains("jdbc"))) {
-                                    isSql = true;
-                                }
+
+                            if (rpcType != null && rpcType == 14) {
+                                isSql = true;
                             }
+
+                            if (!isSql) continue;
+
+                            String serviceName = span.getServiceName();
+                            long duration = span.getDuration() != null ? span.getDuration() : 0;
+                            String timestamp = span.getTimestamp() != null ? String.valueOf(span.getTimestamp()) : null;
+
+                            if (sql == null || sql.isEmpty()) continue;
+                            if (duration < 10) continue;
+
+                            Map<String, Object> item = new LinkedHashMap<>();
+                            item.put("instanceName", serviceName);
+                            item.put("sql", sql.length() > 500 ? sql.substring(0, 500) + "..." : sql);
+                            item.put("durationMs", (double) duration);
+                            item.put("timestamp", timestamp);
+                            results.add(item);
                         }
-                        
-                        // rpcType=14 也是 SQL
-                        if (rpcType != null && rpcType == 14) {
-                            isSql = true;
-                        }
-
-                        if (!isSql) continue;
-                        sqlSpans++;
-
-                        // 6. 提取耗时和时间戳
-                        String serviceName = span.getServiceName();
-                        long duration = span.getDuration() != null ? span.getDuration() : 0;
-                        String timestamp = span.getTimestamp() != null ? String.valueOf(span.getTimestamp()) : null;
-
-                        if (sql == null || sql.isEmpty()) continue;
-                        if (duration < 10) continue; // 过滤掉耗时 < 10ms 的 SQL
-
-                        Map<String, Object> item = new LinkedHashMap<>();
-                        item.put("instanceName", serviceName);
-                        item.put("sql", sql.length() > 500 ? sql.substring(0, 500) + "..." : sql);
-                        item.put("durationMs", (double) duration);
-                        item.put("timestamp", timestamp);
-                        list.add(item);
+                        return results;
+                    } catch (Exception e) {
+                        log.warn("查询 trace 详情失败: traceId={}, error={}", traceId, e.getMessage());
+                        return Collections.<Map<String, Object>>emptyList();
+                    } finally {
+                        EXTERNAL_CALL_SEM.release();
                     }
-                    traceCount++;
-                } catch (Exception e) {
-                    log.warn("查询 trace 详情失败: traceId={}, error={}", traceId, e.getMessage());
-                }
+                }, queryExecutor);
             }
-            
-            log.info("ARMS trace 统计: 查询 {} 条 trace, 共 {} 个 span, 其中 {} 个 SQL span", traceCount, totalSpans, sqlSpans);
+
+            java.util.concurrent.CompletableFuture.allOf(traceFutures).join();
+            int traceCount = 0;
+            for (var f : traceFutures) {
+                try {
+                    var results = (List<Map<String, Object>>) f.get();
+                    if (!results.isEmpty()) {
+                        list.addAll(results);
+                        traceCount++;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            log.info("MySQL Slow Queries: 从 ARMS 查询 {} 条 trace（已缓存）", traceCount);
 
             // 6. 按耗时降序排序
             list.sort((a, b) -> Double.compare(
@@ -1702,21 +1844,31 @@ public class MiddlewareMonitorService {
             String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT);
             String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT);
 
-            for (var inst : instances) {
-                String instanceId = (String) inst.get("instanceId");
-                String instanceName = (String) inst.get("instanceName");
+            var itemFutures = instances.stream()
+                .map(inst -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    String instanceId = (String) inst.get("instanceId");
+                    String instanceName = (String) inst.get("instanceName");
 
-                String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
-                double diskUsage = queryLatestMetric("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime);
+                    String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+                    double diskUsage = queryLatestMetricThrottled("acs_elasticsearch", "NodeDiskUtilization", dim, startTime, endTime);
 
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("indexName", instanceName);
-                item.put("description", "Elasticsearch 实例");
-                item.put("docCount", 0);
-                item.put("storageGB", diskUsage / 1024);
-                item.put("shardCount", 0);
-                item.put("replicaCount", 0);
-                list.add(item);
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("indexName", instanceName);
+                    item.put("description", "Elasticsearch 实例");
+                    item.put("docCount", 0);
+                    item.put("storageGB", diskUsage / 1024);
+                    item.put("shardCount", 0);
+                    item.put("replicaCount", 0);
+                    return item;
+                }, queryExecutor))
+                .toArray(java.util.concurrent.CompletableFuture[]::new);
+
+            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            for (var f : itemFutures) {
+                try {
+                    var item = f.get();
+                    if (item != null) list.add((Map<String, Object>) item);
+                } catch (Exception ignored) {}
             }
 
             list.sort((a, b) -> Double.compare(

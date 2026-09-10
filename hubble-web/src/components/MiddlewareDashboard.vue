@@ -89,19 +89,19 @@
           </el-tab-pane>
           <el-tab-pane label="慢查询 Top10" name="slowQueries">
             <el-alert v-if="redisSlowQueriesData.length === 0" type="info" :closable="false" show-icon style="margin-bottom: 12px">
-              <template #title>最近 24 小时无 Redis 慢查询日志</template>
-              慢查询数据从 SLS 日志中获取（应用级别）
+              <template #title>最近 1 小时无 Redis 慢调用</template>
+              慢查询数据从 ARMS 链路追踪中获取
             </el-alert>
             <el-table v-else :data="redisSlowQueriesData" stripe border size="small" style="width: 100%">
               <el-table-column label="#" width="50" prop="rank" align="center" />
               <el-table-column label="服务" width="180" show-overflow-tooltip prop="instanceName" />
               <el-table-column label="耗时" width="120" align="right">
-                <template #default="{ row }">{{ (num(row.durationMicros) / 1000).toFixed(1) }} ms</template>
+                <template #default="{ row }">{{ num(row.durationMs).toFixed(1) }} ms</template>
               </el-table-column>
-              <el-table-column label="Keys数" width="100" align="right">
-                <template #default="{ row }">{{ num(row.keysCount) }}</template>
+              <el-table-column label="命令" min-width="260" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.command || '-' }}</template>
               </el-table-column>
-              <el-table-column label="时间" min-width="180">
+              <el-table-column label="时间" width="180">
                 <template #default="{ row }">{{ formatTime(row.timestamp) }}</template>
               </el-table-column>
             </el-table>
