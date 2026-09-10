@@ -25,6 +25,7 @@ public class MiddlewareAlertService {
     private final AlertPushService alertPushService;
     private final MonitorProperties monitorProperties;
     private final MiddlewareMonitorService monitorService;
+    private final AlertThresholdService thresholdService;
 
     private List<MiddlewareAlertConfig> configCache = null;
     private long configCacheTime = 0;
@@ -109,12 +110,34 @@ public class MiddlewareAlertService {
                     boolean triggered = isTriggered(value, config);
                     if (!triggered) continue;
 
+                    // 昨天同时段同比双条件：涨幅 ≥ mw_yoy_surge_threshold 且 当前值 ≥ mw_yoy_abs_floor 才真正告警。
+                    // 昨天 value 不可得（数据源不支持/无数据）时跳过同比，保持原阈值判断，避免漏报。
+                    Double yesterday = resolveYesterdayValue(inst, metricName);
+                    Map<String, Object> yoyInfo = null;
+                    if (yesterday != null) {
+                        double surgeThreshold = thresholdService.getDouble("mw_yoy_surge_threshold", 300);
+                        double absFloor = thresholdService.getDouble("mw_yoy_abs_floor", 30);
+                        double surge = yesterday > 0 ? (value - yesterday) / yesterday * 100 : Double.MAX_VALUE;
+                        if (surge < surgeThreshold || value < absFloor) {
+                            log.info("同比过滤: {} {} {} 当前={} 昨天={} 涨幅={}（要求涨幅≥{}% 且当前值≥{}），不告警",
+                                    middlewareType, instKey, metricName, round2(value), round2(yesterday),
+                                    surge == Double.MAX_VALUE ? "∞" : round2(surge), surgeThreshold, absFloor);
+                            continue;
+                        }
+                        yoyInfo = new LinkedHashMap<>();
+                        yoyInfo.put("yesterdayValue", round2(yesterday));
+                        yoyInfo.put("surgePercent", surge == Double.MAX_VALUE ? "∞" : round2(surge));
+                    }
+
                     Map<String, Object> detail = new LinkedHashMap<>();
                     detail.put("metricName", metricName);
                     detail.put("currentValue", Math.round(value * 100.0) / 100.0);
                     detail.put("redThreshold", config.getRedThreshold());
                     detail.put("yellowThreshold", config.getYellowThreshold());
                     detail.put("compareType", config.getCompareType());
+                    if (yoyInfo != null) {
+                        detail.putAll(yoyInfo);
+                    }
 
                     boolean isRed = isRedLevel(value, config);
                     detail.put("level", isRed ? "red" : "yellow");
@@ -162,6 +185,10 @@ public class MiddlewareAlertService {
             if ("red".equals(d.get("level"))) {
                 md.append(String.format("> %s: **%s**（阈值 %s）\n\n",
                         d.get("metricName"), d.get("currentValue"), d.get("redThreshold")));
+                if (d.containsKey("yesterdayValue")) {
+                    md.append(String.format("> 同比：昨天同时段 **%s**，涨幅 **%s%%**\n\n",
+                            d.get("yesterdayValue"), d.get("surgePercent")));
+                }
             }
         }
         md.append(String.format("> 时间：%s\n\n", timeStr));
@@ -262,9 +289,49 @@ public class MiddlewareAlertService {
         };
     }
 
-    private String getString(Map<String, Object> map, String key) {
+    private String getString(Map<?, ?> map, String key) {
         Object v = map.get(key);
         return v != null ? v.toString() : null;
+    }
+
+    /**
+     * 解析指标"昨天同一时段"的值。
+     * 优先读预采集键 _yesterday_&lt;metric&gt;（rocketmq/SLS、跨指标查询缓存），
+     * 否则按 _yoy 元数据按需查询（结果回填，5 分钟实例缓存期内同指标只查一次）。
+     * 返回 null 表示数据源不支持或无昨天数据，调用方跳过同比判断。
+     */
+    private Double resolveYesterdayValue(Map<String, Object> inst, String metricName) {
+        Object pre = inst.get("_yesterday_" + metricName);
+        if (pre instanceof Number n) return n.doubleValue();
+        if (pre != null) {
+            try { return Double.parseDouble(pre.toString()); } catch (NumberFormatException ignored) {}
+        }
+
+        Object metaObj = inst.get("_yoy");
+        if (!(metaObj instanceof Map<?, ?> yoy)) return null;
+        Object specObj = yoy.get(metricName);
+        if (!(specObj instanceof Map<?, ?> spec)) return null;
+        Object specStr = spec.get("spec");
+        if (specStr == null || specStr.toString().isEmpty()) return null;
+        try {
+            Double result;
+            if ("gr".equals(spec.get("src"))) {
+                result = monitorService.queryYesterdayGrafanaPeak(getString(spec, "ds"), specStr.toString());
+            } else {
+                result = monitorService.queryYesterdayCloudMonitorPeak(getString(spec, "ns"), specStr.toString(), getString(spec, "dim"));
+            }
+            if (result != null) {
+                inst.put("_yesterday_" + metricName, result);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("查询昨天同时段值失败: metric={}, err={}", metricName, e.getMessage());
+            return null;
+        }
+    }
+
+    private double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     /**

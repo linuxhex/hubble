@@ -160,6 +160,12 @@ public class MiddlewareMonitorService {
 
                     item.put("memoryUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime, true));
                     item.put("qps", queryLatestMetricThrottled("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
+
+                    Map<String, Object> yoy = new LinkedHashMap<>();
+                    yoy.put("cpuUsage", yoyCm("acs_kvstore", dim, "CpuUsage|ShardingCpuUsage"));
+                    yoy.put("memoryUsage", yoyCm("acs_kvstore", dim, "MemoryUsage|ShardingMemoryUsage"));
+                    yoy.put("connections", yoyCm("acs_kvstore", dim, "ConnectionUsage|ShardingConnectionCount|ShardingUsedConnection|UsedConnection"));
+                    item.put("_yoy", yoy);
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -250,6 +256,12 @@ public class MiddlewareMonitorService {
                     item.put("iopsPeak", iops[1]);
                     item.put("diskUsage", disk[0]);
                     item.put("diskUsagePeak", disk[1]);
+
+                    Map<String, Object> yoy = new LinkedHashMap<>();
+                    yoy.put("cpuUsage", yoyCm("acs_rds_dashboard", dim, "CpuUsage"));
+                    yoy.put("connections", yoyCm("acs_rds_dashboard", dim, "ConnectionUsage"));
+                    yoy.put("diskUsage", yoyCm("acs_rds_dashboard", dim, "DiskUsage"));
+                    item.put("_yoy", yoy);
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -292,6 +304,12 @@ public class MiddlewareMonitorService {
                     item.put("iopsPeak", iops[1]);
                     item.put("diskUsage", disk[0]);
                     item.put("diskUsagePeak", disk[1]);
+
+                    Map<String, Object> yoy = new LinkedHashMap<>();
+                    yoy.put("cpuUsage", yoyCm("acs_polardb", dim, "cluster_cpu_utilization"));
+                    yoy.put("connections", yoyCm("acs_polardb", dim, "cluster_connection_utilization"));
+                    yoy.put("diskUsage", yoyCm("acs_polardb", dim, "cluster_disk_utilization"));
+                    item.put("_yoy", yoy);
                     return item;
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -447,6 +465,9 @@ public class MiddlewareMonitorService {
             long consumeCount = slsQueryClient.countLogstore(logstore, "收到*消息*topic", fromSec, nowSec);
             // 统计消息堆积/异常
             long accumulationCount = slsQueryClient.countLogstore(logstore, "消息堆积 OR 消费失败 OR consumeFailed", fromSec, nowSec);
+            // 昨天同一时段堆积数（15 分钟窗口同口径，同比告警用）
+            long yAccumulation = slsQueryClient.countLogstore(logstore, "消息堆积 OR 消费失败 OR consumeFailed",
+                    fromSec - 24 * 3600, nowSec - 24 * 3600);
 
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("instanceId", "rocketmq-prod");
@@ -459,11 +480,12 @@ public class MiddlewareMonitorService {
             item.put("consumeTps", consumeCount / 900.0);
             item.put("alertLevel", accumulationCount > 10000 ? "red" : accumulationCount > 1000 ? "yellow" : "normal");
             item.put("alertDetails", List.of());
+            item.put("_yesterday_messageAccumulation", (double) yAccumulation);
             list.add(item);
 
             rocketmqInstancesCache = list;
             rocketmqInstancesCacheTime = now;
-            log.info("RocketMQ 监控(SLS): 发送={}, 消费={}, 堆积={}", sendCount, consumeCount, accumulationCount);
+            log.info("RocketMQ 监控(SLS): 发送={}, 消费={}, 堆积={}, 昨天同时段堆积={}", sendCount, consumeCount, accumulationCount, yAccumulation);
         } catch (Exception e) {
             log.error("查询 RocketMQ 监控失败: {}", e.getMessage());
         }
@@ -513,6 +535,8 @@ public class MiddlewareMonitorService {
                     item.put("lag", vals[0]);
                     item.put("produceTps", vals[1]);
                     item.put("consumeTps", vals[2]);
+                    item.put("_yoy", Map.of("lag", yoyGr(aliyunDs,
+                            "sum(AliyunKafka_message_accumulation{instanceId=\"" + instanceId + "\"})")));
                     list.add(item);
                 }
                 log.info("Kafka 实例监控(Prometheus): {} 个", list.size());
@@ -544,6 +568,7 @@ public class MiddlewareMonitorService {
                     item.put("lag", queryLatestMetricThrottled("acs_kafka", "Lag", dim, startTime, endTime));
                     item.put("produceTps", queryLatestMetricThrottled("acs_kafka", "ProduceTps", dim, startTime, endTime));
                     item.put("consumeTps", queryLatestMetricThrottled("acs_kafka", "ConsumeTps", dim, startTime, endTime));
+                    item.put("_yoy", Map.of("lag", yoyCm("acs_kafka", dim, "Lag")));
                     list.add(item);
                 }
             }
@@ -631,6 +656,12 @@ public class MiddlewareMonitorService {
                         item.put("getRtP99", queryLatestMetricThrottled("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
                         item.put("compactionQueueSize", queryLatestMetricThrottled("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
                         item.put("handlerQueueSize", queryLatestMetricThrottled("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
+
+                        // cpuUsage 来自 Prometheus（AliyunLindorm_cpu_user），同比走 Grafana；diskUsage 同比走 CloudMonitor 同源
+                        Map<String, Object> yoy = new LinkedHashMap<>();
+                        yoy.put("cpuUsage", yoyGr(aliyunDs, "avg(AliyunLindorm_cpu_user{instanceId=\"" + instanceId + "\"})"));
+                        yoy.put("diskUsage", yoyCm("acs_lindorm", dim, "hot_storage_used_percent"));
+                        item.put("_yoy", yoy);
                         return item;
                     }, queryExecutor))
                     .toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -681,6 +712,11 @@ public class MiddlewareMonitorService {
                         item.put("getRtP99", queryLatestMetricThrottled("acs_lindorm", "get_rt_p99", dim, startTime, endTime, true));
                         item.put("compactionQueueSize", queryLatestMetricThrottled("acs_lindorm", "compaction_queue_size", dim, startTime, endTime));
                         item.put("handlerQueueSize", queryLatestMetricThrottled("acs_lindorm", "handler_queue_size", dim, startTime, endTime));
+
+                        Map<String, Object> yoy = new LinkedHashMap<>();
+                        yoy.put("cpuUsage", yoyCm("acs_lindorm", dim, "CpuUsage"));
+                        yoy.put("diskUsage", yoyCm("acs_lindorm", dim, "hot_storage_used_percent"));
+                        item.put("_yoy", yoy);
                         return item;
                     }, queryExecutor))
                     .toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -743,6 +779,12 @@ public class MiddlewareMonitorService {
                         jvmMemory = queryLatestMetricThrottled("acs_elasticsearch", "NodeJVMUtilization", dim, startTime, endTime, true);
                     }
                     item.put("jvmMemory", jvmMemory);
+
+                    Map<String, Object> yoy = new LinkedHashMap<>();
+                    yoy.put("cpuUsage", yoyCm("acs_elasticsearch", dim, "NodeCPUUtilization"));
+                    yoy.put("diskUsage", yoyCm("acs_elasticsearch", dim, "NodeDiskUtilization"));
+                    yoy.put("jvmMemory", yoyCm("acs_elasticsearch", dim, "NodeJVMMemoryUsedPercent|NodeJVMHeapUtilization|NodeJVMUtilization"));
+                    item.put("_yoy", yoy);
                     return item;
                 }, queryExecutor))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
@@ -977,6 +1019,89 @@ public class MiddlewareMonitorService {
         return val;
     }
 
+    // ===== 昨天同时段同比（告警"涨幅+绝对值"双条件判断用） =====
+
+    /**
+     * 查询昨天同一时刻 5 分钟窗口的指标峰值（与当前 Peak 同口径：窗口内逐点取最大）。
+     * spec 按 "|" 分隔依次尝试（Redis 集群版备选指标），取第一个有数据的结果；全部无数据返回 null。
+     */
+    public Double queryYesterdayCloudMonitorPeak(String namespace, String spec, String dimensions) {
+        try {
+            String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusDays(1).format(FMT);
+            String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusDays(1).minusMinutes(5).format(FMT);
+            for (String metric : spec.split("\\|")) {
+                double max = queryWindowMaxMetricThrottled(namespace, metric.trim(), dimensions, startTime, endTime);
+                if (max >= 0) return max;
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("查询昨天同时段峰值失败: ns={}, spec={}, err={}", namespace, spec, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 查询昨天同一时刻 5 分钟窗口的 Grafana/Prometheus 指标峰值，无数据返回 null。
+     */
+    public Double queryYesterdayGrafanaPeak(String dsUid, String promql) {
+        try {
+            long to = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
+            long from = to - 5 * 60 * 1000L;
+            var rows = grafanaClient.queryRange(promql, String.valueOf(from), String.valueOf(to), dsUid);
+            double max = -1;
+            for (var row : rows) {
+                double v = toDouble(row.get("value"));
+                if (v > max) max = v;
+            }
+            return max >= 0 ? max : null;
+        } catch (Exception e) {
+            log.warn("查询昨天同时段峰值失败(Grafana): promql={}, err={}", promql, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 窗口最大值（逐点取最大，与 queryLatestAndPeakMetricThrottled 的峰值口径一致），无数据返回 -1。
+     */
+    private double queryWindowMaxMetricThrottled(String namespace, String metric, String dimensions,
+                                                 String startTime, String endTime) {
+        try {
+            EXTERNAL_CALL_SEM.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return -1;
+        }
+        try {
+            List<double[]> points = cloudMonitorClient.queryMetric(namespace, metric, dimensions, 60, startTime, endTime);
+            double max = -1;
+            for (double[] p : points) {
+                if (p[1] > max) max = p[1];
+            }
+            return max;
+        } finally {
+            EXTERNAL_CALL_SEM.release();
+        }
+    }
+
+    /** 同比元数据：CloudMonitor 数据源 */
+    private Map<String, Object> yoyCm(String ns, String dim, String spec) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("src", "cm");
+        m.put("ns", ns);
+        m.put("dim", dim);
+        m.put("spec", spec);
+        return m;
+    }
+
+    /** 同比元数据：Grafana/Prometheus 数据源 */
+    private Map<String, Object> yoyGr(String ds, String promql) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("src", "gr");
+        m.put("ds", ds);
+        m.put("spec", promql);
+        return m;
+    }
+
     /**
      * 从 Grafana queryInstant 结果中提取单个数值（取第一条结果的 value）
      */
@@ -1041,6 +1166,9 @@ public class MiddlewareMonitorService {
                 item.put("memoryUsage", vals[1]);
                 item.put("iops", vals[2]);
                 item.put("activeSessions", vals[3]);
+                item.put("_yoy", Map.of(
+                        "cpuUsage", yoyGr(ds, "avg(AliyunRds_CpuUsage{desc=\"" + entry.getKey() + "\"})"),
+                        "memoryUsage", yoyGr(ds, "avg(AliyunRds_MemoryUsage{desc=\"" + entry.getKey() + "\"})")));
                 list.add(item);
             }
 
@@ -1069,6 +1197,9 @@ public class MiddlewareMonitorService {
                 item.put("memoryUsage", vals[1]);
                 item.put("iops", vals[2]);
                 item.put("activeSessions", vals[3]);
+                item.put("_yoy", Map.of(
+                        "cpuUsage", yoyGr(ds, "avg(AliyunPolardb_cluster_cpu_utilization{desc=\"" + entry.getKey() + "\"})"),
+                        "memoryUsage", yoyGr(ds, "avg(AliyunPolardb_cluster_memory_utilization{desc=\"" + entry.getKey() + "\"})")));
                 list.add(item);
             }
 

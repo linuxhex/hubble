@@ -59,5 +59,7 @@ INSERT INTO alert_threshold_config (config_key, config_value, description) VALUE
 ('dynamic_yellow_floor', '5', '7日动态黄盘绝对下限'),
 ('alert_cooldown_hours', '24', '告警防抖冷却时间(小时)，同一告警在此时间内不重复'),
 ('consecutive_red_count', '3', '连续红盘次数达到此值才触发钉钉告警'),
-('min_request_count', '10', '劣化/暴涨统计最小请求数，低于此值不参与排名')
+('min_request_count', '10', '劣化/暴涨统计最小请求数，低于此值不参与排名'),
+('mw_yoy_surge_threshold', '300', '中间件告警同比涨幅阈值(%)，当前值相对昨天同一5分钟窗口'),
+('mw_yoy_abs_floor', '30', '中间件告警同比绝对值下限，当前值低于此值不告警')
 ON DUPLICATE KEY UPDATE config_value = config_value;
