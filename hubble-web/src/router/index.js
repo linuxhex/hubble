@@ -19,6 +19,7 @@ import ApiDegradation from '../components/ApiDegradation.vue'
 import TrafficSurgeDashboard from '../components/TrafficSurgeDashboard.vue'
 import MiddlewareDashboard from '../components/MiddlewareDashboard.vue'
 import BizAnalysisDashboard from '../components/BizAnalysisDashboard.vue'
+import ServiceLoadDashboard from '../components/ServiceLoadDashboard.vue'
 
 const PUBLIC_PATHS = ['/login', '/unauthorized']
 
@@ -120,6 +121,11 @@ const routes = [
     path: '/biz-analysis',
     name: 'BizAnalysis',
     component: BizAnalysisDashboard
+  },
+  {
+    path: '/service-load',
+    name: 'ServiceLoadDashboard',
+    component: ServiceLoadDashboard
   }
 ]
 

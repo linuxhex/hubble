@@ -125,7 +125,23 @@ public class ArmsClient {
             req.setFilterss(Arrays.asList(filter));
         }
         
-        return client.getAcsResponse(req);
+        log.info("ArmsClient.queryMetrics: metric={}, fromMs={}, toMs={}, pid={}, intervalInSec={}",
+            metric, fromMs, toMs, pid, intervalInSec);
+
+        QueryMetricByPageResponse response = client.getAcsResponse(req);
+
+        if (response != null && response.getData() != null && response.getData().getItems() != null) {
+            int size = response.getData().getItems().size();
+            log.info("ArmsClient.queryMetrics 返回 {} 条数据", size);
+            if (size == 0) {
+                log.warn("ArmsClient.queryMetrics 返回空items, response.getData()={}", response.getData());
+            }
+        } else {
+            log.warn("ArmsClient.queryMetrics 返回空数据, response={}, data={}",
+                response, response != null ? response.getData() : "null");
+        }
+
+        return response;
     }
     
     /**

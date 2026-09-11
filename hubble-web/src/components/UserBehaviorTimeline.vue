@@ -40,6 +40,15 @@
                   {{ item.trace }}
                 </span>
                 <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click.stop="toggleTraceExpand(index, item.trace, item.dateTime)"
+                  class="expand-trace-btn"
+                >
+                  {{ expandedTraces[item.trace] ? '收起链路' : '展开链路' }}
+                </el-button>
+                <el-button
                   link
                   type="primary"
                   size="small"
@@ -68,16 +77,77 @@
             </el-descriptions-item>
           </el-descriptions>
         </div>
+        
+        <!-- 链路展开区域 -->
+        <div v-if="item.trace && expandedTraces[item.trace]" class="trace-expand-area">
+          <div class="trace-chain-container">
+            <div v-if="traceData[item.trace]?.loading" class="trace-loading">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>加载链路数据...</span>
+            </div>
+            <div v-else-if="traceData[item.trace]?.nodes?.length > 0" class="trace-chain">
+              <div class="chain-flow">
+                <div
+                  v-for="(node, index) in traceData[item.trace].nodes"
+                  :key="index"
+                  class="chain-node-wrapper"
+                >
+                  <div
+                    class="chain-node"
+                    :class="{ 'node-error': node.status === 'error', 'node-active': traceData[item.trace]?.selectedNode === index }"
+                    @click="selectTraceNode(item.trace, index)"
+                  >
+                    <div class="node-header">
+                      <span class="node-service">{{ node.serviceName }}</span>
+                      <span class="node-status" :class="node.status">{{ node.status === 'error' ? '异常' : '正常' }}</span>
+                    </div>
+                    <div class="node-path">{{ node.apiPath || '--' }}</div>
+                    <div class="node-meta">
+                      <span class="node-time">{{ node.formattedTime }}</span>
+                      <span class="node-logs">{{ node.logCount }} 条日志</span>
+                    </div>
+                  </div>
+                  <div v-if="index < traceData[item.trace].nodes.length - 1" class="chain-arrow">
+                    <div class="arrow-line"></div>
+                    <div class="arrow-duration">{{ node.duration }}ms</div>
+                    <div class="arrow-head">▶</div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="traceData[item.trace]?.selectedNode !== null && traceData[item.trace]?.selectedNode !== undefined" class="node-detail">
+                <div class="detail-header">
+                  <span class="detail-title">{{ traceData[item.trace].nodes[traceData[item.trace].selectedNode].serviceName }} - 日志详情</span>
+                  <el-button size="small" @click="traceData[item.trace].selectedNode = null">关闭</el-button>
+                </div>
+                <div class="detail-logs">
+                  <div v-for="(log, lIndex) in traceData[item.trace].nodes[traceData[item.trace].selectedNode].logs" :key="lIndex" class="log-item">
+                    <div class="log-header">
+                      <el-tag :type="log.level === 'ERROR' ? 'danger' : log.level === 'WARN' ? 'warning' : 'info'" size="small">
+                        {{ log.level }}
+                      </el-tag>
+                      <span class="log-time">{{ log.formattedTime }}</span>
+                    </div>
+                    <div class="log-message">{{ log.message }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="trace-empty">
+              <span>该链路暂无数据</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowDown, ArrowUp, Link } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Link, Loading } from '@element-plus/icons-vue'
 import { generateSlsLink } from '@/utils/sls'
+import { getTraceChain } from '@/api/trace-chain.js'
 
 const router = useRouter()
 
@@ -93,9 +163,44 @@ const props = defineProps({
 })
 
 const expandedItems = ref({})
+const expandedTraces = reactive({})
+const traceData = reactive({})
 
 const toggleExpand = (index) => {
   expandedItems.value[index] = !expandedItems.value[index]
+}
+
+const toggleTraceExpand = async (index, traceId, timestamp) => {
+  if (!traceId) return
+  
+  if (expandedTraces[traceId]) {
+    expandedTraces[traceId] = false
+    return
+  }
+
+  expandedTraces[traceId] = true
+
+  if (!traceData[traceId]) {
+    traceData[traceId] = { loading: true, nodes: [], selectedNode: null }
+    try {
+      const res = await getTraceChain(traceId, '24h')
+      const data = res?.data || res
+      traceData[traceId] = {
+        loading: false,
+        nodes: data.nodes || [],
+        selectedNode: null
+      }
+    } catch (e) {
+      console.error('获取链路数据失败:', e)
+      traceData[traceId] = { loading: false, nodes: [], selectedNode: null }
+    }
+  }
+}
+
+const selectTraceNode = (traceId, index) => {
+  if (traceData[traceId]) {
+    traceData[traceId].selectedNode = traceData[traceId].selectedNode === index ? null : index
+  }
 }
 
 // 处理追踪ID点击，跳转到内部链路详情页
@@ -151,6 +256,8 @@ const formatResponseData = (responseData) => {
 // 当items变化时，重置展开状态
 watch(() => props.items, () => {
   expandedItems.value = {}
+  Object.keys(expandedTraces).forEach(key => delete expandedTraces[key])
+  Object.keys(traceData).forEach(key => delete traceData[key])
 }, { deep: true })
 </script>
 
@@ -312,6 +419,215 @@ watch(() => props.items, () => {
   padding: 2px 6px;
   height: auto;
   line-height: 1.4;
+}
+
+.content-details .expand-trace-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.trace-expand-area {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e4e7ed;
+}
+
+.trace-chain-container {
+  background: #f9f9f9;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 16px;
+}
+
+.trace-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.trace-empty {
+  text-align: center;
+  padding: 20px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.trace-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chain-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.chain-node-wrapper {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chain-node {
+  background: white;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 10px 12px;
+  min-width: 140px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chain-node:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15);
+}
+
+.chain-node.node-active {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.chain-node.node-error {
+  border-color: #f56c6c;
+  background: #fef0f0;
+}
+
+.chain-node .node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.chain-node .node-service {
+  font-weight: 500;
+  font-size: 12px;
+  color: #303133;
+}
+
+.chain-node .node-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.chain-node .node-status.normal {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.chain-node .node-status.error {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.chain-node .node-path {
+  font-size: 11px;
+  color: #909399;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.chain-node .node-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #606266;
+}
+
+.chain-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #909399;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.chain-arrow .arrow-line {
+  width: 20px;
+  height: 1px;
+  background: #c0c4cc;
+}
+
+.chain-arrow .arrow-duration {
+  padding: 0 4px;
+  color: #606266;
+}
+
+.chain-arrow .arrow-head {
+  color: #c0c4cc;
+  font-size: 10px;
+}
+
+.node-detail {
+  background: white;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.node-detail .detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.node-detail .detail-title {
+  font-weight: 500;
+  font-size: 13px;
+  color: #303133;
+}
+
+.node-detail .detail-logs {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.node-detail .log-item {
+  padding: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.node-detail .log-item:last-child {
+  border-bottom: none;
+}
+
+.node-detail .log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.node-detail .log-time {
+  font-size: 11px;
+  color: #909399;
+}
+
+.node-detail .log-message {
+  font-size: 12px;
+  color: #606266;
+  word-break: break-all;
+  line-height: 1.5;
 }
 </style>
 

@@ -67,6 +67,9 @@ public class AuthFilter extends OncePerRequestFilter {
             // 经营分析接口（无需用户认证）
             "/biz-analysis/",
 
+            // 服务负载接口（无需用户认证）
+            "/service-load/",
+
             // AI 对话 WebSocket（握手阶段放行，onOpen 内校验 JWT）
             "/ws/ai/chat"
     };

@@ -622,6 +622,8 @@ const metricClass = (val) => {
 }
 
 const alertMetricClass = (row, metric) => {
+  const val = num(row[metric])
+  if (metric === 'memoryUsage' && val >= 90) return 'metric-critical'
   if (row.alertLevel === 'red') {
     const details = row.alertDetails || []
     if (details.some(d => d.metricName === metric && d.level === 'red')) return 'metric-critical'

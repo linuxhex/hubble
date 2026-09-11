@@ -112,6 +112,10 @@ onUnmounted(() => {
             <el-icon><Box /></el-icon>
             <span>中间件</span>
           </el-menu-item>
+          <el-menu-item index="/service-load">
+            <el-icon><Monitor /></el-icon>
+            <span>服务负载</span>
+          </el-menu-item>
           <el-menu-item index="/gateway/trace">
             <el-icon><Connection /></el-icon>
             <span>链路详情</span>
