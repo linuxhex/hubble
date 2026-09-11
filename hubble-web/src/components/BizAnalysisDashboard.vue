@@ -498,7 +498,13 @@ const renderHourlyChargingCompChart = () => {
       if (h.alert) s += '<span style="color:#F56C6C;font-weight:bold">⚠ 差异≥10000</span>'
       return s
     }},
-    legend: { data: ['今日充电中', '昨日充电中'], top: 0 },
+    legend: {
+      data: [
+        { name: '今日充电中', itemStyle: { color: '#67C23A' } },
+        { name: '昨日充电中', itemStyle: { color: '#C0C4CC' } }
+      ],
+      top: 0
+    },
     grid: { top: 40, bottom: 30, left: 50, right: 20 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', name: '充电中订单数' },
