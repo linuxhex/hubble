@@ -3,7 +3,6 @@ package com.ykc.hubble.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ykc.hubble.config.BizAnalysisProperties;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -16,12 +15,20 @@ import java.util.*;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class DorisQueryClient {
 
     private final BizAnalysisProperties properties;
-    private final RestTemplate restTemplate;
+    private final RestTemplate dorisRestTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final int MAX_RETRIES = 3;
+    private static final long[] BACKOFF_MS = {2000, 4000, 8000};
+
+    public DorisQueryClient(BizAnalysisProperties properties,
+                            @org.springframework.beans.factory.annotation.Qualifier("dorisRestTemplate") RestTemplate dorisRestTemplate) {
+        this.properties = properties;
+        this.dorisRestTemplate = dorisRestTemplate;
+    }
 
     public List<Map<String, Object>> query(String sql) {
         if (sql == null || sql.isBlank()) {
@@ -35,22 +42,47 @@ public class DorisQueryClient {
             return List.of();
         }
 
-        int maxRetries = 3;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        String sqlPreview = trimmed.substring(0, Math.min(80, trimmed.length()));
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 return doQuery(trimmed);
             } catch (Exception e) {
-                if (attempt < maxRetries) {
-                    log.warn("Doris 查询失败(第{}次), 2s后重试, SQL: {}, 错误: {}",
-                            attempt, trimmed.substring(0, Math.min(80, trimmed.length())), e.getMessage());
-                    try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                if (!isRetryable(e)) {
+                    log.error("Doris 查询失败(不可重试), SQL: {}, 错误: {}", sqlPreview, e.getMessage());
+                    return List.of();
+                }
+                if (attempt < MAX_RETRIES) {
+                    long delay = BACKOFF_MS[attempt - 1];
+                    log.warn("Doris 查询失败(第{}/{}次), {}ms后重试, SQL: {}, 错误: {}",
+                            attempt, MAX_RETRIES, delay, sqlPreview, e.getMessage());
+                    try { Thread.sleep(delay); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 } else {
                     log.error("Doris 查询失败(已重试{}次), SQL: {}, 错误: {}",
-                            maxRetries, trimmed.substring(0, Math.min(100, trimmed.length())), e.getMessage());
+                            MAX_RETRIES, sqlPreview, e.getMessage());
                 }
             }
         }
         return List.of();
+    }
+
+    private boolean isRetryable(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        return msg.contains("timed out") || msg.contains("Connect timed out")
+            || msg.contains("Connection reset") || msg.contains("Connection refused")
+            || msg.contains("Server disconnected") || msg.contains("Unexpected end of file")
+            || msg.contains("I/O error") || msg.contains("read timed out")
+            || msg.contains("Doris 瞬时错误")
+            || e instanceof org.springframework.web.client.ResourceAccessException;
+    }
+
+    private boolean isRetryableErrorMsg(String errorMsg) {
+        if (errorMsg == null) return false;
+        return errorMsg.contains("Server disconnected")
+            || errorMsg.contains("Connection reset")
+            || errorMsg.contains("timed out")
+            || errorMsg.contains("Connection refused");
     }
 
     private List<Map<String, Object>> doQuery(String trimmed) {
@@ -78,7 +110,7 @@ public class DorisQueryClient {
         }
 
         org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(payload, headers);
-        var response = restTemplate.postForObject(url, entity, String.class);
+        var response = dorisRestTemplate.postForObject(url, entity, String.class);
         if (response == null) {
             log.warn("Doris query-server 返回空");
             return List.of();
@@ -110,6 +142,9 @@ public class DorisQueryClient {
             int errorCode = inner.path("error_code").asInt(0);
             if (errorCode != 0) {
                 String errorMsg = inner.path("error_msg").asText("unknown");
+                if (isRetryableErrorMsg(errorMsg)) {
+                    throw new RuntimeException("Doris 瞬时错误: " + errorCode + " - " + errorMsg);
+                }
                 log.warn("Doris 查询返回错误, SQL: {}, error_code: {}, error_msg: {}",
                     sql.substring(0, Math.min(100, sql.length())), errorCode, errorMsg);
                 return List.of();

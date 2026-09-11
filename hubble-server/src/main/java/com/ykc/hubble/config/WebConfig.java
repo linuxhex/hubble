@@ -89,5 +89,18 @@ public class WebConfig implements WebMvcConfigurer {
                 .setDefaultCharset(java.nio.charset.StandardCharsets.UTF_8));
         return rt;
     }
+
+    @Bean("dorisRestTemplate")
+    public RestTemplate dorisRestTemplate() {
+        var factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(15_000);
+        factory.setReadTimeout(90_000);
+        RestTemplate rt = new org.springframework.web.client.RestTemplate(factory);
+        rt.getMessageConverters().stream()
+            .filter(c -> c instanceof org.springframework.http.converter.StringHttpMessageConverter)
+            .forEach(c -> ((org.springframework.http.converter.StringHttpMessageConverter) c)
+                .setDefaultCharset(java.nio.charset.StandardCharsets.UTF_8));
+        return rt;
+    }
 }
 
