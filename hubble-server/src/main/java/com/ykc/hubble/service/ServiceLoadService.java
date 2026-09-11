@@ -9,9 +9,11 @@ import com.ykc.hubble.entity.ServiceLoadDaily;
 import com.ykc.hubble.mapper.ServiceLoadDailyMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -31,27 +33,38 @@ public class ServiceLoadService {
     private final MonitorProperties monitorProperties;
     private final ServiceLoadDailyMapper serviceLoadDailyMapper;
 
+    @Value("${service-load.app-map:}")
+    private String appMapStr;
+
+    @Value("${service-load.fallback-services:}")
+    private String fallbackServicesStr;
+
+    private Map<String, String> promAppBySls = Map.of();
+    private List<String> fallbackServices = List.of();
+
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
-    private static final Map<String, String> SLS_TO_PROM_APP = Map.ofEntries(
-            Map.entry("order-server", "OtsOrderServer"),
-            Map.entry("base-server", "CTP-BASE-SERVER"),
-            Map.entry("order-foundation", "order-foundation"),
-            Map.entry("zdl-ploy-server", "ZdlPloyServer"),
-            Map.entry("guan-zhong", "guan-zhong"),
-            Map.entry("price-center-serve", "priceCenterServer"),
-            Map.entry("external-server", "ExternalServer"),
-            Map.entry("charge-business", "CHARGEBUSINESSSERVER"),
-            Map.entry("activity-server", "activityServer"),
-            Map.entry("dmp-query-server", "dmpqueryserver"),
-            Map.entry("foundation", "foundation"),
-            Map.entry("flow-charge", "FlowSideServer"),
-            Map.entry("alarm-server", "alarmserver"),
-            Map.entry("hangu", "hangu"),
-            Map.entry("poly-center-mos", "poly-center-mos"),
-            Map.entry("statistics-poly-server", "PolyStatisticsServer"),
-            Map.entry("finance-server", "financeServer")
-    );
+    @PostConstruct
+    public void init() {
+        // 解析 SLS容器名 → Prometheus application 映射
+        Map<String, String> map = new HashMap<>();
+        if (appMapStr != null && !appMapStr.isBlank()) {
+            for (String entry : appMapStr.split(",")) {
+                String[] kv = entry.trim().split(":");
+                if (kv.length == 2) map.put(kv[0].trim(), kv[1].trim());
+            }
+        }
+        promAppBySls = Collections.unmodifiableMap(map);
+
+        // 解析备用服务列表
+        if (fallbackServicesStr != null && !fallbackServicesStr.isBlank()) {
+            fallbackServices = Arrays.stream(fallbackServicesStr.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toList();
+        } else {
+            fallbackServices = List.of();
+        }
+        log.info("服务负载配置加载完成: {} 个映射, {} 个备用服务", promAppBySls.size(), fallbackServices.size());
+    }
 
     public List<ServiceLoadDaily> queryByAppNameAndDateRange(String appName, LocalDate startDate) {
         return serviceLoadDailyMapper.selectByAppNameAndDateRange(appName, startDate);
@@ -297,11 +310,7 @@ public class ServiceLoadService {
         }
 
         log.info("SLS服务发现失败且DB为空，使用备用服务列表");
-        return List.of("order-server", "base-server", "charge-server", "order-foundation",
-                "zdl-ploy-server", "guan-zhong", "price-center-serve", "external-server",
-                "charge-business", "activity-server", "dmp-query-server", "foundation",
-                "flow-charge", "alarm-server", "hangu", "poly-center-mos",
-                "statistics-poly-server", "finance-server");
+        return new ArrayList<>(fallbackServices);
     }
 
     private PeakResult queryPeakQps(String logstore, String service,
@@ -448,7 +457,7 @@ public class ServiceLoadService {
                 }
             }
 
-            for (Map.Entry<String, String> entry : SLS_TO_PROM_APP.entrySet()) {
+            for (Map.Entry<String, String> entry : promAppBySls.entrySet()) {
                 String slsName = entry.getKey();
                 String promApp = entry.getValue();
                 List<Double> cpuVals = cpuByApp.get(promApp);
@@ -466,7 +475,7 @@ public class ServiceLoadService {
                     result.put(slsName, r);
                 }
             }
-            log.info("Grafana CPU/内存采集完成: {}/{} 个服务有数据", result.size(), SLS_TO_PROM_APP.size());
+            log.info("Grafana CPU/内存采集完成: {}/{} 个服务有数据", result.size(), promAppBySls.size());
         } catch (Exception e) {
             log.warn("Grafana CPU/内存查询失败: {}", e.getMessage());
         }

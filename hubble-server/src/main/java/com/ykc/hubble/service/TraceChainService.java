@@ -6,8 +6,10 @@ import com.ykc.hubble.config.SlsConfig;
 import com.ykc.hubble.entity.LogEntry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -23,6 +25,24 @@ public class TraceChainService {
     private final MonitorProperties monitorProperties;
     private final SlsConfig slsConfig;
     private final PageDataCacheService pageDataCacheService;
+
+    @Value("${trace.gateway-container:}")
+    private String gatewayContainer;
+
+    @Value("${trace.fallback-services:}")
+    private String fallbackServicesStr;
+
+    private String[] fallbackServices = new String[0];
+
+    @PostConstruct
+    public void init() {
+        if (fallbackServicesStr != null && !fallbackServicesStr.isBlank()) {
+            fallbackServices = Arrays.stream(fallbackServicesStr.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toArray(String[]::new);
+        }
+        log.info("链路追踪配置加载完成: gatewayContainer={}, {} 个备用服务",
+                gatewayContainer, fallbackServices.length);
+    }
 
     public List<Map<String, Object>> searchTracesByApi(String apiPath, String timeRange, int limit) {
         String pageKey = "trace_search";
@@ -107,9 +127,9 @@ public class TraceChainService {
                 
                 // 尝试多种查询策略
                 String[] gatewayQueries = {
-                    "__tag__:_container_name_: guan-zhong and " + endpointOnly,
-                    "__tag__:_container_name_: guan-zhong and " + serviceName,
-                    "__tag__:_container_name_: guan-zhong"
+                    "__tag__:_container_name_: " + gatewayContainer + " and " + endpointOnly,
+                    "__tag__:_container_name_: " + gatewayContainer + " and " + serviceName,
+                    "__tag__:_container_name_: " + gatewayContainer
                 };
                 String[] queryLabels = {
                     "端点名(" + endpointOnly + ")",
@@ -270,10 +290,7 @@ public class TraceChainService {
             log.info("所有精确查询失败，尝试备用方案：从各服务查询日志并按traceId过滤");
             try {
                 // Try querying from common services first (more efficient than querying all logs)
-                String[] services = {
-                    "order-server", "finance-server", "activity-server", "base-server", 
-                    "charge-server", "external-server", "guan-zhong", "dmp-query-server"
-                };
+                String[] services = fallbackServices;
                 
                 for (String service : services) {
                     String serviceQuery = "__tag__:_container_name_: " + service;

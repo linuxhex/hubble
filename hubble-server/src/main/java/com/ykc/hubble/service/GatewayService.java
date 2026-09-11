@@ -13,8 +13,10 @@ import com.ykc.hubble.vo.GatewayTrendVO;
 import com.ykc.hubble.vo.OverviewSnapshotPoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -47,6 +49,28 @@ public class GatewayService {
 
     // 已告警的接口（防抖）：key=apiPath, value=上次告警时间戳
     private final Map<String, Long> trafficAlertLastSent = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Value("${gateway.core-services:}")
+    private String coreServicesStr;
+
+    @Value("${gateway.known-services:}")
+    private String knownServicesStr;
+
+    private String[] coreServices = new String[0];
+    private List<String> knownServices = List.of();
+
+    @PostConstruct
+    public void init() {
+        if (coreServicesStr != null && !coreServicesStr.isBlank()) {
+            coreServices = Arrays.stream(coreServicesStr.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toArray(String[]::new);
+        }
+        if (knownServicesStr != null && !knownServicesStr.isBlank()) {
+            knownServices = Arrays.stream(knownServicesStr.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toList();
+        }
+        log.info("网关服务配置加载完成: {} 个核心服务, {} 个已知服务", coreServices.length, knownServices.size());
+    }
 
     // 接口劣化缓存：key=compareMode, value=[data, timestamp]
     private final Map<String, CacheEntry> degradationCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -1290,24 +1314,8 @@ public class GatewayService {
         List<GatewayHotApiVO> result = new ArrayList<>();
         long fiveMinAgo = now - 300;
         
-        // 核心服务列表：网关、订单、财务、活动、base等
-        String[] coreServices = {
-            "guan-zhong", "guan-zhong-prod",  // 网关
-            "order-server", "order-server-prod",  // 订单
-            "finance-server", "finance-server-prod",  // 财务
-            "activity-server", "activity-server-prod",  // 活动
-            "base-server", "base-server-prod",  // base
-            "charge-server", "charge-server-prod",  // 充电
-            "external-server", "external-server-prod",  // 外部
-            "omp-server", "omp-gateway", "omp-admin",  // OMP
-            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query",  // 大数据
-            "device-server", "device-business", "device-coms-server",  // 设备
-            "payment-server", "pay-server",  // 支付
-            "clearing-server", "reconciliation-server",  // 清结算
-            "user-server", "auth-server",  // 用户
-            "notification-server", "messagePushServer",  // 消息
-            "dmp-query-server", "ctp-order-server", "ctp_activity_server", "ctp_finance_server"  // CTP/DMP
-        };
+        // 核心服务列表：从配置读取
+        // 配置项：gateway.core-services
         
         Map<String, Long> globalApiCounts = new HashMap<>();
         Map<String, List<Double>> apiRtValues = new HashMap<>();
@@ -2062,56 +2070,9 @@ public class GatewayService {
         return result.size() > 30 ? result.subList(0, 30) : result;
     }
 
-    private static final List<String> KNOWN_SERVICES = List.of(
-            "orderserver", "DeviceBusinessServer", "CHARGEBUSINESSSERVER",
-            "BaseServer1", "PolyServer", "financeServer", "clearingserver",
-            "cloudApiServer", "priceCenterServer", "activityServer",
-            "alarmserver", "messagePushServer", "EventTracingServer", "mapServer",
-            "device-business", "device-coms-server", "ospServer", "ospBackend",
-            "payment-server", "foundation-c", "external-server", "new-base",
-            "station-site-server", "reconciliation-server", "ctp_activity_server",
-            "ctp_finance_server", "ctp-order-server", "CTP-BASE-SERVER", "gateway-service-ost",
-            "dmp-query-server",
-            // OMP相关
-            "omp-server", "omp-gateway", "omp-admin",
-            // 大数据相关
-            "bigdata-server", "data-platform", "data-analysis", "dmp-server", "data-query",
-            // 设备相关
-            "device-server", "device-gateway", "device-center", "device-monitor",
-            "device-iot-server", "device-data-server",
-            // 财务相关
-            "finance-server", "finance-core", "finance-gateway", "finance-report",
-            // 清结算相关
-            "clearing-server", "clearing-core", "settlement-server",
-            // 订单相关
-            "order-server", "order-core", "order-gateway",
-            // 活动相关
-            "activity-server", "activity-core", "activity-gateway",
-            // 充电相关
-            "charge-server", "charge-business-server", "charge-gateway",
-            // 用户相关
-            "user-server", "user-center", "auth-server",
-            // 基础服务
-            "base-server", "common-server", "config-server", "file-server",
-            // 报表相关
-            "report-server", "statistics-server",
-            // 库存/仓储
-            "inventory-server", "warehouse-server",
-            // 网关/中间件
-            "guan-zhong", "redis-server", "mq-consumer-server",
-            // 支付相关
-            "pay-server", "pay-gateway", "wallet-server",
-            // 营销相关
-            "marketing-server", "coupon-server", "promotion-server",
-            // 消息相关
-            "notification-server", "sms-server", "push-server", "im-server",
-            // 第三方对接
-            "third-party-server", "callback-server", "webhook-server"
-    );
-
     private Map<String, long[]> queryServiceStats(String logstore, long from, long to) {
         // 先采样发现服务名，再合并已知服务
-        Set<String> allServices = new LinkedHashSet<>(KNOWN_SERVICES);
+        Set<String> allServices = new LinkedHashSet<>(knownServices);
         try {
             List<LogEntry> sample = queryLogs(logstore, "*", from, to, 0, 500);
             for (LogEntry entry : sample) {
@@ -2179,7 +2140,7 @@ public class GatewayService {
         // 1. 获取服务列表：优先 ARMS，回退 SLS 采样 + 已知服务
         List<String> serviceNames = discoverServices(logstore, from, to);
         if (serviceNames.isEmpty()) {
-            serviceNames = new ArrayList<>(KNOWN_SERVICES);
+            serviceNames = new ArrayList<>(knownServices);
             log.info("使用已知服务列表: {} 个", serviceNames.size());
         }
         log.info("queryApiStats: 发现 {} 个服务", serviceNames.size());

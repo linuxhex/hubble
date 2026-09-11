@@ -126,6 +126,21 @@ dingtalk:
   robot-webhook: ${DINGTALK_ROBOT_WEBHOOK:}
   robot-secret: ${DINGTALK_ROBOT_SECRET:}
 
+# 服务负载监控
+service-load:
+  app-map: ${SERVICE_LOAD_APP_MAP:}
+  fallback-services: ${SERVICE_LOAD_FALLBACK_SERVICES:}
+
+# 网关大盘
+gateway:
+  core-services: ${GATEWAY_CORE_SERVICES:}
+  known-services: ${GATEWAY_KNOWN_SERVICES:}
+
+# 链路追踪
+trace:
+  gateway-container: ${TRACE_GATEWAY_CONTAINER:}
+  fallback-services: ${TRACE_FALLBACK_SERVICES:}
+
 # Milvus配置
 milvus:
   enabled: ${MILVUS_ENABLED:false}
