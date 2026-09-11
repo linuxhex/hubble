@@ -79,8 +79,10 @@ public class WebConfig implements WebMvcConfigurer {
      */
     @Bean
     public RestTemplate restTemplate() {
-        RestTemplate rt = new RestTemplate();
-        // 强制 UTF-8，避免 Doris 返回的中文被默认 ISO-8859-1 解码导致乱码
+        var factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10_000);
+        factory.setReadTimeout(60_000);
+        RestTemplate rt = new org.springframework.web.client.RestTemplate(factory);
         rt.getMessageConverters().stream()
             .filter(c -> c instanceof org.springframework.http.converter.StringHttpMessageConverter)
             .forEach(c -> ((org.springframework.http.converter.StringHttpMessageConverter) c)

@@ -35,44 +35,56 @@ public class DorisQueryClient {
             return List.of();
         }
 
-        try {
-            // MCP JSON-RPC 协议：POST /mcp，方法 tools/call，工具 query_doris
-            String url = properties.getQueryServerUrl() + "/mcp";
-
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("jsonrpc", "2.0");
-            payload.put("id", 1);
-            payload.put("method", "tools/call");
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("name", "query_doris");
-            Map<String, Object> arguments = new LinkedHashMap<>();
-            arguments.put("sql", trimmed);
-            params.put("arguments", arguments);
-            payload.put("params", params);
-
-            // 认证走请求头（与 cwork-data mcp_client.py 一致）
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-            headers.set("Accept", "application/json, text/event-stream");
-            if (properties.getQueryUser() != null && !properties.getQueryUser().isBlank()) {
-                headers.set("X-User-Name", properties.getQueryUser());
+        int maxRetries = 3;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return doQuery(trimmed);
+            } catch (Exception e) {
+                if (attempt < maxRetries) {
+                    log.warn("Doris 查询失败(第{}次), 2s后重试, SQL: {}, 错误: {}",
+                            attempt, trimmed.substring(0, Math.min(80, trimmed.length())), e.getMessage());
+                    try { Thread.sleep(2000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                } else {
+                    log.error("Doris 查询失败(已重试{}次), SQL: {}, 错误: {}",
+                            maxRetries, trimmed.substring(0, Math.min(100, trimmed.length())), e.getMessage());
+                }
             }
-            if (properties.getQueryPass() != null && !properties.getQueryPass().isBlank()) {
-                headers.set("X-Password", properties.getQueryPass());
-            }
+        }
+        return List.of();
+    }
 
-            org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(payload, headers);
-            var response = restTemplate.postForObject(url, entity, String.class);
-            if (response == null) {
-                log.warn("Doris query-server 返回空");
-                return List.of();
-            }
+    private List<Map<String, Object>> doQuery(String trimmed) {
+        String url = properties.getQueryServerUrl() + "/mcp";
 
-            return parseMcpResponse(response, trimmed);
-        } catch (Exception e) {
-            log.error("Doris 查询失败, SQL: {}, 错误: {}", trimmed.substring(0, Math.min(100, trimmed.length())), e.getMessage());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jsonrpc", "2.0");
+        payload.put("id", 1);
+        payload.put("method", "tools/call");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("name", "query_doris");
+        Map<String, Object> arguments = new LinkedHashMap<>();
+        arguments.put("sql", trimmed);
+        params.put("arguments", arguments);
+        payload.put("params", params);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        headers.set("Accept", "application/json, text/event-stream");
+        if (properties.getQueryUser() != null && !properties.getQueryUser().isBlank()) {
+            headers.set("X-User-Name", properties.getQueryUser());
+        }
+        if (properties.getQueryPass() != null && !properties.getQueryPass().isBlank()) {
+            headers.set("X-Password", properties.getQueryPass());
+        }
+
+        org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(payload, headers);
+        var response = restTemplate.postForObject(url, entity, String.class);
+        if (response == null) {
+            log.warn("Doris query-server 返回空");
             return List.of();
         }
+
+        return parseMcpResponse(response, trimmed);
     }
 
     /**
