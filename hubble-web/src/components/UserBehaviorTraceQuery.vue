@@ -71,7 +71,18 @@
 
     <!-- 空结果提示 -->
     <div v-if="!querying && hasQueried && !hasResults" class="empty-area">
-      <el-empty description="未查询到符合条件的操作轨迹" />
+      <el-empty description="未查询到符合条件的操作轨迹">
+        <template #default>
+          <div class="empty-tips">
+            <p>可能的原因：</p>
+            <ul>
+              <li>该手机号/用户ID在所选日期无操作记录</li>
+              <li>关键字不匹配，请尝试其他关键字</li>
+              <li>日志数据尚未同步，请稍后再试</li>
+            </ul>
+          </div>
+        </template>
+      </el-empty>
     </div>
 
     <!-- 查询中提示 -->
@@ -337,6 +348,24 @@ onMounted(() => {
   background: white;
   border-radius: 4px;
   min-height: 300px;
+}
+
+.empty-tips {
+  text-align: left;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.8;
+}
+
+.empty-tips p {
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.empty-tips ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 .querying-area {

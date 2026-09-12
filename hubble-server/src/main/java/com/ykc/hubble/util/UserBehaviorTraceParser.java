@@ -37,21 +37,30 @@ public class UserBehaviorTraceParser {
         }
 
         try {
+            String jsonStr = null;
+
             // 查找 "request:" 位置
             int requestIdx = message.indexOf("request:");
-            if (requestIdx == -1) {
-                return null;
+            if (requestIdx != -1) {
+                // 提取request后的内容
+                String requestPayload = message.substring(requestIdx + "request:".length()).trim();
+                int braceIdx = requestPayload.indexOf("{");
+                if (braceIdx != -1) {
+                    jsonStr = requestPayload.substring(braceIdx);
+                }
             }
 
-            // 提取request后的内容
-            String requestPayload = message.substring(requestIdx + "request:".length()).trim();
-            int braceIdx = requestPayload.indexOf("{");
-            if (braceIdx == -1) {
-                return null;
+            // 如果没有 "request:" 标记，尝试查找消息中任意 JSON 对象
+            if (jsonStr == null) {
+                int braceIdx = message.indexOf("{");
+                if (braceIdx != -1) {
+                    jsonStr = message.substring(braceIdx);
+                }
             }
 
-            // 提取JSON字符串
-            String jsonStr = requestPayload.substring(braceIdx);
+            if (jsonStr == null) {
+                return null;
+            }
 
             // 解析JSON
             JsonNode data = objectMapper.readTree(jsonStr);
@@ -86,14 +95,17 @@ public class UserBehaviorTraceParser {
                 try {
                     long dateTime = Long.parseLong(dateTimeStr);
                     item.setDateTime(dateTime);
-                    // 转换为格式化时间字符串
                     item.setFormattedDateTime(formatTimestamp(dateTime));
                 } catch (NumberFormatException e) {
                     log.warn("dateTime格式错误: {}", dateTimeStr);
-                    return null;
+                    // dateTime 解析失败时使用日志时间作为回退
+                    item.setDateTime(parseLogTime(logTime));
+                    item.setFormattedDateTime(logTime);
                 }
             } else {
-                return null;
+                // 没有 dateTime 字段时使用日志时间作为回退
+                item.setDateTime(parseLogTime(logTime));
+                item.setFormattedDateTime(logTime);
             }
 
             // 解析uploadData中的url、response
@@ -229,6 +241,21 @@ public class UserBehaviorTraceParser {
         } catch (Exception e) {
             log.warn("时间戳格式化失败: {}", timestampMs, e);
             return "";
+        }
+    }
+
+    /**
+     * 将日志时间（秒级时间戳字符串）转换为毫秒级时间戳
+     */
+    private long parseLogTime(String logTime) {
+        if (logTime == null || logTime.isEmpty()) {
+            return System.currentTimeMillis();
+        }
+        try {
+            long seconds = Long.parseLong(logTime);
+            return seconds * 1000;
+        } catch (NumberFormatException e) {
+            return System.currentTimeMillis();
         }
     }
 }

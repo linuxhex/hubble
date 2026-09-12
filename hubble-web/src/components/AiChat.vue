@@ -26,13 +26,27 @@ const wsUrl = computed(() => {
   return `${protocol}//${host}/api/ws/ai/chat?token=${encodeURIComponent(token)}`
 })
 
+const wsConnected = ref(false)
+let reconnectTimer = null
+
 function connectWs() {
   if (ws && ws.readyState === WebSocket.OPEN) return
+
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    ElMessage.warning('登录已过期，请重新登录后再使用 AI 对话')
+    return
+  }
 
   ws = new WebSocket(wsUrl.value)
 
   ws.onopen = () => {
     console.log('AI Chat WS 已连接')
+    wsConnected.value = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
   }
 
   ws.onmessage = (event) => {
@@ -49,9 +63,14 @@ function connectWs() {
     isThinking.value = false
   }
 
-  ws.onclose = () => {
-    console.log('AI Chat WS 已断开')
+  ws.onclose = (event) => {
+    console.log('AI Chat WS 已断开', event.code, event.reason)
+    wsConnected.value = false
+    isThinking.value = false
     ws = null
+    if (event.code === 1008 || event.reason?.includes('认证')) {
+      ElMessage.error('认证失败，请重新登录后再试')
+    }
   }
 }
 
@@ -86,19 +105,30 @@ function sendMessage() {
   const text = inputText.value.trim()
   if (!text || isThinking.value) return
 
+  const token = localStorage.getItem('auth_token')
+  if (!token) {
+    ElMessage.warning('登录已过期，请刷新页面重新登录')
+    return
+  }
+
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
   scrollToBottom()
 
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     connectWs()
-    setTimeout(() => {
+    let waited = 0
+    const checkConn = setInterval(() => {
+      waited += 200
       if (ws && ws.readyState === WebSocket.OPEN) {
+        clearInterval(checkConn)
         doSend(text)
-      } else {
-        ElMessage.error('连接失败，请重试')
+      } else if (waited >= 3000) {
+        clearInterval(checkConn)
+        ElMessage.error('AI 连接失败，请检查网络或重新登录')
+        isThinking.value = false
       }
-    }, 500)
+    }, 200)
   } else {
     doSend(text)
   }
@@ -191,6 +221,7 @@ function askQuick(q) {
           <div class="ai-panel-title">
             <el-icon :size="18"><ChatDotRound /></el-icon>
             <span>Hubble 小助手</span>
+            <span class="ws-status-dot" :class="{ connected: wsConnected }" :title="wsConnected ? '已连接' : '未连接'"></span>
           </div>
           <el-icon class="ai-panel-close" :size="16" @click="toggleChat"><Close /></el-icon>
         </div>
@@ -330,6 +361,21 @@ function askQuick(q) {
 
 .ai-panel-close:hover {
   opacity: 1;
+}
+
+.ws-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  display: inline-block;
+  margin-left: 6px;
+  transition: background 0.3s;
+}
+
+.ws-status-dot.connected {
+  background: #67c23a;
+  box-shadow: 0 0 4px rgba(103, 194, 58, 0.6);
 }
 
 .ai-messages {

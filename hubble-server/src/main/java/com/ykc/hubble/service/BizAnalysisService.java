@@ -56,8 +56,9 @@ public class BizAnalysisService {
     @Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 60000)
     public void refreshAll() {
         try {
-            memoryCache.put("overview", new CacheEntry(doDailyOverview()));
-            pageDataCacheService.save(PAGE_KEY, "overview", doDailyOverview());
+            var overviewData = doDailyOverview();
+            memoryCache.put("overview", new CacheEntry(overviewData));
+            pageDataCacheService.save(PAGE_KEY, "overview", overviewData);
         } catch (Exception e) {
             log.error("刷新 overview 缓存失败", e);
         }
@@ -368,21 +369,28 @@ public class BizAnalysisService {
             "FROM internal.ads.ads_omp_point_ad_dau_click_di " +
             "WHERE dt = '" + dt + "'");
 
-        if (!opRows.isEmpty()) {
-            var row = opRows.get(0);
-            result.put("orderCnt", row.get("orderCnt"));
-            result.put("chargedPower", row.get("chargedPower"));
+        if (opRows.isEmpty()) {
+            throw new RuntimeException("经营概览数据不完整: 运营数据查询为空(dt=" + dt + ")");
         }
-        if (!gunRows.isEmpty()) {
-            var row = gunRows.get(0);
-            result.put("totalGuns", row.get("total"));
-            result.put("chargingGuns", row.get("charging"));
+        if (gunRows.isEmpty()) {
+            throw new RuntimeException("经营概览数据不完整: 枪状态数据查询为空(dt=" + dt + ")");
         }
-        if (!dauRows.isEmpty()) {
-            var row = dauRows.get(0);
-            result.put("dau", row.get("dau"));
-            result.put("adClick", row.get("adClick"));
+        if (dauRows.isEmpty()) {
+            throw new RuntimeException("经营概览数据不完整: DAU数据查询为空(dt=" + dt + ")");
         }
+
+        var opRow = opRows.get(0);
+        result.put("orderCnt", opRow.get("orderCnt"));
+        result.put("chargedPower", opRow.get("chargedPower"));
+
+        var gunRow = gunRows.get(0);
+        result.put("totalGuns", gunRow.get("total"));
+        result.put("chargingGuns", gunRow.get("charging"));
+
+        var dauRow = dauRows.get(0);
+        result.put("dau", dauRow.get("dau"));
+        result.put("adClick", dauRow.get("adClick"));
+
         result.put("date", dt);
         return result;
     }

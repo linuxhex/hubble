@@ -28,6 +28,14 @@
 
     <div v-else-if="items.length === 0" class="empty-state">
       <p>未找到该用户的行为记录</p>
+      <div class="empty-tips">
+        <p>可能的原因：</p>
+        <ul>
+          <li>该手机号/用户ID在所选日期无操作记录</li>
+          <li>关键字不匹配，请尝试其他关键字</li>
+          <li>日志数据尚未同步，请稍后再试</li>
+        </ul>
+      </div>
     </div>
 
     <div v-else class="result-area">
@@ -244,6 +252,26 @@ selectedDate.value = getTodayDate()
   padding: 80px 20px;
   color: #666;
   font-size: 14px;
+}
+
+.empty-tips {
+  margin-top: 16px;
+  display: inline-block;
+  text-align: left;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.8;
+}
+
+.empty-tips p {
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.empty-tips ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 .result-area {

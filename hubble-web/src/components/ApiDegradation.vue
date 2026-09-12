@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import { getApiDegradation, getP60Ranking } from '@/api/gateway.js'
 import { searchTracesByApi, getTraceChain } from '@/api/trace-chain.js'
 import { exportCSV } from '@/utils/export-csv.js'
@@ -131,11 +132,15 @@ const openTraceChain = async (trace) => {
     const data = res?.data || res
     chainNodes.value = data.nodes || []
     chainTotalLogs.value = data.totalLogs || 0
+    if (chainNodes.value.length === 0) {
+      ElMessage.warning('该链路暂无详细日志数据')
+    }
     await nextTick()
     setTimeout(() => renderDurationChart(), 150)
   } catch (e) {
     console.error('获取链路失败:', e)
     chainNodes.value = []
+    ElMessage.error('获取链路详情失败，请稍后重试')
   } finally {
     chainLoading.value = false
   }
@@ -304,7 +309,7 @@ onBeforeUnmount(() => {
           >
             <el-table-column label="TraceID" width="200">
               <template #default="{ row }">
-                <span class="trace-id">{{ row.traceId?.substring(0, 16) }}...</span>
+                <span class="trace-id trace-link">{{ row.traceId?.substring(0, 16) }}...</span>
               </template>
             </el-table-column>
             <el-table-column label="经过服务" prop="serviceName" min-width="200" show-overflow-tooltip />
@@ -494,6 +499,16 @@ onBeforeUnmount(() => {
   font-family: monospace;
   font-size: 12px;
   color: #1890ff;
+}
+
+.trace-link {
+  text-decoration: underline;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.trace-link:hover {
+  color: #409eff;
 }
 
 .slow-time {

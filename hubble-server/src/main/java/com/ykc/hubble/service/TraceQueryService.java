@@ -196,6 +196,8 @@ public class TraceQueryService {
             );
 
             // 6. 解析日志
+            int parsedCount = 0;
+            int filteredCount = 0;
             for (LogEntry logEntry : logs) {
                 if (logEntry != null && logEntry.getMessage() != null) {
                     // 传递trace和time字段给解析器
@@ -205,8 +207,18 @@ public class TraceQueryService {
                     );
                     if (item != null) {
                         items.add(item);
+                        parsedCount++;
+                    } else {
+                        filteredCount++;
                     }
                 }
+            }
+            if (logs.isEmpty()) {
+                log.info("用户行为查询 SLS 返回空结果: keyword={}, from={}, to={}", keyword, fromTime, toTime);
+            } else if (items.isEmpty()) {
+                log.warn("用户行为查询 SLS 返回 {} 条日志但全部被解析器过滤: keyword={}", logs.size(), keyword);
+            } else {
+                log.info("用户行为查询解析完成: SLS返回{}条, 解析成功{}条, 过滤{}条", logs.size(), parsedCount, filteredCount);
             }
 
             // 7. 按dateTime升序排序
