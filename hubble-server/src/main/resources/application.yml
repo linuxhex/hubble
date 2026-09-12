@@ -68,14 +68,14 @@ aliyun:
 
 # Grafana 配置（Pod/Node 监控）
 grafana:
-  url: ${GRAFANA_URL:https://graf.ykccn.net}
-  user: ${GRAFANA_USER:caomunian}
+  url: ${GRAFANA_URL:}
+  user: ${GRAFANA_USER:admin}
   pass: ${GRAFANA_PASS:}
   api-key: ${GRAFANA_API_KEY:}
-  ds-uid: ${GRAFANA_DS_UID:6A__NzsMk}
-  node-ds-uid: ${GRAFANA_NODE_DS_UID:cem0jt0mij668b}
-  aliyun-ds-uid: ${GRAFANA_ALIYUN_DS_UID:l9II0lm4z}
-  biz-ds-uid: ${GRAFANA_BIZ_DS_UID:Ufpny5tSz}
+  ds-uid: ${GRAFANA_DS_UID:}
+  node-ds-uid: ${GRAFANA_NODE_DS_UID:}
+  aliyun-ds-uid: ${GRAFANA_ALIYUN_DS_UID:}
+  biz-ds-uid: ${GRAFANA_BIZ_DS_UID:}
 
 # 中间件实例配置（CloudMonitor 通用查询，无需独立 SDK）
 middleware:
@@ -106,15 +106,15 @@ middleware:
 parent-system:
   api-url: ${PARENT_SYSTEM_API_URL:http://parent-system.example.com/api}
   jwt:
-    public-key: ${JWT_PUBLIC_KEY:CloudEyesJwtSecretKeyForHMACSHA256AlgorithmMustBeAtLeast32Bytes}
+    public-key: ${JWT_PUBLIC_KEY:}
     expiration: ${JWT_EXPIRATION:3600000}
 
 # 经营分析配置
 biz-analysis:
-  allowed-users: ${BIZ_ANALYSIS_USERS:lianzi}
-  query-server-url: ${MCP_BASE_URL:http://10.20.0.2:8081}
-  query-user: ${MCP_USER:caomunian}
-  query-pass: ${MCP_PASS:gc#d2GVE69#7}
+  allowed-users: ${BIZ_ANALYSIS_USERS:}
+  query-server-url: ${MCP_BASE_URL:}
+  query-user: ${MCP_USER:}
+  query-pass: ${MCP_PASS:}
 
 # 钉钉配置
 dingtalk:
@@ -147,7 +147,7 @@ milvus:
   host: ${MILVUS_HOST:localhost}
   port: ${MILVUS_PORT:19530}
   username: ${MILVUS_USERNAME:root}
-  password: ${MILVUS_PASSWORD:milvus_password}
+  password: ${MILVUS_PASSWORD:}
   database: ${MILVUS_DATABASE:devops}
   vector-dimension: ${MILVUS_VECTOR_DIMENSION:1024}
 

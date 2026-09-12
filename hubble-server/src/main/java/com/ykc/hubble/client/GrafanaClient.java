@@ -22,10 +22,10 @@ import java.util.*;
 @Component
 public class GrafanaClient {
 
-    @Value("${grafana.url:https://graf.ykccn.net}")
+    @Value("${grafana.url:}")
     private String grafanaUrl;
 
-    @Value("${grafana.user:caomunian}")
+    @Value("${grafana.user:admin}")
     private String grafanaUser;
 
     @Value("${grafana.pass:}")

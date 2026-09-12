@@ -8,7 +8,7 @@ import { ensureSecondTimestamp } from './timestamp'
  */
 export function generateSlsLink(traceId, options = {}) {
   // 默认项目名称（从配置或环境变量获取）
-  const slsProject = options?.project || import.meta.env?.VITE_SLS_PROJECT || 'k8s-log-c7fd130d77f0f4627ac91c831bffeb751'
+  const slsProject = options?.project || import.meta.env?.VITE_SLS_PROJECT || ''
   
   // 使用具体的 logstore，如果没有提供则使用 'all'
   const logstore = options?.logstore || 'all'
