@@ -203,7 +203,10 @@ public class TraceQueryService {
                     // 传递trace和time字段给解析器
                     UserBehaviorTraceItemVO item = traceParser.parse(
                             logEntry.getMessage(),
-                            logEntry.getTime()
+                            logEntry.getTime(),
+                            logEntry.getLevel(),
+                            logEntry.getContainerName(),
+                            logEntry.getContainerIp()
                     );
                     if (item != null) {
                         items.add(item);

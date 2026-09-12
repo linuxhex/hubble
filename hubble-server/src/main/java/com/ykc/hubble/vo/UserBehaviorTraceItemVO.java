@@ -89,5 +89,30 @@ public class UserBehaviorTraceItemVO {
      * 响应参数（JSON字符串）
      */
     private String responseData;
+
+    /**
+     * 服务名称（后端服务日志）
+     */
+    private String serviceName;
+
+    /**
+     * 接口路径（后端服务日志）
+     */
+    private String api;
+
+    /**
+     * 客户端IP（后端服务日志）
+     */
+    private String clientIp;
+
+    /**
+     * 原始日志消息
+     */
+    private String logMessage;
+
+    /**
+     * 日志级别
+     */
+    private String logLevel;
 }
 

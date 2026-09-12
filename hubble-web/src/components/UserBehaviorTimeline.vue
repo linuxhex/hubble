@@ -60,19 +60,31 @@
               </span>
               <span v-else>-</span>
             </el-descriptions-item>
-            <el-descriptions-item label="类型">{{ item.type }}</el-descriptions-item>
-            <el-descriptions-item label="用户ID">{{ item.userId }}</el-descriptions-item>
-            <el-descriptions-item label="用户账号">{{ item.userAccount }}</el-descriptions-item>
-            <el-descriptions-item label="页面ID">{{ item.pageid }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ item.type || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="服务名称">{{ item.serviceName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="日志级别">
+              <el-tag v-if="item.logLevel" :type="item.logLevel === 'ERROR' ? 'danger' : item.logLevel === 'WARN' ? 'warning' : 'info'" size="small">
+                {{ item.logLevel }}
+              </el-tag>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="用户ID">{{ item.userId || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="用户账号">{{ item.userAccount || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="页面ID">{{ item.pageid || '-' }}</el-descriptions-item>
             <el-descriptions-item label="来源页面">{{ item.fromPage || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="应用版本">{{ item.appVersion }}</el-descriptions-item>
+            <el-descriptions-item label="应用版本">{{ item.appVersion || '-' }}</el-descriptions-item>
             <el-descriptions-item label="AB测试值">{{ item.abValue || '-' }}</el-descriptions-item>
             <el-descriptions-item label="前端上报时间">{{ item.formattedDateTime || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="日志时间">{{ item.formattedLogTime || '-' }}</el-descriptions-item>
             <el-descriptions-item label="会话ID">{{ item.sessionId || '-' }}</el-descriptions-item>
             <el-descriptions-item label="客户端IP">{{ item.clientIp || '-' }}</el-descriptions-item>
             <el-descriptions-item label="响应码">{{ item.responseStatus || '-' }}</el-descriptions-item>
             <el-descriptions-item label="响应参数" :span="2">
               <pre v-if="item.responseData" class="response-data">{{ formatResponseData(item.responseData) }}</pre>
+              <span v-else>-</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="原始日志" :span="2">
+              <pre v-if="item.logMessage" class="log-message-text">{{ item.logMessage }}</pre>
               <span v-else>-</span>
             </el-descriptions-item>
           </el-descriptions>
@@ -628,6 +640,20 @@ watch(() => props.items, () => {
   color: #606266;
   word-break: break-all;
   line-height: 1.5;
+}
+
+.log-message-text {
+  font-family: monospace;
+  font-size: 12px;
+  color: #606266;
+  background: #f5f7fa;
+  padding: 8px 12px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
 }
 </style>
 

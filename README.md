@@ -1,19 +1,110 @@
 # Hubble - 业务监控平台
 
-前后端分离项目，支持独立开发和统一部署。
+全链路业务监控平台，覆盖网关流量、异常检测、性能劣化、中间件监控、链路追踪、用户行为分析、经营分析等核心能力。
+
+## 系统截图
+
+### 网关概览
+实时监控网关流量，展示总请求量、平均响应时间、错误率、QPS 四大核心指标，含请求趋势图和热门接口排名。
+
+![网关概览](docs/screenshots/01-gateway.png)
+
+### 异常大盘
+按分钟粒度展示各服务的异常事件分布，支持 15 分钟/30 分钟/1 小时时间粒度切换，快速定位异常服务。
+
+![异常大盘](docs/screenshots/02-abnormal.png)
+
+### 接口劣化
+自动检测 P60 耗时劣化的接口，支持今天 vs 昨天、本周 vs 上周对比模式。点击下钻可查看该接口的链路详情。
+
+![接口劣化](docs/screenshots/03-degradation.png)
+
+**下钻链路详情**：展示 TraceID、经过服务、服务数、总耗时、日志数、状态，点击可查看调用链完整日志。
+
+![接口劣化下钻](docs/screenshots/03-degradation-drill.png)
+
+### 流量暴涨
+检测接口流量异常暴涨，支持逐层下钻分析。
+
+![流量暴涨](docs/screenshots/04-traffic.png)
+
+### 中间件
+Redis 中间件监控，展示 Big Keys Top10 和慢查询 Top10，支持 Tab 切换。
+
+![中间件](docs/screenshots/05-middleware.png)
+
+![慢查询](docs/screenshots/05-middleware-tab2.png)
+
+### 服务负载
+服务资源负载监控，展示 CPU/内存使用率，含扩容阈值预警（CPU ≥ 80%/90%，内存 ≥ 85%/95%）。
+
+![服务负载](docs/screenshots/06-service-load.png)
+
+### 链路详情
+按业务维度查询链路追踪数据，支持 TraceID 精确查询。
+
+![链路详情](docs/screenshots/07-trace.png)
+
+### 用户行为
+通过手机号/用户ID 查询用户行为轨迹，展示时间、服务、页面名称、接口路径、终端、链路ID、响应状态、日志级别。支持链路下钻查看完整调用链和日志详情。
+
+![用户行为查询](docs/screenshots/08-user-behavior-query.png)
+
+**链路下钻**：展示调用链各节点（服务名、状态、日志数），点击节点查看原始日志。
+
+![链路下钻](docs/screenshots/08-user-behavior-trace.png)
+
+**日志详情**：展示日志级别、时间、原始日志内容（支持后端日志格式解析）。
+
+![日志详情](docs/screenshots/08-user-behavior-trace-detail.png)
+
+### 日志搜索
+关键字日志搜索，支持 Logstore 选择、时间范围筛选、排序方式切换，含快捷时间按钮。
+
+![日志搜索](docs/screenshots/09-log-search.png)
+
+### 告警配置
+日志监控告警配置，支持新建监控规则、配置告警机器人、独立开关控制每条规则。
+
+![告警配置](docs/screenshots/10-alert-config.png)
+
+### 经营分析
+业务经营数据全景分析，含 6 大指标卡（累计订单量、累计电量、枪总量、充电中枪数、小程序 DAU、广告点击数）、多维度图表（小时对比、月度趋势、年度同比、每日订单&电量、收入趋势、枪利用率、充电时段分布、DAU/MAU 趋势）、业务场景拆分、区域/站点排名 Top20。
+
+![经营分析-指标卡](docs/screenshots/11-biz-analysis.png)
+
+![经营分析-图表](docs/screenshots/11-biz-analysis-charts.png)
+
+![经营分析-排名](docs/screenshots/11-biz-analysis-tables.png)
 
 ## 目录结构
 
 ```
 hubble/
-├── hubble-web/          # 前端 (Vue 3 + Vite)
-├── hubble-server/       # 后端 (Spring Boot 3 + Java 17)
+├── hubble-web/          # 前端 (Vue 3 + Vite + Element Plus + ECharts)
+├── hubble-server/       # 后端 (Spring Boot 3 + Java 21 + MyBatis-Plus)
 ├── docs/
-│   ├── requirements/    # 需求文档 + 测试截图归档（见下方说明）
-│   └── test-reports/    # 综合测试报告
+│   ├── screenshots/     # 系统截图（本 README 引用）
+│   └── requirements/    # 需求文档 + 测试截图归档
 ├── build.sh             # 一键构建脚本
 └── README.md
 ```
+
+## 功能模块
+
+| 模块 | 路由 | 说明 |
+|------|------|------|
+| 网关概览 | `/gateway` | 总请求量/QPS/错误率/响应时间 + 请求趋势图 + 热门接口 |
+| 异常大盘 | `/abnormal` | 按分钟展示各服务异常事件，支持多时间粒度 |
+| 接口劣化 | `/degradation-ranking` | P60 耗时劣化检测，支持对比模式 + 链路下钻 |
+| 流量暴涨 | `/traffic-surge` | 接口流量异常检测 + 下钻分析 |
+| 中间件 | `/middleware` | Redis Big Keys + 慢查询 Top10 |
+| 服务负载 | `/service-load` | CPU/内存使用率 + 扩容阈值预警 |
+| 链路详情 | `/trace-query` | 按业务/TraceID 查询调用链 |
+| 用户行为 | `/user-behavior` | 手机号查询行为轨迹 + 链路下钻 + 日志详情 |
+| 日志搜索 | `/keyword-log-query` | 关键字搜索 SLS 日志 |
+| 告警配置 | `/alert-config` | 日志监控规则 + 机器人配置 |
+| 经营分析 | `/biz-analysis` | 订单/电量/枪/DAU 全维度分析 |
 
 ## 开发模式
 
@@ -24,14 +115,14 @@ cd hubble-server
 bash start.sh
 ```
 
-后端运行在 `http://localhost:8080`
+后端运行在 `http://localhost:18081`
 
 `start.sh` 会自动加载 `.env` 文件中的环境变量。首次运行前需要配置：
 
 ```bash
 cd hubble-server
 cp .env.example .env
-# 编辑 .env 填写真实配置
+# 编辑 .env 填写真实配置（阿里云 SLS/ARMS/DashScope 等）
 ```
 
 ### 启动前端
@@ -42,11 +133,7 @@ npm install  # 首次需要
 npm run dev
 ```
 
-前端运行在 `http://localhost:82`，API 请求自动代理到后端 8080 端口。
-
-### 访问应用
-
-开发模式访问 `http://localhost:82`
+前端运行在 `http://localhost:82`，API 请求自动代理到后端 18081 端口。
 
 ## 生产部署
 
@@ -73,6 +160,13 @@ java -jar hubble-server/target/hubble-1.0.0.jar
 - **后端**: Java 17+
 - **前端**: Node.js 18+
 - **构建**: Maven 3.6+
+
+## 技术栈
+
+- **前端**: Vue 3 + Vite + Element Plus + ECharts + Pinia
+- **后端**: Spring Boot 3 + MyBatis-Plus + H2 (内存缓存)
+- **数据源**: 阿里云 SLS (日志) + ARMS (链路追踪) + CloudMonitor (监控指标)
+- **AI**: DashScope (文本向量化)
 
 ---
 

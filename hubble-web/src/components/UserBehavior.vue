@@ -44,6 +44,11 @@
       </div>
       <el-table :data="items" style="width: 100%" border>
         <el-table-column prop="formattedDateTime" label="时间" width="180" />
+        <el-table-column prop="serviceName" label="服务" width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.serviceName || '--' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="pageName" label="页面名称" width="200" show-overflow-tooltip />
         <el-table-column prop="url" label="接口路径" show-overflow-tooltip>
           <template #default="{ row }">
@@ -69,6 +74,14 @@
             <el-tag :type="row.responseStatus === '200' ? 'success' : 'danger'" size="small">
               {{ row.responseStatus || '--' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="logLevel" label="级别" width="80">
+          <template #default="{ row }">
+            <el-tag v-if="row.logLevel" :type="row.logLevel === 'ERROR' ? 'danger' : row.logLevel === 'WARN' ? 'warning' : 'info'" size="small">
+              {{ row.logLevel }}
+            </el-tag>
+            <span v-else>--</span>
           </template>
         </el-table-column>
       </el-table>

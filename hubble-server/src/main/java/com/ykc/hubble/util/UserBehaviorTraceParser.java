@@ -32,6 +32,21 @@ public class UserBehaviorTraceParser {
      * @return 用户行为轨迹项，解析失败返回null
      */
     public UserBehaviorTraceItemVO parse(String message, String logTime) {
+        return parse(message, logTime, null, null, null);
+    }
+
+    /**
+     * 解析message字段，提取用户行为轨迹信息
+     *
+     * @param message       日志消息
+     * @param logTime       日志时间（Unix时间戳，秒）
+     * @param level         日志级别（来自SLS LogEntry）
+     * @param containerName 容器名/服务名（来自SLS LogEntry）
+     * @param containerIp   容器IP（来自SLS LogEntry）
+     * @return 用户行为轨迹项，解析失败返回null
+     */
+    public UserBehaviorTraceItemVO parse(String message, String logTime,
+                                          String level, String containerName, String containerIp) {
         if (message == null || message.isEmpty()) {
             return null;
         }
@@ -42,7 +57,6 @@ public class UserBehaviorTraceParser {
             // 查找 "request:" 位置
             int requestIdx = message.indexOf("request:");
             if (requestIdx != -1) {
-                // 提取request后的内容
                 String requestPayload = message.substring(requestIdx + "request:".length()).trim();
                 int braceIdx = requestPayload.indexOf("{");
                 if (braceIdx != -1) {
@@ -50,7 +64,19 @@ public class UserBehaviorTraceParser {
                 }
             }
 
-            // 如果没有 "request:" 标记，尝试查找消息中任意 JSON 对象
+            // 查找 "message=" 位置（ZDL日志格式: [ZDL] ... message={...}）
+            if (jsonStr == null) {
+                int msgIdx = message.indexOf("message=");
+                if (msgIdx != -1) {
+                    String msgPayload = message.substring(msgIdx + "message=".length()).trim();
+                    int braceIdx = msgPayload.indexOf("{");
+                    if (braceIdx != -1) {
+                        jsonStr = msgPayload.substring(braceIdx);
+                    }
+                }
+            }
+
+            // 如果没有特殊标记，尝试查找消息中任意 JSON 对象
             if (jsonStr == null) {
                 int braceIdx = message.indexOf("{");
                 if (braceIdx != -1) {
@@ -58,8 +84,17 @@ public class UserBehaviorTraceParser {
                 }
             }
 
+            UserBehaviorTraceItemVO item = new UserBehaviorTraceItemVO();
+            item.setFormattedLogTime(formatLogTime(logTime));
+
+            // 填充 SLS LogEntry 提供的字段
+            if (level != null) item.setLogLevel(level);
+            if (containerName != null) item.setServiceName(containerName);
+            if (containerIp != null) item.setClientIp(containerIp);
+
             if (jsonStr == null) {
-                return null;
+                // 无 JSON：按后端服务日志格式解析 [serviceName][span][traceId] message
+                return parseBackendLog(item, message, logTime);
             }
 
             // 解析JSON
@@ -68,23 +103,24 @@ public class UserBehaviorTraceParser {
                 return null;
             }
 
-            // 创建VO对象
-            UserBehaviorTraceItemVO item = new UserBehaviorTraceItemVO();
-
             // 从message中提取第三个方括号里的值作为追踪ID
             String extractedTrace = extractTraceFromMessage(message);
             item.setTrace(extractedTrace != null ? extractedTrace : "");
-
-            // 转换为格式化时间字符串（秒转毫秒）
-            item.setFormattedLogTime(logTime);
 
             // 提取基本字段
             item.setPageName(getStringValue(data, "pageName"));
             item.setPageid(getStringValue(data, "pageid"));
             item.setTerminal(getStringValue(data, "terminal"));
             item.setType(getStringValue(data, "type"));
-            item.setUserAccount(getStringValue(data, "userAccount"));
-            item.setUserId(getStringValue(data, "userId"));
+
+            String userAccount = getStringValue(data, "userAccount");
+            if (userAccount.isEmpty()) userAccount = getStringValue(data, "userPhone");
+            item.setUserAccount(userAccount);
+
+            String userId = getStringValue(data, "userId");
+            if (userId.isEmpty()) userId = getStringValue(data, "uid");
+            item.setUserId(userId);
+
             item.setFromPage(getStringValue(data, "fromPage"));
             item.setAppVersion(getStringValue(data, "appVersion"));
             item.setAbValue(getStringValue(data, "abValue"));
@@ -162,11 +198,131 @@ public class UserBehaviorTraceParser {
                 item.setResponseData("");
             }
 
+            item.setLogMessage(extractLogMessage(message));
+
+            // 提取 api 路径（ControllerLog 格式中的 apiUrl）
+            String apiUrl = getStringValue(data, "apiUrl");
+            if (!apiUrl.isEmpty()) {
+                item.setApi(apiUrl);
+            }
+
             return item;
 
         } catch (Exception e) {
             log.warn("解析用户行为轨迹消息失败: {}", message, e);
             return null;
+        }
+    }
+
+    /**
+     * 解析后端服务日志格式: [serviceName][span][traceId] message
+     */
+    private UserBehaviorTraceItemVO parseBackendLog(UserBehaviorTraceItemVO item, String message, String logTime) {
+        // 提取第一个方括号内容作为 serviceName（如果 VO 中还没有）
+        if (item.getServiceName() == null || item.getServiceName().isEmpty()) {
+            String firstBracket = extractBracketContent(message, 1);
+            if (firstBracket != null) {
+                item.setServiceName(firstBracket);
+            }
+        }
+
+        // 提取第三个方括号作为 trace
+        String trace = extractTraceFromMessage(message);
+        item.setTrace(trace != null ? trace : "");
+
+        // 提取方括号后的文本作为 logMessage
+        String logMsg = extractLogMessage(message);
+        item.setLogMessage(logMsg != null ? logMsg : "");
+
+        // 设置时间
+        item.setDateTime(parseLogTime(logTime));
+        item.setFormattedDateTime(formatLogTime(logTime));
+
+        return item;
+    }
+
+    /**
+     * 提取第 n 个方括号的内容
+     */
+    private String extractBracketContent(String message, int bracketIndex) {
+        if (message == null || message.isEmpty()) {
+            return null;
+        }
+        try {
+            int count = 0;
+            int startIdx = -1;
+            for (int i = 0; i < message.length(); i++) {
+                char c = message.charAt(i);
+                if (c == '[') {
+                    count++;
+                    if (count == bracketIndex) {
+                        startIdx = i + 1;
+                    }
+                } else if (c == ']' && count == bracketIndex && startIdx != -1) {
+                    return message.substring(startIdx, i).trim();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("提取第{}个方括号内容失败: {}", bracketIndex, message, e);
+        }
+        return null;
+    }
+
+    /**
+     * 提取日志消息文本用于展示。
+     * 跳过开头所有连续的 [...] 对，取剩余文本；若有 message= 则只取 message= 前的描述部分。
+     */
+    private String extractLogMessage(String message) {
+        if (message == null || message.isEmpty()) {
+            return null;
+        }
+        try {
+            // 1. 跳过开头所有连续的 [...] 对
+            int pos = 0;
+            while (pos < message.length() && message.charAt(pos) == '[') {
+                int close = message.indexOf(']', pos);
+                if (close < 0) break;
+                pos = close + 1;
+                // 跳过括号后的空格
+                while (pos < message.length() && message.charAt(pos) == ' ') pos++;
+            }
+
+            if (pos > 0 && pos < message.length()) {
+                String remaining = message.substring(pos);
+                // 如果有 message=，只取 message= 前的描述
+                int msgEqIdx = remaining.indexOf("message=");
+                if (msgEqIdx > 0) {
+                    return remaining.substring(0, msgEqIdx).trim().replaceAll(",\\s*$", "");
+                }
+                return remaining.trim();
+            }
+
+            // 2. 无方括号开头：若有 message= 则取前面的描述文本
+            int msgIdx = message.indexOf("message=");
+            if (msgIdx > 0) {
+                return message.substring(0, msgIdx).trim().replaceAll(",\\s*$", "");
+            }
+
+            // 3. 整个消息
+            return message.trim();
+        } catch (Exception e) {
+            log.debug("提取日志消息失败: {}", message, e);
+        }
+        return message;
+    }
+
+    /**
+     * 将日志时间（秒级时间戳字符串）转换为格式化时间字符串
+     */
+    private String formatLogTime(String logTime) {
+        if (logTime == null || logTime.isEmpty()) {
+            return "";
+        }
+        try {
+            long seconds = Long.parseLong(logTime);
+            return formatTimestamp(seconds * 1000);
+        } catch (NumberFormatException e) {
+            return logTime;
         }
     }
 
