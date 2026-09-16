@@ -1,115 +1,68 @@
-# Hubble 部署环境变量清单
+# Hubble 部署指南（单 jar）
 
-## 必需环境变量（服务器启动前必须设置）
+## 部署方式：只需要一个 jar
 
-### 钉钉登录
-```bash
-export DINGTALK_APP_KEY=YOUR_DINGTALK_APP_KEY
-export DINGTALK_APP_SECRET=YOUR_DINGTALK_APP_SECRET
-export DINGTALK_REDIRECT_URL=http://<服务器IP>:18081/login
-```
-**注意**: `DINGTALK_REDIRECT_URL` 必须与钉钉开放平台后台配置的回调地址完全一致
+jar 打包时已将配置（`.env`）和前端页面一并打入，服务器上**只需要这一个文件**。
 
-### 阿里云 SLS/ARMS（网关日志、链路追踪）
-```bash
-export ALIYUN_SLS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID
-export ALIYUN_SLS_ACCESS_KEY_SECRET=YOUR_ACCESS_KEY_SECRET
-export ALIYUN_SLS_PROJECT=YOUR_SLS_PROJECT
-export ALIYUN_SLS_ENDPOINT=cn-hangzhou.log.aliyuncs.com
-export ARMS_AK_ID=YOUR_ACCESS_KEY_ID
-export ARMS_AK_SECRET=YOUR_ACCESS_KEY_SECRET
-export ARMS_REGION=cn-hangzhou
-```
-
-### Grafana（中间件监控、服务负载）
-```bash
-export GRAFANA_URL=https://graf.ykccn.net
-export GRAFANA_USER=caomunian
-export GRAFANA_PASS=YOUR_GRAFANA_PASS
-export GRAFANA_DS_UID=6A__NzsMk
-export GRAFANA_NODE_DS_UID=cem0jt0mij668b
-export GRAFANA_ALIYUN_DS_UID=l9II0lm4z
-export GRAFANA_BIZ_DS_UID=Ufpny5tSz
-```
-
-### Doris 数仓（业务监控）
-```bash
-export MCP_BASE_URL=http://10.20.0.2:8081
-export MCP_USER=caomunian
-export MCP_PASS=YOUR_MCP_PASS
-```
-
-### JWT 认证
-```bash
-export JWT_PUBLIC_KEY=CloudEyesJwtSecretKeyForHMACSHA256AlgorithmMustBeAtLeast32Bytes
-```
-
-### 业务监控权限
-```bash
-export BIZ_ANALYSIS_USERS=lianzi
-```
-
-### 钉钉机器人（告警通知）
-```bash
-export DINGTALK_ROBOT_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx
-export DINGTALK_ROBOT_SECRET=SECxxx
-```
-
-### 服务负载配置
-```bash
-export SERVICE_LOAD_APP_MAP=order-server:OtsOrderServer,base-server:CTP-BASE-SERVER,...
-export SERVICE_LOAD_FALLBACK_SERVICES=order-server,base-server,...
-export GATEWAY_CORE_SERVICES=guan-zhong,order-server,...
-export GATEWAY_KNOWN_SERVICES=orderserver,DeviceBusinessServer,...
-export TRACE_GATEWAY_CONTAINER=guan-zhong
-export TRACE_FALLBACK_SERVICES=order-server,finance-server,...
-```
-
-## 启动命令
+### 部署步骤
 
 ```bash
-# 方式1：直接 export 后启动
-export MCP_BASE_URL=http://10.20.0.2:8081
-# ... 其他环境变量 ...
-java -jar hubble-1.0.0.jar
+# 1. 上传 jar 到服务器（任意目录，如 /opt/hubble/）
+scp hubble-server/target/hubble-1.0.0.jar server:/opt/hubble/
 
-# 方式2：使用 env 文件（推荐）
-# 创建 server.env 文件（不要提交到 git）
-cat > server.env << 'EOF'
-MCP_BASE_URL=http://10.20.0.2:8081
-MCP_USER=caomunian
-# ... 其他变量 ...
-EOF
+# 2. 启动
+cd /opt/hubble && nohup java -jar hubble-1.0.0.jar > hubble.log 2>&1 &
 
-# 加载并启动
-set -a && source server.env && set +a && java -jar hubble-1.0.0.jar
-
-# 或使用项目自带启动脚本（推荐）
-cp .env.example .env && vi .env   # 填入实际配置
-./start.sh start
+# 3. 查看日志
+tail -f hubble.log
 ```
 
-## 网络要求
+启动后访问 `http://<服务器IP>:18081`。
 
-服务器需要能访问以下外部服务：
-- `https://api.dingtalk.com` — 钉钉登录 API
-- `https://graf.ykccn.net` — Grafana 监控
-- `http://10.20.0.2:8081` — Doris query-server（内网）
-- `cn-hangzhou.log.aliyuncs.com` — 阿里云 SLS
+### 前提
+
+- 服务器已安装 Java 17+（`java -version` 确认）
+- 服务器可访问：钉钉 API、Grafana、Doris query-server（内网）、阿里云 SLS
+
+### 更新配置
+
+配置已打入 jar，改配置需要重新打包。如需临时覆盖某个变量，可在启动前用环境变量覆盖（优先级高于 jar 内配置）：
+
+```bash
+MCP_BASE_URL=http://新地址 java -jar hubble-1.0.0.jar
+```
+
+### 停止 / 重启
+
+```bash
+# 停止
+pkill -f hubble-1.0.0.jar
+
+# 重启
+pkill -f hubble-1.0.0.jar; sleep 2
+cd /opt/hubble && nohup java -jar hubble-1.0.0.jar > hubble.log 2>&1 &
+```
+
+## 本地打包流程
+
+```bash
+# 1. 构建前端
+cd hubble-web && npm run build
+cp -r dist/* ../hubble-server/src/main/resources/static/
+
+# 2. 确认 hubble-server/src/main/resources/.env 存在（本地配置，不入 git）
+# 3. 打包
+cd ../hubble-server && mvn clean package -DskipTests
+
+# 产物：target/hubble-1.0.0.jar
+```
 
 ## 验证
 
-启动后检查：
 ```bash
-# 1. 检查启动日志
-tail -f logs/hubble.log
-
-# 2. 测试钉钉登录
-curl -X POST "http://localhost:18081/api/auth/dingtalk/login?code=test"
-
-# 3. 测试业务监控
-curl http://localhost:18081/api/biz-analysis/overview
-
-# 4. 测试中间件监控
-curl http://localhost:18081/api/middleware/redis
+# 1. 启动日志无 ERROR、无 "URI is not absolute"、无 "undefined scheme"
+# 2. 首页可访问
+curl -o /dev/null -w "%{http_code}" http://localhost:18081/        # 200
+# 3. 登录接口连通
+curl "http://localhost:18081/api/auth/dingtalk/login?code=test"
 ```

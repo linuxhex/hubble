@@ -228,14 +228,6 @@
     </dependencies>
 
     <build>
-        <resources>
-            <resource>
-                <directory>src/main/resources</directory>
-                <excludes>
-                    <exclude>.env</exclude>
-                </excludes>
-            </resource>
-        </resources>
         <plugins>
             <!-- Lombok 注解处理器：命令行 mvn 编译必须显式声明；add-opens 通过 MAVEN_OPTS 传入（in-process 模式） -->
             <plugin>
