@@ -4,8 +4,8 @@
 
 ### 钉钉登录
 ```bash
-export DINGTALK_APP_KEY=dingebk14cn2n0iv4ble
-export DINGTALK_APP_SECRET=qm6jMrfzNK0ni1_LoqHj94D-6t5FLK_zcVb4q69pUsL8yW3uT9knmgoarTFN9LHY
+export DINGTALK_APP_KEY=YOUR_DINGTALK_APP_KEY
+export DINGTALK_APP_SECRET=YOUR_DINGTALK_APP_SECRET
 export DINGTALK_REDIRECT_URL=http://<服务器IP>:18081/login
 ```
 **注意**: `DINGTALK_REDIRECT_URL` 必须与钉钉开放平台后台配置的回调地址完全一致
@@ -25,7 +25,7 @@ export ARMS_REGION=cn-hangzhou
 ```bash
 export GRAFANA_URL=https://graf.ykccn.net
 export GRAFANA_USER=caomunian
-export GRAFANA_PASS=Cmn@112221
+export GRAFANA_PASS=YOUR_GRAFANA_PASS
 export GRAFANA_DS_UID=6A__NzsMk
 export GRAFANA_NODE_DS_UID=cem0jt0mij668b
 export GRAFANA_ALIYUN_DS_UID=l9II0lm4z
@@ -36,7 +36,7 @@ export GRAFANA_BIZ_DS_UID=Ufpny5tSz
 ```bash
 export MCP_BASE_URL=http://10.20.0.2:8081
 export MCP_USER=caomunian
-export MCP_PASS=gc#d2GVE69#7
+export MCP_PASS=YOUR_MCP_PASS
 ```
 
 ### JWT 认证
@@ -84,8 +84,9 @@ EOF
 # 加载并启动
 set -a && source server.env && set +a && java -jar hubble-1.0.0.jar
 
-# 方式3：Docker/K8s 环境变量注入
-# docker run -e MCP_BASE_URL=... -e GRAFANA_URL=... hubble:latest
+# 或使用项目自带启动脚本（推荐）
+cp .env.example .env && vi .env   # 填入实际配置
+./start.sh start
 ```
 
 ## 网络要求
