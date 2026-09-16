@@ -897,6 +897,7 @@ onMounted(() => {
   loadConfigList()
   loadSlsKeywordList()
   loadEnabledRobots()
+  loadRobots()
   loadThresholds()
   loadMwAlertList()
 })

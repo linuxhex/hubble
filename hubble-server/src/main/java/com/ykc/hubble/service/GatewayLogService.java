@@ -52,6 +52,21 @@ public class GatewayLogService {
 
         List<LogEntry> logs = queryLogs(logstore, query, from, now, queryOffset, queryLimit);
 
+        // 如果使用了 offset/limit 分页（KeywordLogQuery 模式），返回原始 LogEntry 数据
+        if (dto.getOffset() != null) {
+            // 排序方式
+            if ("asc".equalsIgnoreCase(dto.getSortOrder())) {
+                Collections.reverse(logs);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("total", logs.size());
+            result.put("logs", logs);
+            result.put("hasMore", logs.size() >= queryLimit);
+            return result;
+        }
+
+        // 否则使用 page/pageSize 分页（GatewayLogs 模式），转换为 VO
         List<GatewayLogVO> voList = logs.stream()
                 .map(this::toVO)
                 .collect(Collectors.toList());
@@ -62,17 +77,6 @@ public class GatewayLogService {
         }
 
         int total = voList.size();
-
-        // 如果使用了 offset/limit 分页（KeywordLogQuery 模式），直接返回
-        if (dto.getOffset() != null) {
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("total", total);
-            result.put("logs", voList);
-            result.put("hasMore", total >= queryLimit);
-            return result;
-        }
-
-        // 否则使用 page/pageSize 分页（GatewayLogs 模式）
         int page = dto.getPage() != null ? dto.getPage() : 1;
         int pageSize = dto.getPageSize() != null ? dto.getPageSize() : 20;
         int fromIndex = Math.min((page - 1) * pageSize, total);

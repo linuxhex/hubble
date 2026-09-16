@@ -134,7 +134,7 @@ onUnmounted(() => {
           </el-menu-item>
           <el-menu-item v-if="authStore.user?.nickname === 'lianzi'" index="/biz-analysis">
             <el-icon><TrendCharts /></el-icon>
-            <span>经营分析</span>
+            <span>业务监控</span>
           </el-menu-item>
         </el-menu>
       </div>

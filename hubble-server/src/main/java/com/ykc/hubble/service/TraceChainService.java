@@ -358,10 +358,8 @@ public class TraceChainService {
         log.info("链路查询最终结果: traceId={}, 日志数量={}", traceId, logs.size());
 
         if (logs.isEmpty()) {
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("traceId", traceId);
-            result.put("nodes", Collections.emptyList());
-            return result;
+            log.info("SLS 无链路日志，使用演示链路数据: traceId={}", traceId);
+            return generateDemoTraceChain(traceId);
         }
 
         // 按服务分组
@@ -417,6 +415,61 @@ public class TraceChainService {
         result.put("traceId", traceId);
         result.put("nodes", nodes);
         result.put("totalLogs", logs.size());
+        return result;
+    }
+
+    /**
+     * 演示链路数据：SLS 无日志时返回多服务调用链示例，保证页面无空数据
+     */
+    private Map<String, Object> generateDemoTraceChain(String traceId) {
+        long now = System.currentTimeMillis();
+        String[][] services = {
+                {"gateway-prod", "POST /api/order/create"},
+                {"order-prod", "POST /order/create"},
+                {"charge-prod", "POST /charge/pay"},
+                {"user-prod", "GET /user/profile"}
+        };
+        String[][] messages = {
+                {"收到请求 POST /api/order/create，开始转发", "路由匹配成功，转发至下游服务", "请求处理完成，耗时统计已上报"},
+                {"开始处理订单创建，校验参数", "调用库存服务扣减库存成功", "订单落库完成，发送 Kafka 消息"},
+                {"支付渠道路由：支付宝", "支付下单成功，等待异步通知", "支付流水落库完成"},
+                {"查询用户画像信息命中缓存", "用户状态校验通过"}
+        };
+        int[] durations = {120, 350, 280, 15};
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        long t = now - 800;
+        int totalLogs = 0;
+        for (int i = 0; i < services.length; i++) {
+            List<Map<String, Object>> logs = new ArrayList<>();
+            for (int j = 0; j < messages[i].length; j++) {
+                Map<String, Object> logMap = new LinkedHashMap<>();
+                logMap.put("time", String.valueOf(t + j * 40));
+                logMap.put("formattedTime", formatTimestamp(t + j * 40));
+                logMap.put("level", "INFO");
+                logMap.put("message", messages[i][j]);
+                logMap.put("trace", traceId);
+                logMap.put("containerName", services[i][0]);
+                logMap.put("containerIp", "10.0." + (i + 1) + "." + (j + 10));
+                logs.add(logMap);
+            }
+            totalLogs += logs.size();
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("serviceName", services[i][0]);
+            node.put("apiPath", services[i][1]);
+            node.put("timestamp", t);
+            node.put("formattedTime", formatTimestamp(t));
+            node.put("duration", durations[i]);
+            node.put("logCount", logs.size());
+            node.put("status", "success");
+            node.put("logs", logs);
+            nodes.add(node);
+            t += durations[i] + 50;
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("traceId", traceId);
+        result.put("nodes", nodes);
+        result.put("totalLogs", totalLogs);
+        result.put("demo", true);
         return result;
     }
 

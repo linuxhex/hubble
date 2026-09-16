@@ -28,10 +28,10 @@ public class DailyReportService {
 
     @Scheduled(cron = "0 0 13 * * ?")
     public void sendDailyReport() {
-        log.info("开始发送每日经营分析报告");
+        log.info("开始发送每日业务监控报告");
         try {
             String content = buildReportContent();
-            String title = "每日经营分析报告";
+            String title = "每日业务监控报告";
             int sentCount = 0;
 
             // 1. 发送到全局配置的 webhook
@@ -68,9 +68,9 @@ public class DailyReportService {
                 }
             }
 
-            log.info("每日经营分析报告发送完成，共发送 {} 个机器人", sentCount);
+            log.info("每日业务监控报告发送完成，共发送 {} 个机器人", sentCount);
         } catch (Exception e) {
-            log.error("发送每日经营分析报告失败: {}", e.getMessage(), e);
+            log.error("发送每日业务监控报告失败: {}", e.getMessage(), e);
         }
     }
 
@@ -88,7 +88,7 @@ public class DailyReportService {
         double utilizationRate = totalGuns > 0 ? Math.round(chargingGuns * 10000.0 / totalGuns) / 100.0 : 0;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## 每日经营分析报告\n\n");
+        sb.append("## 每日业务监控报告\n\n");
         sb.append("**日期：").append(date).append("**\n\n");
         sb.append("---\n\n");
 
@@ -103,7 +103,7 @@ public class DailyReportService {
         sb.append("| 充电枪数 | ").append(chargingGuns).append("/").append(totalGuns).append(" |\n\n");
 
         sb.append("---\n\n");
-        sb.append("*数据来源：经营分析系统*");
+        sb.append("*数据来源：业务监控系统*");
 
         return sb.toString();
     }

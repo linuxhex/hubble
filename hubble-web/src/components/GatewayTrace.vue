@@ -22,8 +22,24 @@
     </div>
 
     <div v-if="!traceId && nodes.length === 0" class="empty-state">
-      <p>请输入链路ID查询链路详情</p>
-      <p style="font-size: 12px; color: #999; margin-top: 8px;">链路ID可在日志搜索、异常大盘等处获取</p>
+      <p v-if="recentTraces.length === 0">请输入链路ID查询链路详情</p>
+      <p style="font-size: 12px; color: #999; margin-top: 8px;" v-if="recentTraces.length === 0">链路ID可在日志搜索、异常大盘等处获取</p>
+      <div v-if="recentTraces.length > 0" class="recent-traces">
+        <p style="font-size: 14px; font-weight: 500; margin-bottom: 12px;">最近链路（点击查询）</p>
+        <div class="recent-traces-list">
+          <div
+            v-for="trace in recentTraces"
+            :key="trace.traceId"
+            class="recent-trace-item"
+            @click="selectRecentTrace(trace)"
+          >
+            <span class="trace-id">{{ trace.traceId }}</span>
+            <span class="trace-app">{{ trace.appName }}</span>
+            <span class="trace-url">{{ trace.url || '--' }}</span>
+            <span class="trace-time">{{ trace.timestamp }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-else-if="searched && nodes.length === 0" class="empty-state">
@@ -128,6 +144,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getTraceChain } from '@/api/trace-chain.js'
+import { queryGatewayLogs } from '@/api/keyword-log-query.js'
 
 const route = useRoute()
 const traceId = ref('')
@@ -139,6 +156,7 @@ const searched = ref(false)
 const nodes = ref([])
 const totalLogs = ref(0)
 const selectedNode = ref(null)
+const recentTraces = ref([])
 
 const totalDuration = computed(() => {
   return nodes.value.reduce((sum, node) => sum + (node.duration || 0), 0)
@@ -173,6 +191,37 @@ const selectNode = (index) => {
   selectedNode.value = selectedNode.value === index ? null : index
 }
 
+const fetchRecentTraces = async () => {
+  try {
+    const end = new Date()
+    const start = new Date(end.getTime() - 60 * 60 * 1000)
+    const fmt = (d) => {
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    }
+    const res = await queryGatewayLogs({ page: 1, pageSize: 50, startTime: fmt(start), endTime: fmt(end) })
+    const data = res?.data || res
+    const records = data?.records || data?.list || []
+    const seen = new Set()
+    const traces = []
+    for (const r of records) {
+      if (r.traceId && !seen.has(r.traceId)) {
+        seen.add(r.traceId)
+        traces.push({ traceId: r.traceId, appName: r.appName, url: r.url, timestamp: r.timestamp })
+        if (traces.length >= 10) break
+      }
+    }
+    recentTraces.value = traces
+  } catch (e) {
+    console.error('获取最近链路失败:', e)
+  }
+}
+
+const selectRecentTrace = (trace) => {
+  traceId.value = trace.traceId
+  fetchTraceChain()
+}
+
 onMounted(() => {
   const queryTraceId = route.query.traceId
   const queryTimestamp = route.query.timestamp
@@ -182,6 +231,8 @@ onMounted(() => {
       traceTimestamp.value = queryTimestamp
     }
     fetchTraceChain()
+  } else {
+    fetchRecentTraces()
   }
 })
 </script>
@@ -752,5 +803,69 @@ onMounted(() => {
   overflow-x: auto;
   color: #586069;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.recent-traces {
+  margin-top: 16px;
+  text-align: left;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.recent-traces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-trace-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: white;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.recent-trace-item:hover {
+  border-color: #409EFF;
+  background: #ecf5ff;
+}
+
+.trace-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: #409EFF;
+  flex-shrink: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-app {
+  font-size: 12px;
+  color: #606266;
+  flex-shrink: 0;
+  min-width: 100px;
+}
+
+.trace-url {
+  font-size: 12px;
+  color: #909399;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-time {
+  font-size: 11px;
+  color: #c0c4cc;
+  flex-shrink: 0;
 }
 </style>

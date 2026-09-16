@@ -16,14 +16,14 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/biz-analysis")
 @RequiredArgsConstructor
-@Tag(name = "经营分析", description = "经营分析数据")
+@Tag(name = "业务监控", description = "业务监控数据")
 public class BizAnalysisController {
 
     private final BizAnalysisService bizAnalysisService;
     private final DailyReportService dailyReportService;
 
     @PostMapping("/test-daily-report")
-    @Operation(summary = "测试发送每日经营分析报告")
+    @Operation(summary = "测试发送每日业务监控报告")
     public Result<String> testDailyReport() {
         dailyReportService.sendDailyReport();
         return Result.success("已触发测试发送");

@@ -42,8 +42,6 @@ public class AuthFilter extends OncePerRequestFilter {
             "/sls-keywords/query",
 
             // 监控大盘接口（无需用户认证）
-            "/alert-config/query",
-            "/alert-config/mgmt/test-alert",
             "/alert-data/query",
             "/alert-data/service-health",
             "/alert-data/minute-timeline",
@@ -64,7 +62,7 @@ public class AuthFilter extends OncePerRequestFilter {
             // 中间件告警接口（无需用户认证）
             "/middleware-alert/",
 
-            // 经营分析接口（无需用户认证）
+            // 业务监控接口（无需用户认证）
             "/biz-analysis/",
 
             // 服务负载接口（无需用户认证）
