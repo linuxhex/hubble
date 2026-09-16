@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  hubble:
+    build: .
+    container_name: hubble
+    ports:
+      - "80:80"
+      - "18081:18081"
+    env_file:
+      - .env
+    environment:
+      # 钉钉登录（必须与钉钉开放平台回调地址一致）
+      - DINGTALK_APP_KEY=${DINGTALK_APP_KEY}
+      - DINGTALK_APP_SECRET=${DINGTALK_APP_SECRET}
+      - DINGTALK_REDIRECT_URL=${DINGTALK_REDIRECT_URL:-http://localhost:18081/login}
+      
+      # 阿里云 SLS/ARMS
+      - ALIYUN_SLS_ACCESS_KEY_ID=${ALIYUN_SLS_ACCESS_KEY_ID}
+      - ALIYUN_SLS_ACCESS_KEY_SECRET=${ALIYUN_SLS_ACCESS_KEY_SECRET}
+      - ALIYUN_SLS_PROJECT=${ALIYUN_SLS_PROJECT}
+      - ALIYUN_SLS_ENDPOINT=${ALIYUN_SLS_ENDPOINT:-cn-hangzhou.log.aliyuncs.com}
+      - ARMS_AK_ID=${ARMS_AK_ID}
+      - ARMS_AK_SECRET=${ARMS_AK_SECRET}
+      - ARMS_REGION=${ARMS_REGION:-cn-hangzhou}
+      
+      # Grafana 监控
+      - GRAFANA_URL=${GRAFANA_URL}
+      - GRAFANA_USER=${GRAFANA_USER:-admin}
+      - GRAFANA_PASS=${GRAFANA_PASS}
+      - GRAFANA_DS_UID=${GRAFANA_DS_UID}
+      - GRAFANA_NODE_DS_UID=${GRAFANA_NODE_DS_UID}
+      - GRAFANA_ALIYUN_DS_UID=${GRAFANA_ALIYUN_DS_UID}
+      - GRAFANA_BIZ_DS_UID=${GRAFANA_BIZ_DS_UID}
+      
+      # Doris 数仓（业务监控）
+      - MCP_BASE_URL=${MCP_BASE_URL}
+      - MCP_USER=${MCP_USER}
+      - MCP_PASS=${MCP_PASS}
+      
+      # JWT 认证
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      - BIZ_ANALYSIS_USERS=${BIZ_ANALYSIS_USERS}
+      
+      # 钉钉机器人（告警）
+      - DINGTALK_ROBOT_WEBHOOK=${DINGTALK_ROBOT_WEBHOOK}
+      - DINGTALK_ROBOT_SECRET=${DINGTALK_ROBOT_SECRET}
+      
+      # 服务负载配置
+      - SERVICE_LOAD_APP_MAP=${SERVICE_LOAD_APP_MAP}
+      - SERVICE_LOAD_FALLBACK_SERVICES=${SERVICE_LOAD_FALLBACK_SERVICES}
+      - GATEWAY_CORE_SERVICES=${GATEWAY_CORE_SERVICES}
+      - GATEWAY_KNOWN_SERVICES=${GATEWAY_KNOWN_SERVICES}
+      - TRACE_GATEWAY_CONTAINER=${TRACE_GATEWAY_CONTAINER}
+      - TRACE_FALLBACK_SERVICES=${TRACE_FALLBACK_SERVICES}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18081/system/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
