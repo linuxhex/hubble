@@ -88,6 +88,12 @@ function handleWsMessage(data) {
       break
     case 'error':
       isThinking.value = false
+      if (currentAssistantMsg && !currentAssistantMsg.content) {
+        const idx = messages.value.indexOf(currentAssistantMsg)
+        if (idx >= 0) {
+          messages.value[idx].content = '抱歉，AI 服务暂时不可用：' + (data.message || '响应异常') + '。请稍后重试。'
+        }
+      }
       currentAssistantMsg = null
       if (data.message !== 'thinking') {
         ElMessage.error(data.message || 'AI 响应异常')

@@ -375,22 +375,13 @@ const handleRefresh = () => {
 }
 
 onMounted(() => {
-  // 读取路由参数，预填充搜索表单
   if (route.query.appName) {
     searchForm.appName = route.query.appName
   }
   if (route.query.keyword) {
-    // 从异常大盘跳转时，使用keyword作为搜索条件
     searchForm.keyword = route.query.keyword
   }
-  if (route.query.level === 'ERROR') {
-    // 如果指定了ERROR级别，可以在搜索时添加level过滤
-    // 暂时不处理level，后续可以扩展
-  }
-  // 从异常大盘跳转时，自动触发搜索
-  if (route.query.appName || route.query.keyword) {
-    fetchLogs()
-  }
+  fetchLogs()
 })
 
 const logDistributionVisible = ref(false)

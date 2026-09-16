@@ -109,10 +109,10 @@ parent-system:
     public-key: ${JWT_PUBLIC_KEY:}
     expiration: ${JWT_EXPIRATION:3600000}
 
-# 经营分析配置
+# 业务监控配置
 biz-analysis:
   allowed-users: ${BIZ_ANALYSIS_USERS:}
-  query-server-url: ${MCP_BASE_URL:}
+  query-server-url: ${MCP_BASE_URL:http://query-server-internal:8080}
   query-user: ${MCP_USER:}
   query-pass: ${MCP_PASS:}
 

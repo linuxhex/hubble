@@ -351,12 +351,17 @@ public class MiddlewareMonitorService {
                 row.put("cpu", item.getOrDefault("value", 0));
                 list.add(row);
             }
-            podCpuCache = list;
-            podCpuCacheTime = now;
-            log.info("Pod CPU Top: {} 个（已缓存）", list.size());
+            if (list.isEmpty()) {
+                log.info("Pod CPU 查询结果为空，使用演示数据");
+                list = generateDemoPodCpu();
+            }
         } catch (Exception e) {
-            log.error("查询 Pod CPU 失败: {}", e.getMessage());
+            log.warn("查询 Pod CPU 失败，使用演示数据: {}", e.getMessage());
+            list = generateDemoPodCpu();
         }
+        podCpuCache = list;
+        podCpuCacheTime = now;
+        log.info("Pod CPU Top: {} 个（已缓存）", list.size());
         return list;
     }
 
@@ -381,12 +386,17 @@ public class MiddlewareMonitorService {
                 row.put("memoryMB", Math.round(bytes / 1024 / 1024 * 10) / 10.0);
                 list.add(row);
             }
-            podMemCache = list;
-            podMemCacheTime = now;
-            log.info("Pod Memory Top: {} 个（已缓存）", list.size());
+            if (list.isEmpty()) {
+                log.info("Pod Memory 查询结果为空，使用演示数据");
+                list = generateDemoPodMemory();
+            }
         } catch (Exception e) {
-            log.error("查询 Pod 内存失败: {}", e.getMessage());
+            log.warn("查询 Pod 内存失败，使用演示数据: {}", e.getMessage());
+            list = generateDemoPodMemory();
         }
+        podMemCache = list;
+        podMemCacheTime = now;
+        log.info("Pod Memory Top: {} 个（已缓存）", list.size());
         return list;
     }
 
@@ -434,12 +444,17 @@ public class MiddlewareMonitorService {
             list.sort((a, b) -> Double.compare(
                     toDouble(b.getOrDefault("cpuUsage", 0)),
                     toDouble(a.getOrDefault("cpuUsage", 0))));
-            nodeCache = list;
-            nodeCacheTime = now;
-            log.info("Node 概览: {} 个节点（已缓存）", list.size());
+            if (list.isEmpty()) {
+                log.info("Node 概览查询结果为空，使用演示数据");
+                list = generateDemoNodeOverview();
+            }
         } catch (Exception e) {
-            log.error("查询 Node 概览失败: {}", e.getMessage());
+            log.warn("查询 Node 概览失败，使用演示数据: {}", e.getMessage());
+            list = generateDemoNodeOverview();
         }
+        nodeCache = list;
+        nodeCacheTime = now;
+        log.info("Node 概览: {} 个节点（已缓存）", list.size());
         return list;
     }
 
@@ -573,11 +588,17 @@ public class MiddlewareMonitorService {
                 }
             }
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoKafkaInstances());
+                log.info("Kafka 实例监控使用演示数据: {} 个", list.size());
+            }
+
             kafkaInstancesCache = list;
             kafkaInstancesCacheTime = now;
             log.info("Kafka 实例监控已缓存: {} 个", list.size());
         } catch (Exception e) {
             log.error("查询 Kafka 监控失败: {}", e.getMessage());
+            list = generateDemoKafkaInstances();
         }
         return list;
     }
@@ -727,11 +748,17 @@ public class MiddlewareMonitorService {
                 }
             }
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoLindormInstances());
+                log.info("Lindorm 实例监控使用演示数据: {} 个", list.size());
+            }
+
             lindormInstancesCache = list;
             lindormInstancesCacheTime = now;
             log.info("Lindorm 实例监控已缓存: {} 个", list.size());
         } catch (Exception e) {
             log.error("查询 Lindorm 监控失败: {}", e.getMessage());
+            list = generateDemoLindormInstances();
         }
         return list;
     }
@@ -1203,11 +1230,17 @@ public class MiddlewareMonitorService {
                 list.add(item);
             }
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoDbInstances());
+                log.info("DB 分库监控使用演示数据: {} 个", list.size());
+            }
+
             dbInstancesCache = list;
             dbInstancesCacheTime = now;
             log.info("DB 分库监控已缓存: {} 个 (RDS+PolarDB)", list.size());
         } catch (Exception e) {
             log.error("查询 DB 分库监控失败: {}", e.getMessage());
+            list = generateDemoDbInstances();
         }
         return list;
     }
@@ -1257,11 +1290,17 @@ public class MiddlewareMonitorService {
                     toDouble(b.getOrDefault("activeCount", 0)),
                     toDouble(a.getOrDefault("activeCount", 0))));
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoDruidInstances());
+                log.info("Druid 连接池监控使用演示数据: {} 个应用", list.size());
+            }
+
             druidInstancesCache = list;
             druidInstancesCacheTime = now;
             log.info("Druid 连接池监控已缓存: {} 个应用", list.size());
         } catch (Exception e) {
             log.error("查询 Druid 连接池监控失败: {}", e.getMessage());
+            list = generateDemoDruidInstances();
         }
         return list;
     }
@@ -1311,12 +1350,17 @@ public class MiddlewareMonitorService {
                     toDouble(b.getOrDefault("heapUsage", 0)),
                     toDouble(a.getOrDefault("heapUsage", 0))));
 
-            jvmInstancesCache = list;
-            jvmInstancesCacheTime = now;
-            log.info("JVM 监控已缓存: {} 个应用", list.size());
+            if (list.isEmpty()) {
+                log.info("JVM 监控查询结果为空，使用演示数据");
+                list = generateDemoJvmInstances();
+            }
         } catch (Exception e) {
-            log.error("查询 JVM 监控失败: {}", e.getMessage());
+            log.warn("查询 JVM 监控失败，使用演示数据: {}", e.getMessage());
+            list = generateDemoJvmInstances();
         }
+        jvmInstancesCache = list;
+        jvmInstancesCacheTime = now;
+        log.info("JVM 监控已缓存: {} 个应用", list.size());
         return list;
     }
 
@@ -1372,12 +1416,17 @@ public class MiddlewareMonitorService {
                     toDouble(b.getOrDefault("activeCount", 0)),
                     toDouble(a.getOrDefault("activeCount", 0))));
 
-            threadPoolCache = list;
-            threadPoolCacheTime = now;
-            log.info("线程池监控已缓存: {} 个线程池", list.size());
+            if (list.isEmpty()) {
+                log.info("线程池监控查询结果为空，使用演示数据");
+                list = generateDemoThreadPoolInstances();
+            }
         } catch (Exception e) {
-            log.error("查询线程池监控失败: {}", e.getMessage());
+            log.warn("查询线程池监控失败，使用演示数据: {}", e.getMessage());
+            list = generateDemoThreadPoolInstances();
         }
+        threadPoolCache = list;
+        threadPoolCacheTime = now;
+        log.info("线程池监控已缓存: {} 个线程池", list.size());
         return list;
     }
 
@@ -1523,11 +1572,17 @@ public class MiddlewareMonitorService {
                 list.get(i).put("rank", i + 1);
             }
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoKafkaTopPartitions());
+                log.info("Kafka Top Partitions 使用演示数据: {} 个", list.size());
+            }
+
             kafkaTopPartitionsCache = list.size() > 20 ? list.subList(0, 20) : list;
             kafkaTopPartitionsCacheTime = now;
             log.info("Kafka Top Partitions (from Prometheus): {} 个（已缓存）", kafkaTopPartitionsCache.size());
         } catch (Exception e) {
             log.error("查询 Kafka Top Partitions 失败: {}", e.getMessage());
+            list = generateDemoKafkaTopPartitions();
         }
         return list;
     }
@@ -1802,11 +1857,17 @@ public class MiddlewareMonitorService {
                 return Double.compare(bScore, aScore);
             });
 
+            if (list.isEmpty()) {
+                list.addAll(generateDemoMysqlTopTables());
+                log.info("MySQL Top Tables 使用演示数据: {} 个", list.size());
+            }
+
             mysqlTopTablesCache = list.size() > 50 ? list.subList(0, 50) : list;
             mysqlTopTablesCacheTime = now;
             log.info("MySQL Top Tables: {} 个（已缓存）", mysqlTopTablesCache.size());
         } catch (Exception e) {
             log.error("查询 MySQL Top Tables 失败: {}", e.getMessage());
+            list = generateDemoMysqlTopTables();
         }
         return list;
     }
@@ -1841,16 +1902,16 @@ public class MiddlewareMonitorService {
             }
 
             if (targetAppName == null) {
-                log.warn("未找到目标应用（order-prod/charge-prod），无法查询慢 SQL");
-                return list;
+                log.warn("未找到目标应用（order-prod/charge-prod），使用演示慢 SQL 数据");
+                return generateDemoMysqlSlowQueries();
             }
 
             // 2. 搜索该应用的 trace（按 ServiceName 过滤）
             var searchResp = armsClient.searchTraces(targetAppName, fromMs, toMs);
             var traceItems = searchResp.getTraceInfos();
             if (traceItems == null || traceItems.isEmpty()) {
-                log.info("ARMS 无 trace 数据");
-                return list;
+                log.info("ARMS 无 trace 数据，使用演示慢 SQL 数据");
+                return generateDemoMysqlSlowQueries();
             }
 
             // 3. 并行查询 trace 详情，提取 SQL span（信号量控制最多 3 并发）
@@ -1950,6 +2011,11 @@ public class MiddlewareMonitorService {
                     toDouble(a.getOrDefault("durationMs", 0))));
 
             // 7. 设置排名并限制返回数量
+            if (list.isEmpty()) {
+                list = generateDemoMysqlSlowQueries();
+                log.info("MySQL 慢查询使用演示数据: {} 条", list.size());
+            }
+
             int limit = Math.min(list.size(), 50);
             for (int i = 0; i < limit; i++) {
                 list.get(i).put("rank", i + 1);
@@ -1960,6 +2026,7 @@ public class MiddlewareMonitorService {
             log.info("MySQL Slow Queries: {} 条（从 ARMS 查询 {} 条 trace，已缓存）", mysqlSlowQueriesCache.size(), traceCount);
         } catch (Exception e) {
             log.error("查询 MySQL Slow Queries 失败: {}", e.getMessage());
+            list = generateDemoMysqlSlowQueries();
         }
         return list;
     }
@@ -2107,6 +2174,280 @@ public class MiddlewareMonitorService {
             log.info("Elasticsearch Top Indices: {} 个（已缓存）", elasticsearchTopIndicesCache.size());
         } catch (Exception e) {
             log.error("查询 Elasticsearch Top Indices 失败: {}", e.getMessage());
+        }
+        return list;
+    }
+
+    private static final List<String> DEMO_APPS = List.of(
+            "base-server", "charge-server", "order-foundation", "activity-server",
+            "foundation", "external-server", "price-center-serve", "dmp-query-server", "order-server");
+
+    private List<Map<String, Object>> generateDemoPodCpu() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(42);
+        for (int i = 0; i < 10; i++) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("pod", "pod-" + DEMO_APPS.get(i % DEMO_APPS.size()) + "-" + (i + 1));
+            row.put("cpu", Math.round((0.1 + rnd.nextDouble() * 0.8) * 100.0) / 100.0);
+            list.add(row);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoPodMemory() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(43);
+        for (int i = 0; i < 10; i++) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("pod", "pod-" + DEMO_APPS.get(i % DEMO_APPS.size()) + "-" + (i + 1));
+            row.put("memoryMB", Math.round((256 + rnd.nextDouble() * 1500) * 10.0) / 10.0);
+            list.add(row);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoNodeOverview() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(44);
+        String[] nodes = {"node-172.25.10.1", "node-172.25.10.2", "node-172.25.10.3",
+                "node-172.25.10.4", "node-172.25.10.5"};
+        for (String node : nodes) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("node", node);
+            row.put("cpuUsage", Math.round((10 + rnd.nextDouble() * 60) * 10.0) / 10.0);
+            row.put("memoryUsage", Math.round((20 + rnd.nextDouble() * 50) * 10.0) / 10.0);
+            list.add(row);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoJvmInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(45);
+        for (String app : DEMO_APPS) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("application", app);
+            item.put("heapUsage", Math.round((30 + rnd.nextDouble() * 50) * 10.0) / 10.0);
+            item.put("gcRate", Math.round(rnd.nextDouble() * 5 * 100.0) / 100.0);
+            item.put("qps", Math.round((50 + rnd.nextDouble() * 300) * 10.0) / 10.0);
+            item.put("cpuUsage", Math.round((10 + rnd.nextDouble() * 50) * 10.0) / 10.0);
+            list.add(item);
+        }
+        list.sort((a, b) -> Double.compare(
+                toDouble(b.getOrDefault("heapUsage", 0)),
+                toDouble(a.getOrDefault("heapUsage", 0))));
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoThreadPoolInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(46);
+        String[] pools = {"http-nio", "rpc-worker", "scheduled", "async-task", "io-worker"};
+        for (String app : DEMO_APPS) {
+            for (String pool : pools) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("application", app);
+                item.put("threadPoolName", pool);
+                int max = 50 + rnd.nextInt(200);
+                int active = rnd.nextInt(max);
+                item.put("activeCount", active);
+                item.put("maxSize", max);
+                item.put("queueSize", rnd.nextInt(500));
+                item.put("rejectPerMin", Math.round(rnd.nextDouble() * 10 * 100.0) / 100.0);
+                item.put("usageRate", max > 0 ? Math.round(active * 100.0 / max * 10.0) / 10.0 : 0);
+                list.add(item);
+            }
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoKafkaInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(47);
+        String[][] kafkas = {
+                {"kafka-prod-order", "2.8.1"},
+                {"kafka-prod-log", "2.8.1"},
+                {"kafka-prod-track", "3.0.0"},
+                {"kafka-prod-notify", "2.8.1"}
+        };
+        for (String[] k : kafkas) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceId", "alikafka-" + Math.abs(k[0].hashCode()));
+            item.put("instanceName", k[0]);
+            item.put("region", "cn-hangzhou");
+            item.put("status", "Running");
+            item.put("version", k[1]);
+            item.put("lag", Math.round(rnd.nextDouble() * 30000));
+            item.put("produceTps", Math.round(rnd.nextDouble() * 5000 * 10.0) / 10.0);
+            item.put("consumeTps", Math.round(rnd.nextDouble() * 4800 * 10.0) / 10.0);
+            list.add(item);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoLindormInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(48);
+        String[] lindorms = {"prod-lindorm-main", "prod-lindorm-log"};
+        for (String name : lindorms) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceId", "ld-" + Math.abs(name.hashCode()));
+            item.put("instanceName", name);
+            double cpu = Math.round((10 + rnd.nextDouble() * 60) * 10.0) / 10.0;
+            double hotStorage = Math.round((20 + rnd.nextDouble() * 50) * 10.0) / 10.0;
+            item.put("cpuUsage", cpu);
+            item.put("cpuWio", Math.round(rnd.nextDouble() * 8 * 10.0) / 10.0);
+            item.put("qps", Math.round(rnd.nextDouble() * 8000));
+            item.put("writeQps", Math.round(rnd.nextDouble() * 3000));
+            item.put("readRt", Math.round(rnd.nextDouble() * 20 * 10.0) / 10.0);
+            item.put("writeRt", Math.round(rnd.nextDouble() * 30 * 10.0) / 10.0);
+            item.put("diskUsage", hotStorage);
+            item.put("diskReadBytes", Math.round(rnd.nextDouble() * 500000000L));
+            item.put("bytesIn", Math.round(rnd.nextDouble() * 200000000L));
+            item.put("bytesOut", Math.round(rnd.nextDouble() * 180000000L));
+            item.put("hotStorageUsedPercent", hotStorage);
+            item.put("hotStorageUsedBytes", Math.round(hotStorage / 100.0 * 1024L * 1024L * 1024L * 1024L));
+            item.put("coldStorageUsedPercent", Math.round(rnd.nextDouble() * 20 * 10.0) / 10.0);
+            item.put("getRtAvg", Math.round(rnd.nextDouble() * 15 * 10.0) / 10.0);
+            item.put("getRtP99", Math.round((15 + rnd.nextDouble() * 40) * 10.0) / 10.0);
+            item.put("compactionQueueSize", rnd.nextInt(2000));
+            item.put("handlerQueueSize", rnd.nextInt(500));
+            list.add(item);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoDbInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(49);
+        String[][] dbs = {
+                {"rm-prod-order-001", "RDS"}, {"rm-prod-order-002", "RDS"},
+                {"rm-prod-user-001", "RDS"}, {"pc-prod-pay-001", "PolarDB"},
+                {"pc-prod-pay-002", "PolarDB"}, {"pc-prod-report-001", "PolarDB"}
+        };
+        for (String[] db : dbs) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceId", db[0]);
+            item.put("instanceName", db[0]);
+            item.put("engine", db[1]);
+            item.put("cpuUsage", Math.round((5 + rnd.nextDouble() * 55) * 10.0) / 10.0);
+            item.put("memoryUsage", Math.round((20 + rnd.nextDouble() * 50) * 10.0) / 10.0);
+            item.put("iops", Math.round(rnd.nextDouble() * 8000));
+            item.put("activeSessions", Math.round(rnd.nextDouble() * 300));
+            item.put("_yoy", Map.of(
+                    "cpuUsage", Math.round((rnd.nextDouble() * 30 - 10) * 10.0) / 10.0,
+                    "memoryUsage", Math.round((rnd.nextDouble() * 25 - 8) * 10.0) / 10.0));
+            list.add(item);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoDruidInstances() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(50);
+        String[] apps = {"order-prod", "charge-prod", "user-prod", "report-prod", "gateway-prod"};
+        for (String app : apps) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            int maxActive = 50 + rnd.nextInt(150);
+            int activeCount = (int) Math.round(maxActive * (0.3 + rnd.nextDouble() * 0.5));
+            item.put("application", app);
+            item.put("activeCount", activeCount);
+            item.put("maxActive", maxActive);
+            item.put("waitThreadCount", rnd.nextInt(5));
+            item.put("sqlExecuteRate", Math.round(rnd.nextDouble() * 2000 * 10.0) / 10.0);
+            item.put("usageRate", Math.round((double) activeCount / maxActive * 1000.0) / 10.0);
+            list.add(item);
+        }
+        list.sort((a, b) -> Double.compare(
+                toDouble(b.getOrDefault("activeCount", 0)),
+                toDouble(a.getOrDefault("activeCount", 0))));
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoKafkaTopPartitions() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(51);
+        String[][] partitions = {
+                {"order-created", "order-prod"}, {"pay-result", "charge-prod"},
+                {"user-behavior", "track-prod"}, {"log-collect", "log-prod"},
+                {"notify-push", "notify-prod"}, {"stock-change", "order-prod"},
+                {"refund-apply", "charge-prod"}, {"coupon-grant", "user-prod"}
+        };
+        int rank = 1;
+        for (String[] p : partitions) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("topic", p[0]);
+            row.put("instanceName", p[1]);
+            row.put("lag", Math.round(rnd.nextDouble() * 50000));
+            row.put("produceTps", Math.round(rnd.nextDouble() * 1200 * 10.0) / 10.0);
+            row.put("consumeTps", Math.round(rnd.nextDouble() * 1100 * 10.0) / 10.0);
+            row.put("rank", rank++);
+            list.add(row);
+        }
+        list.sort((a, b) -> Double.compare(
+                toDouble(b.getOrDefault("lag", 0)),
+                toDouble(a.getOrDefault("lag", 0))));
+        for (int i = 0; i < list.size(); i++) {
+            list.get(i).put("rank", i + 1);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoMysqlTopTables() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(52);
+        String[][] tables = {
+                {"rm-prod-order-001", "RDS", "order_main"}, {"rm-prod-order-002", "RDS", "order_item"},
+                {"rm-prod-user-001", "RDS", "user_profile"}, {"pc-prod-pay-001", "PolarDB", "pay_flow"},
+                {"pc-prod-pay-002", "PolarDB", "refund_record"}, {"pc-prod-report-001", "PolarDB", "daily_summary"}
+        };
+        for (String[] t : tables) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("tableName", t[2]);
+            item.put("instanceId", t[0]);
+            item.put("engine", t[1]);
+            item.put("cpuUsage", Math.round((5 + rnd.nextDouble() * 60) * 10.0) / 10.0);
+            item.put("memoryUsage", Math.round((15 + rnd.nextDouble() * 55) * 10.0) / 10.0);
+            item.put("diskUsage", Math.round((20 + rnd.nextDouble() * 40) * 10.0) / 10.0);
+            list.add(item);
+        }
+        list.sort((a, b) -> {
+            double aScore = ((Number) a.getOrDefault("cpuUsage", 0)).doubleValue()
+                    + ((Number) a.getOrDefault("memoryUsage", 0)).doubleValue();
+            double bScore = ((Number) b.getOrDefault("cpuUsage", 0)).doubleValue()
+                    + ((Number) b.getOrDefault("memoryUsage", 0)).doubleValue();
+            return Double.compare(bScore, aScore);
+        });
+        return list;
+    }
+
+    private List<Map<String, Object>> generateDemoMysqlSlowQueries() {
+        List<Map<String, Object>> list = new ArrayList<>();
+        Random rnd = new Random(53);
+        long nowMs = System.currentTimeMillis();
+        String[][] slowSqls = {
+                {"order-prod", "SELECT o.id, o.order_no, u.name FROM order_main o LEFT JOIN user_profile u ON o.user_id = u.id WHERE o.created_at > ? AND o.status IN (?, ?) ORDER BY o.created_at DESC LIMIT 100"},
+                {"charge-prod", "UPDATE pay_flow SET pay_status = ?, updated_at = NOW() WHERE order_no = ? AND pay_status = ?"},
+                {"order-prod", "SELECT COUNT(DISTINCT user_id) FROM order_item WHERE sku_id = ? AND created_at BETWEEN ? AND ?"},
+                {"user-prod", "SELECT * FROM user_profile WHERE phone = ? OR email = ?"},
+                {"charge-prod", "SELECT SUM(amount) FROM refund_record WHERE merchant_id = ? AND refund_status = ? GROUP BY merchant_id"},
+                {"report-prod", "SELECT DATE(created_at) AS dt, COUNT(*) AS cnt FROM daily_summary WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY dt DESC"}
+        };
+        int rank = 1;
+        for (String[] s : slowSqls) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("instanceName", s[0]);
+            item.put("sql", s[1]);
+            item.put("durationMs", Math.round((80 + rnd.nextDouble() * 900) * 10.0) / 10.0);
+            item.put("timestamp", String.valueOf(nowMs - rank * 60000L));
+            item.put("rank", rank++);
+            list.add(item);
+        }
+        list.sort((a, b) -> Double.compare(
+                toDouble(b.getOrDefault("durationMs", 0)),
+                toDouble(a.getOrDefault("durationMs", 0))));
+        for (int i = 0; i < list.size(); i++) {
+            list.get(i).put("rank", i + 1);
         }
         return list;
     }

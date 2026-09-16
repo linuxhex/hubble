@@ -63,3 +63,9 @@ INSERT INTO alert_threshold_config (config_key, config_value, description) VALUE
 ('mw_yoy_surge_threshold', '300', '中间件告警同比涨幅阈值(%)，当前值相对昨天同一5分钟窗口'),
 ('mw_yoy_abs_floor', '30', '中间件告警同比绝对值下限，当前值低于此值不告警')
 ON DUPLICATE KEY UPDATE config_value = config_value;
+
+-- 预置钉钉机器人演示数据
+INSERT INTO dingtalk_robot (name, webhook, secret, remark, enabled, created_at, updated_at) VALUES
+('运维群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-ops-001', 'SEC-demo-ops-secret-key', '通知到运维群，接收服务器告警和故障通知', 1, NOW(), NOW()),
+('技术告警群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-tech-002', 'SEC-demo-tech-secret-key', '通知到技术告警群，接收中间件和服务异常告警', 1, NOW(), NOW()),
+('业务监控群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-biz-003', NULL, '通知到业务监控群，接收业务指标异常告警', 0, NOW(), NOW());

@@ -121,6 +121,7 @@ public class ServiceLoadService {
 
                 ServiceLoadDaily load = new ServiceLoadDaily();
                 load.setAppName(appName);
+                load.setPid("N/A");
                 load.setStatDate(date);
 
                 double baseCpu = 20 + random.nextDouble() * 40;

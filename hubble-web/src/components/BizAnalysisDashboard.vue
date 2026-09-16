@@ -1,7 +1,7 @@
 <template>
   <div class="biz-analysis-page">
     <div class="page-header">
-      <h2>经营分析</h2>
+      <h2>业务监控</h2>
       <el-button size="small" @click="fetchAll" :loading="loading">刷新</el-button>
     </div>
 
@@ -558,7 +558,7 @@ const fetchAll = async () => {
     renderHourlyCompChart()
     renderHourlyChargingCompChart()
   } catch (e) {
-    console.error('经营分析加载失败:', e)
+    console.error('业务监控加载失败:', e)
   } finally {
     loading.value = false
   }

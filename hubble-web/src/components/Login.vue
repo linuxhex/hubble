@@ -10,6 +10,13 @@ const authStore = useAuthStore()
 const loading = ref(false)
 
 onMounted(async () => {
+  const existingToken = localStorage.getItem('auth_token')
+  if (existingToken) {
+    const redirect = route.query.redirect || '/gateway'
+    router.replace(redirect)
+    return
+  }
+
   const code = route.query.code
   if (code) {
     loading.value = true

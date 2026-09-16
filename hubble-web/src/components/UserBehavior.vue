@@ -149,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import { queryUserBehaviorTrace } from '@/api/user-behavior-trace-query.js'
 import { getTraceChain } from '@/api/trace-chain.js'
@@ -228,7 +228,11 @@ const selectTraceNode = (traceId, index) => {
   }
 }
 
-selectedDate.value = getTodayDate()
+onMounted(() => {
+  selectedDate.value = getTodayDate()
+  keyword.value = '13800138000'
+  handleQuery()
+})
 </script>
 
 <style scoped>

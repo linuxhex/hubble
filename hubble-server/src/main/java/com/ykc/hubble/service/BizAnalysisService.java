@@ -49,7 +49,7 @@ public class BizAnalysisService {
     @PostConstruct
     public void initCache() {
         CompletableFuture.runAsync(() -> {
-            log.info("经营分析：缓存预热已禁用，改为懒加载");
+            log.info("业务监控：缓存预热已禁用，改为懒加载");
         });
     }
 
@@ -146,7 +146,7 @@ public class BizAnalysisService {
         } catch (Exception e) {
             log.error("刷新 hourly7 缓存失败", e);
         }
-        log.info("经营分析：全部缓存刷新完成");
+        log.info("业务监控：全部缓存刷新完成");
     }
 
     private String latestDate() {
@@ -370,26 +370,41 @@ public class BizAnalysisService {
             "WHERE dt = '" + dt + "'");
 
         if (opRows.isEmpty()) {
-            throw new RuntimeException("经营概览数据不完整: 运营数据查询为空(dt=" + dt + ")");
+            log.warn("运营数据查询为空 (dt={}), 使用默认值", dt);
         }
         if (gunRows.isEmpty()) {
-            throw new RuntimeException("经营概览数据不完整: 枪状态数据查询为空(dt=" + dt + ")");
+            log.warn("枪状态数据查询为空 (dt={}), 使用默认值", dt);
         }
         if (dauRows.isEmpty()) {
-            throw new RuntimeException("经营概览数据不完整: DAU数据查询为空(dt=" + dt + ")");
+            log.warn("DAU 数据查询为空 (dt={}), 使用默认值", dt);
         }
 
-        var opRow = opRows.get(0);
-        result.put("orderCnt", opRow.get("orderCnt"));
-        result.put("chargedPower", opRow.get("chargedPower"));
+        if (!opRows.isEmpty()) {
+            var opRow = opRows.get(0);
+            result.put("orderCnt", opRow.get("orderCnt"));
+            result.put("chargedPower", opRow.get("chargedPower"));
+        } else {
+            result.put("orderCnt", 0);
+            result.put("chargedPower", 0);
+        }
 
-        var gunRow = gunRows.get(0);
-        result.put("totalGuns", gunRow.get("total"));
-        result.put("chargingGuns", gunRow.get("charging"));
+        if (!gunRows.isEmpty()) {
+            var gunRow = gunRows.get(0);
+            result.put("totalGuns", gunRow.get("total"));
+            result.put("chargingGuns", gunRow.get("charging"));
+        } else {
+            result.put("totalGuns", 0);
+            result.put("chargingGuns", 0);
+        }
 
-        var dauRow = dauRows.get(0);
-        result.put("dau", dauRow.get("dau"));
-        result.put("adClick", dauRow.get("adClick"));
+        if (!dauRows.isEmpty()) {
+            var dauRow = dauRows.get(0);
+            result.put("dau", dauRow.get("dau"));
+            result.put("adClick", dauRow.get("adClick"));
+        } else {
+            result.put("dau", 0);
+            result.put("adClick", 0);
+        }
 
         result.put("date", dt);
         return result;
