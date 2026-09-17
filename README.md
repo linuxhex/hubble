@@ -1,6 +1,6 @@
 # Hubble - 业务监控平台
 
-全链路业务监控平台，覆盖网关流量、异常检测、性能劣化、中间件监控、链路追踪、用户行为分析、经营分析等核心能力。
+全链路业务监控平台，覆盖网关流量、异常检测、性能劣化、中间件监控、链路追踪、用户行为分析、业务监控等核心能力。
 
 ## 系统截图
 
@@ -68,14 +68,14 @@ Redis 中间件监控，展示 Big Keys Top10 和慢查询 Top10，支持 Tab �
 
 ![告警配置](docs/screenshots/10-alert-config.png)
 
-### 经营分析
+### 业务监控
 业务经营数据全景分析，含 6 大指标卡（累计订单量、累计电量、枪总量、充电中枪数、小程序 DAU、广告点击数）、多维度图表（小时对比、月度趋势、年度同比、每日订单&电量、收入趋势、枪利用率、充电时段分布、DAU/MAU 趋势）、业务场景拆分、区域/站点排名 Top20。
 
-![经营分析-指标卡](docs/screenshots/11-biz-analysis.png)
+![业务监控-指标卡](docs/screenshots/11-biz-analysis.png)
 
-![经营分析-图表](docs/screenshots/11-biz-analysis-charts.png)
+![业务监控-图表](docs/screenshots/11-biz-analysis-charts.png)
 
-![经营分析-排名](docs/screenshots/11-biz-analysis-tables.png)
+![业务监控-排名](docs/screenshots/11-biz-analysis-tables.png)
 
 ## 目录结构
 
@@ -104,7 +104,7 @@ hubble/
 | 用户行为 | `/user-behavior` | 手机号查询行为轨迹 + 链路下钻 + 日志详情 |
 | 日志搜索 | `/keyword-log-query` | 关键字搜索 SLS 日志 |
 | 告警配置 | `/alert-config` | 日志监控规则 + 机器人配置 |
-| 经营分析 | `/biz-analysis` | 订单/电量/枪/DAU 全维度分析 |
+| 业务监控 | `/biz-analysis` | 订单/电量/枪/DAU 全维度分析 |
 
 ## 开发模式
 
@@ -198,7 +198,7 @@ docs/requirements/
 - `场景1-页面加载.png`
 - `场景2-切换服务-base-server.png`
 - `场景3-图表数据渲染.png`
-- `修复后-经营分析页面.png`（bug 修复场景用"修复前/修复后"前缀）
+- `修复后-业务监控页面.png`（bug 修复场景用"修复前/修复后"前缀）
 
 ### 测试报告格式
 
