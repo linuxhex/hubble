@@ -71,40 +71,40 @@
         </div>
       </div>
 
-      <div class="chain-flow">
+      <div class="chain-tree-table">
+        <div class="tree-header">
+          <div class="tree-col-path">接口路径 / 服务</div>
+          <div class="tree-col-info">类型 / 位置</div>
+          <div class="tree-col-duration">耗时</div>
+          <div class="tree-col-bar">耗时分布</div>
+        </div>
         <div
-          v-for="(node, index) in nodes"
-          :key="index"
-          class="chain-node-wrapper"
+          v-for="(node, idx) in visibleNodes"
+          :key="node._origIndex"
+          class="tree-row"
+          :class="{ 'row-error': node.status === 'error', 'row-active': selectedNode === node._origIndex }"
+          :style="{ paddingLeft: (node.level || 0) * 24 + 12 + 'px' }"
+          @click="selectNode(node._origIndex)"
         >
-          <div
-            class="chain-node"
-            :class="{ 'node-error': node.status === 'error', 'node-active': selectedNode === index }"
-            @click="selectNode(index)"
-          >
-            <div class="node-header">
-              <span class="node-service">{{ node.serviceName }}</span>
-              <span class="node-status" :class="node.status">{{ node.status === 'error' ? '异常' : '正常' }}</span>
-            </div>
-            <div class="node-path">{{ node.apiPath || '--' }}</div>
-            <div class="node-stats">
-              <div class="stat-item">
-                <span class="stat-label">耗时</span>
-                <span class="stat-value" :class="{'stat-slow': node.duration > 1000}">{{ node.duration }}ms</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">日志</span>
-                <span class="stat-value">{{ node.logCount }}</span>
-              </div>
-            </div>
-            <div class="node-meta">
-              <span class="node-time">{{ node.formattedTime }}</span>
-            </div>
+          <div class="tree-col-path">
+            <span class="expand-icon" v-if="node.hasChildren" @click.stop="toggleExpand(node._origIndex)">
+              {{ node.expanded ? '−' : '+' }}
+            </span>
+            <span class="expand-icon" v-else style="visibility: hidden">+</span>
+            <el-tooltip :content="node.apiPath || node.serviceName" placement="top" :show-after="300">
+              <span class="path-text" @click.stop="copyPath(node.apiPath)">{{ node.apiPath || node.serviceName }}</span>
+            </el-tooltip>
           </div>
-          <div v-if="index < nodes.length - 1" class="chain-arrow">
-            <div class="arrow-line"></div>
-            <div class="arrow-duration">{{ node.duration }}ms</div>
-            <div class="arrow-head">▶</div>
+          <div class="tree-col-info">
+            <span class="info-service">{{ node.serviceName }}</span>
+            <span class="info-type">{{ node.callType || 'URL' }}</span>
+            <span class="info-ip">{{ node.ip || '--' }}</span>
+          </div>
+          <div class="tree-col-duration">
+            <span :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
+          </div>
+          <div class="tree-col-bar">
+            <div class="duration-bar" :style="{ width: getBarWidth(node.duration) + '%' }"></div>
           </div>
         </div>
       </div>
@@ -143,6 +143,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getTraceChain } from '@/api/trace-chain.js'
 import { queryGatewayLogs } from '@/api/keyword-log-query.js'
 
@@ -166,6 +167,40 @@ const errorCount = computed(() => {
   return nodes.value.filter(node => node.status === 'error').length
 })
 
+const visibleNodes = computed(() => {
+  const allNodes = nodes.value
+  if (allNodes.length === 0) return []
+
+  const childrenMap = {}
+  allNodes.forEach((node, idx) => {
+    const pid = node.parentId
+    if (pid !== undefined && pid !== null && pid >= 0) {
+      if (!childrenMap[pid]) childrenMap[pid] = []
+      childrenMap[pid].push(idx)
+    }
+  })
+
+  const result = []
+  const addWithChildren = (idx, level) => {
+    const node = allNodes[idx]
+    result.push({ ...node, level, _origIndex: idx })
+    if (node.expanded && childrenMap[idx]) {
+      for (const childIdx of childrenMap[idx]) {
+        addWithChildren(childIdx, level + 1)
+      }
+    }
+  }
+
+  // Start from root nodes (parentId === -1 or no parent)
+  allNodes.forEach((node, idx) => {
+    if (node.parentId === undefined || node.parentId === null || node.parentId < 0) {
+      addWithChildren(idx, 0)
+    }
+  })
+
+  return result
+})
+
 const fetchTraceChain = async () => {
   if (!traceId.value.trim()) return
   loading.value = true
@@ -175,7 +210,30 @@ const fetchTraceChain = async () => {
     const res = await getTraceChain(traceId.value.trim(), timeRange.value, traceTimestamp.value)
     const data = res?.data || res
     currentTraceId.value = data.traceId || traceId.value
-    nodes.value = data.nodes || []
+    const rawNodes = data.nodes || []
+    const maxDuration = Math.max(...rawNodes.map(n => n.duration || 0), 1)
+
+    // 先构建 hasChildren 映射
+    const childCount = {}
+    rawNodes.forEach((node, idx) => {
+      const pid = node.parentId
+      if (pid !== undefined && pid !== null && pid >= 0) {
+        childCount[pid] = (childCount[pid] || 0) + 1
+      }
+    })
+
+    nodes.value = rawNodes.map((node, idx) => ({
+      ...node,
+      id: node.id !== undefined ? node.id : idx,
+      parentId: node.parentId !== undefined ? node.parentId : -1,
+      level: 0,
+      hasChildren: (childCount[idx] || 0) > 0,
+      expanded: true,
+      callType: node.callType || 'URL',
+      ip: node.ip || '',
+      barWidth: ((node.duration || 0) / maxDuration) * 100,
+      _origIndex: idx
+    }))
     totalLogs.value = data.totalLogs || 0
     searched.value = true
   } catch (e) {
@@ -187,8 +245,33 @@ const fetchTraceChain = async () => {
   }
 }
 
+const getBarWidth = (duration) => {
+  const maxDuration = Math.max(...nodes.value.map(n => n.duration || 0), 1)
+  return ((duration || 0) / maxDuration) * 100
+}
+
+const toggleExpand = (index) => {
+  nodes.value[index].expanded = !nodes.value[index].expanded
+}
+
 const selectNode = (index) => {
   selectedNode.value = selectedNode.value === index ? null : index
+}
+
+const copyPath = async (path, event) => {
+  if (!path) return
+  try {
+    await navigator.clipboard.writeText(path)
+    ElMessage.success('已复制')
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = path
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    ElMessage.success('已复制')
+  }
 }
 
 const fetchRecentTraces = async () => {
@@ -390,291 +473,143 @@ onMounted(() => {
   color: #f56c6c;
 }
 
-.chain-flow {
+.chain-tree-table {
   background: white;
-  padding: 16px;
   border-radius: 4px;
-  display: flex;
-  align-items: flex-start;
-  overflow-x: auto;
-  gap: 0;
-}
-
-.chain-node-wrapper {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.chain-node {
-  width: 180px;
-  border: 2px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: white;
-}
-
-@media (max-width: 768px) {
-  .chain-node {
-    width: 140px;
-    padding: 8px;
-  }
-}
-
-@media (max-width: 480px) {
-  .chain-node {
-    width: 120px;
-    padding: 6px;
-  }
-}
-
-.chain-node:hover {
-  border-color: #409eff;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
-}
-
-.chain-node.node-active {
-  border-color: #409eff;
-  background: #ecf5ff;
-}
-
-.chain-node.node-error {
-  border-color: #f56c6c;
-  background: #fef0f0;
-}
-
-.node-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.node-service {
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 110px;
-}
-
-@media (max-width: 768px) {
-  .node-service {
-    font-size: 12px;
-    max-width: 90px;
-  }
-}
-
-@media (max-width: 480px) {
-  .node-service {
-    font-size: 11px;
-    max-width: 75px;
-  }
-}
-
-.node-status {
-  font-size: 10px;
-  padding: 2px 5px;
-  border-radius: 10px;
-  font-weight: 500;
-}
-
-@media (max-width: 480px) {
-  .node-status {
-    font-size: 9px;
-    padding: 1px 4px;
-  }
-}
-
-.node-path {
-  font-size: 11px;
-  color: #1890ff;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-bottom: 6px;
-}
-
-@media (max-width: 768px) {
-  .node-path {
-    font-size: 10px;
-  }
-}
-
-@media (max-width: 480px) {
-  .node-path {
-    font-size: 9px;
-    margin-bottom: 4px;
-  }
-}
-
-.node-stats {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-  padding: 4px 0;
-  border-top: 1px solid #f0f0f0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-@media (max-width: 480px) {
-  .node-stats {
-    gap: 6px;
-    margin-bottom: 4px;
-    padding: 3px 0;
-  }
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.stat-label {
-  font-size: 10px;
-  color: #999;
-}
-
-@media (max-width: 480px) {
-  .stat-label {
-    font-size: 9px;
-  }
-}
-
-.stat-value {
-  font-size: 12px;
-  font-weight: 600;
-  color: #333;
-}
-
-@media (max-width: 768px) {
-  .stat-value {
-    font-size: 11px;
-  }
-}
-
-@media (max-width: 480px) {
-  .stat-value {
-    font-size: 10px;
-  }
-}
-
-.stat-value.stat-slow {
-  color: #f56c6c;
-}
-
-.node-status.success {
-  background: #f0f9eb;
-  color: #67c23a;
-}
-
-.node-status.error {
-  background: #fef0f0;
-  color: #f56c6c;
-}
-
-.node-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #999;
-}
-
-@media (max-width: 480px) {
-  .node-meta {
-    font-size: 9px;
-  }
-}
-
-.chain-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0 8px;
-  position: relative;
-  min-width: 60px;
-  justify-content: center;
-}
-
-@media (max-width: 768px) {
-  .chain-arrow {
-    padding: 0 6px;
-    min-width: 50px;
-  }
-}
-
-@media (max-width: 480px) {
-  .chain-arrow {
-    padding: 0 4px;
-    min-width: 40px;
-  }
-}
-
-.arrow-line {
-  width: 40px;
-  height: 2px;
-  background: linear-gradient(to right, #dcdfe6, #c0c4cc);
-  margin-bottom: 6px;
-  position: relative;
-}
-
-@media (max-width: 768px) {
-  .arrow-line {
-    width: 30px;
-  }
-}
-
-@media (max-width: 480px) {
-  .arrow-line {
-    width: 25px;
-    margin-bottom: 4px;
-  }
-}
-
-.arrow-line::after {
-  content: '';
-  position: absolute;
-  right: -2px;
-  top: -3px;
-  width: 0;
-  height: 0;
-  border-left: 6px solid #c0c4cc;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-}
-
-.arrow-duration {
-  font-size: 11px;
-  color: #666;
-  font-weight: 500;
-  white-space: nowrap;
-  background: white;
-  padding: 2px 6px;
-  border-radius: 10px;
   border: 1px solid #e4e7ed;
 }
 
-@media (max-width: 768px) {
-  .arrow-duration {
-    font-size: 10px;
-    padding: 1px 5px;
-  }
+.tree-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e7ed;
+  font-size: 12px;
+  font-weight: 600;
+  color: #606266;
 }
 
-@media (max-width: 480px) {
-  .arrow-duration {
-    font-size: 9px;
-    padding: 1px 4px;
-  }
+.tree-col-path {
+  flex: 2;
+  min-width: 0;
 }
 
-.arrow-head {
-  display: none;
+.tree-col-info {
+  flex: 1.5;
+  min-width: 0;
+}
+
+.tree-col-duration {
+  width: 80px;
+  text-align: right;
+}
+
+.tree-col-bar {
+  width: 120px;
+  position: relative;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 13px;
+}
+
+.tree-row:hover {
+  background: #f5f7fa;
+}
+
+.tree-row.row-active {
+  background: #ecf5ff;
+}
+
+.tree-row.row-error {
+  background: #fef0f0;
+}
+
+.tree-row.row-error:hover {
+  background: #fde2e2;
+}
+
+.expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  font-size: 12px;
+  color: #909399;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.expand-icon:hover {
+  color: #409eff;
+}
+
+.path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #303133;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.path-text:hover {
+  background: #e6f7ff;
+  color: #1890ff;
+}
+
+.info-service {
+  color: #409eff;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.info-type {
+  color: #909399;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.info-ip {
+  color: #c0c4cc;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.tree-col-duration {
+  font-size: 13px;
+  color: #606266;
+}
+
+.duration-slow {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.duration-bar {
+  height: 16px;
+  background: #67c23a;
+  border-radius: 2px;
+  min-width: 4px;
+  transition: width 0.3s;
+}
+
+.row-error .duration-bar {
+  background: #f56c6c;
 }
 
 .node-detail {

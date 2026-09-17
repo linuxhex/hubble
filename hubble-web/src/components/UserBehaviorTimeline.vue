@@ -97,33 +97,40 @@
               <el-icon class="is-loading"><Loading /></el-icon>
               <span>加载链路数据...</span>
             </div>
-            <div v-else-if="traceData[item.trace]?.nodes?.length > 0" class="trace-chain">
-              <div class="chain-flow">
-                <div
-                  v-for="(node, index) in traceData[item.trace].nodes"
-                  :key="index"
-                  class="chain-node-wrapper"
-                >
-                  <div
-                    class="chain-node"
-                    :class="{ 'node-error': node.status === 'error', 'node-active': traceData[item.trace]?.selectedNode === index }"
-                    @click="selectTraceNode(item.trace, index)"
-                  >
-                    <div class="node-header">
-                      <span class="node-service">{{ node.serviceName }}</span>
-                      <span class="node-status" :class="node.status">{{ node.status === 'error' ? '异常' : '正常' }}</span>
-                    </div>
-                    <div class="node-path">{{ node.apiPath || '--' }}</div>
-                    <div class="node-meta">
-                      <span class="node-time">{{ node.formattedTime }}</span>
-                      <span class="node-logs">{{ node.logCount }} 条日志</span>
-                    </div>
-                  </div>
-                  <div v-if="index < traceData[item.trace].nodes.length - 1" class="chain-arrow">
-                    <div class="arrow-line"></div>
-                    <div class="arrow-duration">{{ node.duration }}ms</div>
-                    <div class="arrow-head">▶</div>
-                  </div>
+            <div v-else-if="traceData[item.trace]?.nodes?.length > 0" class="trace-chain-tree-table">
+              <div class="tree-header">
+                <div class="tree-col-path">接口路径 / 服务</div>
+                <div class="tree-col-info">类型 / 位置</div>
+                <div class="tree-col-duration">耗时</div>
+                <div class="tree-col-bar">耗时分布</div>
+              </div>
+              <div
+                v-for="(node, nodeIndex) in getVisibleTraceNodes(item.trace)"
+                :key="node._origIndex"
+                class="tree-row"
+                :class="{ 'row-error': node.status === 'error', 'row-active': traceData[item.trace]?.selectedNode === node._origIndex }"
+                :style="{ paddingLeft: (node.level || 0) * 24 + 12 + 'px' }"
+                @click="selectTraceNode(item.trace, node._origIndex)"
+              >
+                <div class="tree-col-path">
+                  <span class="expand-icon" v-if="node.hasChildren" @click.stop="toggleTraceNodeExpand(item.trace, nodeIndex)">
+                    {{ node.expanded ? '−' : '+' }}
+                  </span>
+                  <span class="expand-icon" v-else style="visibility: hidden">+</span>
+                  <el-tooltip :content="node.apiPath || node.serviceName" placement="top" :show-after="300">
+                    <span class="path-text" @click.stop="copyPath(node.apiPath)">{{ node.apiPath || node.serviceName }}</span>
+                  </el-tooltip>
+                </div>
+                <div class="tree-col-info">
+                  <span class="info-service">{{ node.serviceName }}</span>
+                  <span class="info-type">{{ node.callType || 'URL' }}</span>
+                  <span class="info-ip">{{ node.ip || '--' }}</span>
+                </div>
+                <div class="tree-col-duration">
+                  <span :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
+                </div>
+                <div class="tree-col-bar">
+                  <div class="duration-bar" :style="{ width: getTraceBarWidth(item.trace, node.duration) + '%' }"></div>
                 </div>
               </div>
               <div v-if="traceData[item.trace]?.selectedNode !== null && traceData[item.trace]?.selectedNode !== undefined" class="node-detail">
@@ -157,6 +164,7 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { ArrowDown, ArrowUp, Link, Loading } from '@element-plus/icons-vue'
 import { generateSlsLink } from '@/utils/sls'
 import { getTraceChain } from '@/api/trace-chain.js'
@@ -197,9 +205,28 @@ const toggleTraceExpand = async (index, traceId, timestamp) => {
     try {
       const res = await getTraceChain(traceId, '24h')
       const data = res?.data || res
+      const rawNodes = data.nodes || []
+
+      const childCount = {}
+      rawNodes.forEach((node, idx) => {
+        const pid = node.parentId
+        if (pid !== undefined && pid !== null && pid >= 0) {
+          childCount[pid] = (childCount[pid] || 0) + 1
+        }
+      })
+
       traceData[traceId] = {
         loading: false,
-        nodes: data.nodes || [],
+        nodes: rawNodes.map((node, idx) => ({
+          ...node,
+          id: node.id !== undefined ? node.id : idx,
+          parentId: node.parentId !== undefined ? node.parentId : -1,
+          level: 0,
+          hasChildren: (childCount[idx] || 0) > 0,
+          expanded: true,
+          callType: node.callType || 'URL',
+          ip: node.ip || ''
+        })),
         selectedNode: null
       }
     } catch (e) {
@@ -209,9 +236,71 @@ const toggleTraceExpand = async (index, traceId, timestamp) => {
   }
 }
 
+const getTraceBarWidth = (traceId, duration) => {
+  const nodes = traceData[traceId]?.nodes || []
+  const maxDuration = Math.max(...nodes.map(n => n.duration || 0), 1)
+  return ((duration || 0) / maxDuration) * 100
+}
+
+const getVisibleTraceNodes = (traceId) => {
+  const td = traceData[traceId]
+  if (!td || !td.nodes || td.nodes.length === 0) return []
+
+  const allNodes = td.nodes
+  const childrenMap = {}
+  allNodes.forEach((node, idx) => {
+    const pid = node.parentId
+    if (pid !== undefined && pid !== null && pid >= 0) {
+      if (!childrenMap[pid]) childrenMap[pid] = []
+      childrenMap[pid].push(idx)
+    }
+  })
+
+  const result = []
+  const addWithChildren = (idx, level) => {
+    const node = allNodes[idx]
+    result.push({ ...node, level, _origIndex: idx })
+    if (node.expanded && childrenMap[idx]) {
+      for (const childIdx of childrenMap[idx]) {
+        addWithChildren(childIdx, level + 1)
+      }
+    }
+  }
+
+  allNodes.forEach((node, idx) => {
+    if (node.parentId === undefined || node.parentId === null || node.parentId < 0) {
+      addWithChildren(idx, 0)
+    }
+  })
+
+  return result
+}
+
+const toggleTraceNodeExpand = (traceId, index) => {
+  if (traceData[traceId]) {
+    traceData[traceId].nodes[index].expanded = !traceData[traceId].nodes[index].expanded
+  }
+}
+
 const selectTraceNode = (traceId, index) => {
   if (traceData[traceId]) {
     traceData[traceId].selectedNode = traceData[traceId].selectedNode === index ? null : index
+  }
+}
+
+const copyPath = async (path) => {
+  if (!path) return
+  try {
+    await navigator.clipboard.writeText(path)
+    ElMessage.success('已复制')
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = path
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    ElMessage.success('已复制')
   }
 }
 
@@ -475,6 +564,140 @@ watch(() => props.items, () => {
   gap: 16px;
 }
 
+.trace-chain-tree-table {
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.trace-chain-tree-table .tree-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e7ed;
+  font-size: 12px;
+  font-weight: 600;
+  color: #606266;
+}
+
+.trace-chain-tree-table .tree-col-path {
+  flex: 2;
+  min-width: 0;
+}
+
+.trace-chain-tree-table .tree-col-info {
+  flex: 1.5;
+  min-width: 0;
+}
+
+.trace-chain-tree-table .tree-col-duration {
+  width: 70px;
+  text-align: right;
+}
+
+.trace-chain-tree-table .tree-col-bar {
+  width: 100px;
+  position: relative;
+}
+
+.trace-chain-tree-table .tree-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 12px;
+}
+
+.trace-chain-tree-table .tree-row:hover {
+  background: #f5f7fa;
+}
+
+.trace-chain-tree-table .tree-row.row-active {
+  background: #ecf5ff;
+}
+
+.trace-chain-tree-table .tree-row.row-error {
+  background: #fef0f0;
+}
+
+.trace-chain-tree-table .expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  font-size: 11px;
+  color: #909399;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.trace-chain-tree-table .expand-icon:hover {
+  color: #409eff;
+}
+
+.trace-chain-tree-table .path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #303133;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.trace-chain-tree-table .path-text:hover {
+  background: #e6f7ff;
+  color: #1890ff;
+}
+
+.trace-chain-tree-table .info-service {
+  color: #409eff;
+  margin-right: 6px;
+  font-size: 11px;
+}
+
+.trace-chain-tree-table .info-type {
+  color: #909399;
+  margin-right: 6px;
+  font-size: 11px;
+}
+
+.trace-chain-tree-table .info-ip {
+  color: #c0c4cc;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.trace-chain-tree-table .tree-col-duration {
+  font-size: 12px;
+  color: #606266;
+}
+
+.trace-chain-tree-table .duration-slow {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.trace-chain-tree-table .duration-bar {
+  height: 14px;
+  background: #67c23a;
+  border-radius: 2px;
+  min-width: 3px;
+  transition: width 0.3s;
+}
+
+.trace-chain-tree-table .row-error .duration-bar {
+  background: #f56c6c;
+}
+
 .chain-flow {
   display: flex;
   align-items: center;
@@ -552,6 +775,15 @@ watch(() => props.items, () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 140px;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.chain-node .node-path:hover {
+  background: #e6f7ff;
+  color: #1890ff;
 }
 
 .chain-node .node-meta {
