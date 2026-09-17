@@ -367,46 +367,59 @@ public class TraceChainService {
                 .filter(l -> l.getContainerName() != null && !l.getContainerName().isBlank())
                 .collect(Collectors.groupingBy(LogEntry::getContainerName, LinkedHashMap::new, Collectors.toList()));
 
-        // 构建节点列表
+        // 构建节点列表，基于时间重叠推断父子关系
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Map.Entry<String, List<LogEntry>>> serviceEntries = new ArrayList<>(logsByService.entrySet());
+
+        // 先收集每个服务的时间范围
+        long[][] serviceTimeRanges = new long[serviceEntries.size()][2];
+        for (int i = 0; i < serviceEntries.size(); i++) {
+            List<LogEntry> serviceLogs = serviceEntries.get(i).getValue();
+            serviceLogs.sort((a, b) -> Long.compare(parseTimestamp(a.getTime()), parseTimestamp(b.getTime())));
+            serviceTimeRanges[i][0] = parseTimestamp(serviceLogs.get(0).getTime());
+            serviceTimeRanges[i][1] = parseTimestamp(serviceLogs.get(serviceLogs.size() - 1).getTime());
+        }
 
         for (int i = 0; i < serviceEntries.size(); i++) {
             Map.Entry<String, List<LogEntry>> entry = serviceEntries.get(i);
             String serviceName = entry.getKey();
             List<LogEntry> serviceLogs = entry.getValue();
 
-            // 按时间排序
             serviceLogs.sort((a, b) -> {
                 long timeA = parseTimestamp(a.getTime());
                 long timeB = parseTimestamp(b.getTime());
                 return Long.compare(timeA, timeB);
             });
 
-            LogEntry firstLog = serviceLogs.get(0);
-            LogEntry lastLog = serviceLogs.get(serviceLogs.size() - 1);
+            long startTime = serviceTimeRanges[i][0];
+            long endTime = serviceTimeRanges[i][1];
 
-            long startTime = parseTimestamp(firstLog.getTime());
-            long endTime = parseTimestamp(lastLog.getTime());
+            // 推断父节点：找到包含当前服务启动时间的最近外层服务
+            int parentId = -1;
+            for (int j = i - 1; j >= 0; j--) {
+                if (serviceTimeRanges[j][0] <= startTime && serviceTimeRanges[j][1] >= startTime && j != i) {
+                    parentId = j;
+                    break;
+                }
+            }
 
-            // 计算耗时：与下一个服务的时间差
-            long duration = 0;
-            if (i < serviceEntries.size() - 1) {
-                List<LogEntry> nextServiceLogs = serviceEntries.get(i + 1).getValue();
-                nextServiceLogs.sort((a, b) -> Long.compare(parseTimestamp(a.getTime()), parseTimestamp(b.getTime())));
-                long nextStartTime = parseTimestamp(nextServiceLogs.get(0).getTime());
-                duration = nextStartTime - startTime;
+            long duration = endTime - startTime;
+            if (duration == 0) {
+                duration = 1;
             }
 
             Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", i);
+            node.put("parentId", parentId);
             node.put("serviceName", serviceName);
-            node.put("apiPath", extractApiPath(firstLog.getMessage()));
+            node.put("apiPath", extractApiPath(serviceLogs.get(0).getMessage()));
             node.put("timestamp", startTime);
             node.put("formattedTime", formatTimestamp(startTime));
             node.put("duration", duration);
             node.put("logCount", serviceLogs.size());
             node.put("status", determineStatus(serviceLogs));
             node.put("logs", serviceLogs.stream().map(this::logToMap).collect(Collectors.toList()));
+            node.put("ip", serviceLogs.get(0).getContainerIp());
 
             nodes.add(node);
         }
@@ -423,28 +436,54 @@ public class TraceChainService {
      */
     private Map<String, Object> generateDemoTraceChain(String traceId) {
         long now = System.currentTimeMillis();
+        // 树形结构：gateway → order → charge → pay-channel
+        //                         → user
+        //                    → inventory
         String[][] services = {
                 {"gateway-prod", "POST /api/order/create"},
                 {"order-prod", "POST /order/create"},
                 {"charge-prod", "POST /charge/pay"},
-                {"user-prod", "GET /user/profile"}
+                {"pay-channel-prod", "POST /pay/channel/submit"},
+                {"user-prod", "GET /user/profile"},
+                {"inventory-prod", "POST /inventory/deduct"}
         };
+        int[] parentIds = {-1, 0, 1, 2, 1, 1};
         String[][] messages = {
                 {"收到请求 POST /api/order/create，开始转发", "路由匹配成功，转发至下游服务", "请求处理完成，耗时统计已上报"},
-                {"开始处理订单创建，校验参数", "调用库存服务扣减库存成功", "订单落库完成，发送 Kafka 消息"},
-                {"支付渠道路由：支付宝", "支付下单成功，等待异步通知", "支付流水落库完成"},
-                {"查询用户画像信息命中缓存", "用户状态校验通过"}
+                {"开始处理订单创建，校验参数", "调用库存服务扣减库存成功", "调用支付服务发起扣款", "订单落库完成，发送 Kafka 消息"},
+                {"支付渠道路由：支付宝", "支付下单成功，等待异步通知", "调用支付通道提交扣款"},
+                {"支付宝网关请求发送", "收到支付宝成功响应", "签名验签通过"},
+                {"查询用户画像信息命中缓存", "用户状态校验通过"},
+                {"Redis 缓存扣减", "数据库库存同步更新完成"}
         };
-        int[] durations = {120, 350, 280, 15};
+        int[] durations = {800, 500, 280, 150, 30, 120};
         List<Map<String, Object>> nodes = new ArrayList<>();
-        long t = now - 800;
+        long baseTime = now - 1200;
+        long[] startTimes = new long[services.length];
+        long[] endTimes = new long[services.length];
+
+        // 计算每个服务的启动和结束时间（模拟真实调用链）
+        startTimes[0] = baseTime;
+        endTimes[0] = baseTime + durations[0];
+        startTimes[1] = baseTime + 50;
+        endTimes[1] = baseTime + 50 + durations[1];
+        startTimes[2] = baseTime + 100;
+        endTimes[2] = baseTime + 100 + durations[2];
+        startTimes[3] = baseTime + 120;
+        endTimes[3] = baseTime + 120 + durations[3];
+        startTimes[4] = baseTime + 80;
+        endTimes[4] = baseTime + 80 + durations[4];
+        startTimes[5] = baseTime + 60;
+        endTimes[5] = baseTime + 60 + durations[5];
+
         int totalLogs = 0;
         for (int i = 0; i < services.length; i++) {
+            long t = startTimes[i];
             List<Map<String, Object>> logs = new ArrayList<>();
             for (int j = 0; j < messages[i].length; j++) {
                 Map<String, Object> logMap = new LinkedHashMap<>();
-                logMap.put("time", String.valueOf(t + j * 40));
-                logMap.put("formattedTime", formatTimestamp(t + j * 40));
+                logMap.put("time", String.valueOf(t + j * 30));
+                logMap.put("formattedTime", formatTimestamp(t + j * 30));
                 logMap.put("level", "INFO");
                 logMap.put("message", messages[i][j]);
                 logMap.put("trace", traceId);
@@ -454,16 +493,19 @@ public class TraceChainService {
             }
             totalLogs += logs.size();
             Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", i);
+            node.put("parentId", parentIds[i]);
             node.put("serviceName", services[i][0]);
             node.put("apiPath", services[i][1]);
-            node.put("timestamp", t);
-            node.put("formattedTime", formatTimestamp(t));
+            node.put("timestamp", startTimes[i]);
+            node.put("formattedTime", formatTimestamp(startTimes[i]));
             node.put("duration", durations[i]);
             node.put("logCount", logs.size());
             node.put("status", "success");
             node.put("logs", logs);
+            node.put("ip", "10.0." + (i + 1) + ".10");
+            node.put("callType", i == 0 ? "HTTP" : "RPC");
             nodes.add(node);
-            t += durations[i] + 50;
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("traceId", traceId);
