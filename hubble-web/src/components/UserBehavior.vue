@@ -62,29 +62,36 @@
                     v-for="(node, nodeIndex) in getVisibleTraceNodes(row.trace)"
                     :key="node._origIndex"
                     class="tree-row"
-                    :class="{ 'row-error': node.status === 'error', 'row-active': traceData[row.trace]?.selectedNode === node._origIndex }"
-                    :style="{ paddingLeft: (node.level || 0) * 24 + 12 + 'px' }"
+                    :class="{ 'row-error': node.status === 'error', 'row-active': traceData[row.trace]?.selectedNode === node._origIndex, 'row-leaf': !node.hasChildren }"
+                    :style="{ paddingLeft: (node.level || 0) * 28 + 16 + 'px' }"
                     @click="selectTraceNode(row.trace, node._origIndex)"
                   >
                     <div class="tree-col-path">
-                      <span class="expand-icon" v-if="node.hasChildren" @click.stop="toggleTraceNodeExpand(row.trace, nodeIndex)">
-                        {{ node.expanded ? '−' : '+' }}
+                      <span
+                        v-if="node.hasChildren"
+                        class="expand-btn"
+                        :class="{ expanded: node.expanded }"
+                        @click.stop="toggleTraceNodeExpand(row.trace, node._origIndex)"
+                      >
+                        <el-icon><CaretRight /></el-icon>
                       </span>
-                      <span class="expand-icon" v-else style="visibility: hidden">+</span>
+                      <span v-else class="leaf-dot"></span>
                       <el-tooltip :content="node.apiPath || node.serviceName" placement="top" :show-after="300">
                         <span class="path-text" @click.stop="copyPath(node.apiPath)">{{ node.apiPath || node.serviceName }}</span>
                       </el-tooltip>
                     </div>
                     <div class="tree-col-info">
-                      <span class="info-service">{{ node.serviceName }}</span>
+                      <el-tag size="small" effect="plain" class="service-tag">{{ node.serviceName }}</el-tag>
                       <span class="info-type">{{ node.callType || 'URL' }}</span>
                       <span class="info-ip">{{ node.ip || '--' }}</span>
                     </div>
                     <div class="tree-col-duration">
-                      <span :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
+                      <span class="duration-value" :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
                     </div>
                     <div class="tree-col-bar">
-                      <div class="duration-bar" :style="{ width: getTraceBarWidth(row.trace, node.duration) + '%' }"></div>
+                      <div class="duration-bar-bg">
+                        <div class="duration-bar" :class="{ 'bar-error': node.status === 'error' }" :style="{ width: getTraceBarWidth(row.trace, node.duration) + '%' }"></div>
+                      </div>
                     </div>
                   </div>
                   <div v-if="traceData[row.trace]?.selectedNode !== null && traceData[row.trace]?.selectedNode !== undefined" class="node-detail">
@@ -143,7 +150,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import { Loading, CaretRight } from '@element-plus/icons-vue'
 import { queryUserBehaviorTrace } from '@/api/user-behavior-trace-query.js'
 import { getTraceChain } from '@/api/trace-chain.js'
 
@@ -415,11 +422,11 @@ onMounted(() => {
 }
 
 .trace-expand-area {
-  margin-top: 16px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  padding: 16px;
-  background: #fafafa;
+  margin-top: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafbfc;
 }
 
 .trace-chain-container {
@@ -431,35 +438,34 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  color: #999;
+  color: #909399;
   gap: 8px;
+  font-size: 13px;
 }
 
 .trace-empty {
   text-align: center;
   padding: 40px;
-  color: #999;
-}
-
-.trace-chain {
-  width: 100%;
+  color: #909399;
 }
 
 .trace-chain-tree-table {
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
   overflow: hidden;
+  background: white;
 }
 
 .trace-chain-tree-table .tree-header {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
-  font-size: 12px;
+  padding: 10px 14px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
+  font-size: 11px;
   font-weight: 600;
-  color: #606266;
+  color: #909399;
+  letter-spacing: 0.5px;
 }
 
 .trace-chain-tree-table .tree-col-path {
@@ -470,30 +476,36 @@ onMounted(() => {
 .trace-chain-tree-table .tree-col-info {
   flex: 1.5;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .trace-chain-tree-table .tree-col-duration {
-  width: 70px;
+  width: 80px;
   text-align: right;
 }
 
 .trace-chain-tree-table .tree-col-bar {
-  width: 100px;
-  position: relative;
+  width: 120px;
 }
 
 .trace-chain-tree-table .tree-row {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f2f3f5;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
   font-size: 12px;
 }
 
+.trace-chain-tree-table .tree-row:last-child {
+  border-bottom: none;
+}
+
 .trace-chain-tree-table .tree-row:hover {
-  background: #f5f7fa;
+  background: #f5f8ff;
 }
 
 .trace-chain-tree-table .tree-row.row-active {
@@ -501,25 +513,50 @@ onMounted(() => {
 }
 
 .trace-chain-tree-table .tree-row.row-error {
-  background: #fef0f0;
+  background: #fff8f8;
 }
 
-.trace-chain-tree-table .expand-icon {
+.trace-chain-tree-table .tree-row.row-leaf {
+  opacity: 0.85;
+}
+
+.trace-chain-tree-table .expand-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-right: 4px;
-  font-size: 11px;
-  color: #909399;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border-radius: 3px;
   cursor: pointer;
-  user-select: none;
+  color: #909399;
+  transition: all 0.2s;
   flex-shrink: 0;
 }
 
-.trace-chain-tree-table .expand-icon:hover {
+.trace-chain-tree-table .expand-btn:hover {
+  background: #ecf5ff;
   color: #409eff;
+}
+
+.trace-chain-tree-table .expand-btn .el-icon {
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.trace-chain-tree-table .expand-btn.expanded .el-icon {
+  transform: rotate(90deg);
+}
+
+.trace-chain-tree-table .leaf-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #dcdfe6;
+  margin-right: 9px;
+  margin-left: 7px;
+  flex-shrink: 0;
 }
 
 .trace-chain-tree-table .path-text {
@@ -531,52 +568,68 @@ onMounted(() => {
   cursor: pointer;
   padding: 1px 4px;
   border-radius: 3px;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .trace-chain-tree-table .path-text:hover {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: #ecf5ff;
+  color: #409eff;
 }
 
-.trace-chain-tree-table .info-service {
-  color: #409eff;
-  margin-right: 6px;
-  font-size: 11px;
+.trace-chain-tree-table .service-tag {
+  font-size: 10px !important;
+  height: 18px !important;
+  line-height: 16px !important;
+  padding: 0 5px !important;
+  border-radius: 9px !important;
+  flex-shrink: 0;
 }
 
 .trace-chain-tree-table .info-type {
   color: #909399;
-  margin-right: 6px;
-  font-size: 11px;
+  font-size: 10px;
+  background: #f4f4f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .trace-chain-tree-table .info-ip {
   color: #c0c4cc;
-  font-size: 11px;
-  font-family: monospace;
+  font-size: 10px;
+  font-family: 'SF Mono', 'Monaco', monospace;
+  flex-shrink: 0;
 }
 
-.trace-chain-tree-table .tree-col-duration {
+.trace-chain-tree-table .duration-value {
   font-size: 12px;
+  font-weight: 600;
   color: #606266;
+  font-family: 'SF Mono', 'Monaco', monospace;
 }
 
 .trace-chain-tree-table .duration-slow {
   color: #f56c6c;
-  font-weight: 600;
+}
+
+.trace-chain-tree-table .duration-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: #f0f2f5;
+  border-radius: 3px;
+  overflow: hidden;
 }
 
 .trace-chain-tree-table .duration-bar {
-  height: 14px;
-  background: #67c23a;
-  border-radius: 2px;
+  height: 100%;
+  background: linear-gradient(90deg, #67c23a, #95d475);
+  border-radius: 3px;
   min-width: 3px;
-  transition: width 0.3s;
+  transition: width 0.4s ease;
 }
 
-.trace-chain-tree-table .row-error .duration-bar {
-  background: #f56c6c;
+.trace-chain-tree-table .duration-bar.bar-error {
+  background: linear-gradient(90deg, #f56c6c, #f89898);
 }
 
 .chain-flow {
