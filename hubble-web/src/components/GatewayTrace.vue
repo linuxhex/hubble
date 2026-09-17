@@ -82,29 +82,36 @@
           v-for="(node, idx) in visibleNodes"
           :key="node._origIndex"
           class="tree-row"
-          :class="{ 'row-error': node.status === 'error', 'row-active': selectedNode === node._origIndex }"
-          :style="{ paddingLeft: (node.level || 0) * 24 + 12 + 'px' }"
+          :class="{ 'row-error': node.status === 'error', 'row-active': selectedNode === node._origIndex, 'row-leaf': !node.hasChildren }"
+          :style="{ paddingLeft: (node.level || 0) * 28 + 16 + 'px' }"
           @click="selectNode(node._origIndex)"
         >
           <div class="tree-col-path">
-            <span class="expand-icon" v-if="node.hasChildren" @click.stop="toggleExpand(node._origIndex)">
-              {{ node.expanded ? '−' : '+' }}
+            <span
+              v-if="node.hasChildren"
+              class="expand-btn"
+              :class="{ expanded: node.expanded }"
+              @click.stop="toggleExpand(node._origIndex)"
+            >
+              <el-icon><CaretRight /></el-icon>
             </span>
-            <span class="expand-icon" v-else style="visibility: hidden">+</span>
+            <span v-else class="leaf-dot"></span>
             <el-tooltip :content="node.apiPath || node.serviceName" placement="top" :show-after="300">
               <span class="path-text" @click.stop="copyPath(node.apiPath)">{{ node.apiPath || node.serviceName }}</span>
             </el-tooltip>
           </div>
           <div class="tree-col-info">
-            <span class="info-service">{{ node.serviceName }}</span>
+            <el-tag size="small" effect="plain" class="service-tag">{{ node.serviceName }}</el-tag>
             <span class="info-type">{{ node.callType || 'URL' }}</span>
             <span class="info-ip">{{ node.ip || '--' }}</span>
           </div>
           <div class="tree-col-duration">
-            <span :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
+            <span class="duration-value" :class="{ 'duration-slow': node.duration > 1000 }">{{ node.duration }}ms</span>
           </div>
           <div class="tree-col-bar">
-            <div class="duration-bar" :style="{ width: getBarWidth(node.duration) + '%' }"></div>
+            <div class="duration-bar-bg">
+              <div class="duration-bar" :class="{ 'bar-error': node.status === 'error' }" :style="{ width: getBarWidth(node.duration) + '%' }"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -144,6 +151,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { CaretRight } from '@element-plus/icons-vue'
 import { getTraceChain } from '@/api/trace-chain.js'
 import { queryGatewayLogs } from '@/api/keyword-log-query.js'
 
@@ -332,8 +340,10 @@ onMounted(() => {
 
 .search-area {
   background: white;
-  padding: 16px 24px;
-  border-radius: 4px;
+  padding: 20px 24px;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .search-row {
@@ -363,12 +373,14 @@ onMounted(() => {
 
 .chain-header {
   background: white;
-  padding: 10px 16px;
-  border-radius: 4px;
+  padding: 14px 20px;
+  border-radius: 8px;
   margin-bottom: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 @media (max-width: 768px) {
@@ -412,12 +424,14 @@ onMounted(() => {
 
 .trace-summary {
   background: white;
-  padding: 12px 16px;
-  border-radius: 4px;
+  padding: 16px 20px;
+  border-radius: 8px;
   margin-bottom: 12px;
   display: flex;
-  gap: 24px;
+  gap: 32px;
   flex-wrap: wrap;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 @media (max-width: 768px) {
@@ -452,9 +466,10 @@ onMounted(() => {
 }
 
 .summary-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
+  font-size: 22px;
+  font-weight: 700;
+  color: #303133;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
 }
 
 @media (max-width: 768px) {
@@ -475,20 +490,23 @@ onMounted(() => {
 
 .chain-tree-table {
   background: white;
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #e4e7ed;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .tree-header {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
   font-size: 12px;
   font-weight: 600;
-  color: #606266;
+  color: #909399;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .tree-col-path {
@@ -499,60 +517,94 @@ onMounted(() => {
 .tree-col-info {
   flex: 1.5;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .tree-col-duration {
-  width: 80px;
+  width: 90px;
   text-align: right;
 }
 
 .tree-col-bar {
-  width: 120px;
+  width: 140px;
   position: relative;
 }
 
 .tree-row {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f2f3f5;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
   font-size: 13px;
+  position: relative;
+}
+
+.tree-row:last-child {
+  border-bottom: none;
 }
 
 .tree-row:hover {
-  background: #f5f7fa;
+  background: #f5f8ff;
 }
 
 .tree-row.row-active {
   background: #ecf5ff;
+  border-left: 3px solid #409eff;
 }
 
 .tree-row.row-error {
-  background: #fef0f0;
+  background: #fff8f8;
 }
 
 .tree-row.row-error:hover {
-  background: #fde2e2;
+  background: #fff0f0;
 }
 
-.expand-icon {
+.tree-row.row-leaf {
+  opacity: 0.85;
+}
+
+.expand-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 6px;
-  font-size: 12px;
-  color: #909399;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 4px;
   cursor: pointer;
-  user-select: none;
+  color: #909399;
+  transition: all 0.2s;
   flex-shrink: 0;
 }
 
-.expand-icon:hover {
+.expand-btn:hover {
+  background: #ecf5ff;
   color: #409eff;
+}
+
+.expand-btn .el-icon {
+  font-size: 14px;
+  transition: transform 0.2s;
+}
+
+.expand-btn.expanded .el-icon {
+  transform: rotate(90deg);
+}
+
+.leaf-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #dcdfe6;
+  margin-right: 11px;
+  margin-left: 7px;
+  flex-shrink: 0;
 }
 
 .path-text {
@@ -561,62 +613,81 @@ onMounted(() => {
   white-space: nowrap;
   color: #303133;
   font-weight: 500;
+  font-size: 13px;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
-  transition: background 0.2s;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
 }
 
 .path-text:hover {
-  background: #e6f7ff;
-  color: #1890ff;
+  background: #ecf5ff;
+  color: #409eff;
 }
 
-.info-service {
-  color: #409eff;
-  margin-right: 8px;
-  font-size: 12px;
+.service-tag {
+  font-size: 11px !important;
+  height: 20px !important;
+  line-height: 18px !important;
+  padding: 0 6px !important;
+  border-radius: 10px !important;
+  flex-shrink: 0;
 }
 
 .info-type {
   color: #909399;
-  margin-right: 8px;
-  font-size: 12px;
+  font-size: 11px;
+  background: #f4f4f5;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .info-ip {
   color: #c0c4cc;
-  font-size: 12px;
-  font-family: monospace;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  flex-shrink: 0;
 }
 
-.tree-col-duration {
+.duration-value {
   font-size: 13px;
+  font-weight: 600;
   color: #606266;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
 }
 
 .duration-slow {
   color: #f56c6c;
-  font-weight: 600;
+}
+
+.duration-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: #f0f2f5;
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .duration-bar {
-  height: 16px;
-  background: #67c23a;
-  border-radius: 2px;
+  height: 100%;
+  background: linear-gradient(90deg, #67c23a, #95d475);
+  border-radius: 4px;
   min-width: 4px;
-  transition: width 0.3s;
+  transition: width 0.4s ease;
 }
 
-.row-error .duration-bar {
-  background: #f56c6c;
+.duration-bar.bar-error {
+  background: linear-gradient(90deg, #f56c6c, #f89898);
 }
 
 .node-detail {
   background: white;
-  border-radius: 4px;
+  border-radius: 8px;
   margin-top: 16px;
   overflow: hidden;
+  border: 1px solid #ebeef5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .detail-header {
