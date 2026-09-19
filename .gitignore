@@ -32,3 +32,6 @@ target/
 *.class
 *.jar
 *.war
+
+# H2 file database
+data/

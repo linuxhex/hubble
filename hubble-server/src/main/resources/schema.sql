@@ -111,21 +111,19 @@ CREATE TABLE IF NOT EXISTS business_trace (
   PRIMARY KEY (id)
 );
 
--- 服务每日负载数据（每2天采集一次，存储最近一年）
+-- 服务每日负载数据（扩容决策参考，存储最近一年）
 CREATE TABLE IF NOT EXISTS service_load_daily (
   id BIGINT NOT NULL AUTO_INCREMENT,
   app_name VARCHAR(100) NOT NULL COMMENT '应用名称',
-  pid VARCHAR(100) NOT NULL COMMENT 'ARMS应用PID',
   stat_date DATE NOT NULL COMMENT '统计日期',
   avg_cpu DECIMAL(8,2) COMMENT '平均CPU使用率(%)',
   max_cpu DECIMAL(8,2) COMMENT '最大CPU使用率(%)',
   avg_memory DECIMAL(8,2) COMMENT '平均内存使用率(%)',
   max_memory DECIMAL(8,2) COMMENT '最大内存使用率(%)',
-  gc_count INT COMMENT 'GC次数',
-  gc_time DECIMAL(10,2) COMMENT 'GC耗时(ms)',
   max_qps DECIMAL(10,2) COMMENT '最高QPS',
   avg_rt DECIMAL(10,2) COMMENT '平均响应时间(ms)',
   total_count BIGINT COMMENT '总调用次数',
+  partial_day TINYINT DEFAULT 0 COMMENT '1=当日12点采集仅半天数据',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );

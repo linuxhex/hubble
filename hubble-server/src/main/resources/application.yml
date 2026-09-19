@@ -9,7 +9,7 @@ spring:
 
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:hubble;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;LOCK_TIMEOUT=5000
+    url: jdbc:h2:file:${HUBBLE_DB_PATH:./data/hubble};MODE=MySQL;DATABASE_TO_LOWER=TRUE;LOCK_TIMEOUT=5000
     username: sa
     password:
     hikari:
@@ -52,6 +52,11 @@ aliyun:
     access-key-secret: ${ALIYUN_SLS_ACCESS_KEY_SECRET:}
     endpoint: ${ALIYUN_SLS_ENDPOINT:cn-hangzhou.log.aliyuncs.com}
     project: ${ALIYUN_SLS_PROJECT:}
+    # AI 排查工具多环境 project 映射（未配置的环境回落到上面的 project）
+    projects:
+      prod: ${SLS_PROJECT_PROD:}
+      uat: ${SLS_PROJECT_UAT:}
+      test: ${SLS_PROJECT_TEST:}
     query:
       max-results: 100
       timeout-seconds: 30
@@ -130,6 +135,9 @@ dingtalk:
 service-load:
   app-map: ${SERVICE_LOAD_APP_MAP:}
   fallback-services: ${SERVICE_LOAD_FALLBACK_SERVICES:}
+  # 启动时自动补采最近缺天数据（需内网 Prometheus/SLS 可达，连续2日失败自动熔断）
+  backfill-on-startup: ${SERVICE_LOAD_BACKFILL:true}
+  backfill-days: ${SERVICE_LOAD_BACKFILL_DAYS:14}
 
 # 网关大盘
 gateway:
@@ -151,11 +159,24 @@ milvus:
   database: ${MILVUS_DATABASE:devops}
   vector-dimension: ${MILVUS_VECTOR_DIMENSION:1024}
 
-# 阿里云DashScope配置
+# 阿里云DashScope配置（仅 embedding 使用；AI 对话已切换到 llm.* 内部网关）
 dashscope:
   apiKey: ${DASHSCOPE_API_KEY:your-dashscope-api-key}
   embeddingModel: text-embedding-v3
-  chatModel: ${DASHSCOPE_CHAT_MODEL:qwen-turbo}
+
+# AI 对话 LLM 配置（OpenAI 兼容协议，内部网关）
+llm:
+  base-url: ${LLM_BASE_URL:http://10.20.0.239:3020/v1}
+  api-key: ${LLM_API_KEY:}
+  model: ${LLM_MODEL:glm-5.2}
+
+# AI 助手 Agent 配置（排查工具）
+agent:
+  # 代码检索工作区根目录（为空则 AI 对话的代码检索工具不可用）
+  code-workspace: ${HUBBLE_CODE_WORKSPACE:}
+  # 单次对话最大工具调用轮次
+  max-tool-rounds: 8
+  nacos-script-path: ${NACOS_SCRIPT_PATH:${user.home}/.qoder/skills/cwork-config/scripts/nacos_query.sh}
 
 # SpringDoc OpenAPI配置
 springdoc:

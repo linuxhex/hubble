@@ -1,348 +1,351 @@
 <template>
   <div class="service-load-page">
     <div class="page-header">
-      <h2>服务负载</h2>
-      <el-button size="small" @click="fetchData" :loading="loading">刷新</el-button>
+      <div>
+        <h2>服务负载 · 扩容决策参考</h2>
+        <div class="page-subtitle">基于历史峰值水位与增长趋势，评估各服务是否需要扩容</div>
+      </div>
+      <div class="header-actions">
+        <el-button size="small" @click="collectNow" :loading="collecting" :disabled="collecting">立即采集</el-button>
+        <el-button size="small" type="primary" @click="refresh" :loading="loading">刷新</el-button>
+      </div>
     </div>
 
     <!-- 筛选区 -->
     <div class="filter-bar">
-      <el-select v-model="timeRange" placeholder="时间范围" size="small" style="width: 140px" @change="fetchData">
+      <el-select v-model="timeRange" placeholder="时间范围" size="small" style="width: 130px" @change="onRangeChange">
         <el-option label="最近7天" value="7" />
         <el-option label="最近30天" value="30" />
         <el-option label="最近90天" value="90" />
         <el-option label="最近180天" value="180" />
       </el-select>
-      <el-select v-model="selectedApps" multiple placeholder="选择服务（可多选）" size="small" style="width: 400px; margin-left: 12px" @change="fetchData">
-        <el-option v-for="app in appList" :key="app" :label="app" :value="app" />
-      </el-select>
+      <el-input v-model="nameFilter" placeholder="按服务名过滤" size="small" clearable style="width: 220px" />
       <div class="threshold-info">
-        <span class="threshold-item"><span class="dot yellow"></span>CPU ≥ 80% 建议扩容</span>
-        <span class="threshold-item"><span class="dot red"></span>CPU ≥ 90% 紧急扩容</span>
-        <span class="threshold-item"><span class="dot yellow"></span>内存 ≥ 85% 建议扩容</span>
-        <span class="threshold-item"><span class="dot red"></span>内存 ≥ 95% 紧急扩容</span>
+        <span class="threshold-item"><span class="dot yellow"></span>CPU ≥80% / 内存 ≥85% 建议扩容</span>
+        <span class="threshold-item"><span class="dot red"></span>CPU ≥90% / 内存 ≥95% 紧急扩容</span>
+      </div>
+      <div class="source-note">数据来源：Prometheus（CPU/内存）+ SLS（QPS），每日 00:00/12:00 定时采集</div>
+    </div>
+
+    <!-- 概览统计（点击卡片筛选对应分级） -->
+    <div class="summary-cards" v-if="items.length > 0">
+      <div class="summary-card urgent" :class="{ active: activeLevel === 'URGENT' }" @click="toggleLevel('URGENT')">
+        <div class="summary-count">{{ summary.urgent || 0 }}</div>
+        <div class="summary-label">紧急</div>
+      </div>
+      <div class="summary-card suggest" :class="{ active: activeLevel === 'SUGGEST' }" @click="toggleLevel('SUGGEST')">
+        <div class="summary-count">{{ summary.suggest || 0 }}</div>
+        <div class="summary-label">建议</div>
+      </div>
+      <div class="summary-card watch" :class="{ active: activeLevel === 'WATCH' }" @click="toggleLevel('WATCH')">
+        <div class="summary-count">{{ summary.watch || 0 }}</div>
+        <div class="summary-label">关注</div>
+      </div>
+      <div class="summary-card normal" :class="{ active: activeLevel === 'NORMAL' }" @click="toggleLevel('NORMAL')">
+        <div class="summary-count">{{ summary.normal || 0 }}</div>
+        <div class="summary-label">正常</div>
+      </div>
+      <div class="summary-card insufficient" :class="{ active: activeLevel === 'INSUFFICIENT' }" @click="toggleLevel('INSUFFICIENT')">
+        <div class="summary-count">{{ summary.insufficient || 0 }}</div>
+        <div class="summary-label">数据不足</div>
+      </div>
+      <div class="summary-meta">
+        <template v-if="activeLevel">已筛选「{{ adviceLabel(activeLevel) }}」</template>
+        共 {{ summary.total || 0 }} 个服务 · 评估窗口 {{ timeRange }} 天 · 更新于 {{ generatedAt }}
       </div>
     </div>
 
-    <!-- 对比图表区 -->
-    <div class="chart-section" v-if="selectedApps.length > 0">
-      <div class="section-title">CPU 使用率对比（%）</div>
-      <div ref="cpuChartRef" class="chart-container"></div>
-    </div>
-
-    <div class="chart-section" v-if="selectedApps.length > 0">
-      <div class="section-title">内存使用率对比（%）</div>
-      <div ref="memoryChartRef" class="chart-container"></div>
-    </div>
-
-    <div class="chart-section" v-if="selectedApps.length > 0">
-      <div class="section-title">最高 QPS 对比</div>
-      <div ref="qpsChartRef" class="chart-container"></div>
-    </div>
-
-    <!-- 扩容评估表 -->
-    <div class="assessment-section" v-if="assessmentData.length > 0">
-      <div class="section-title">扩容评估（结合业务增长趋势）</div>
-      <el-table :data="assessmentData" stripe border size="small" style="width: 100%">
-        <el-table-column prop="appName" label="服务" width="180" />
-        <el-table-column label="CPU 峰值" width="120" align="right">
+    <!-- 扩容决策总表 -->
+    <div class="table-section" v-if="items.length > 0">
+      <el-table
+        :data="filteredItems"
+        stripe
+        border
+        size="small"
+        style="width: 100%"
+        row-key="appName"
+        @expand-change="handleExpand"
+      >
+        <el-table-column type="expand">
           <template #default="{ row }">
-            <span :class="getCpuClass(row.maxCpu)">{{ formatNum(row.maxCpu) }}%</span>
+            <div class="drilldown">
+              <div class="drilldown-loading" v-if="trendLoading[row.appName]">
+                <el-skeleton :rows="3" animated />
+              </div>
+              <el-tabs v-else v-model="activeTab[row.appName]">
+                <el-tab-pane label="CPU" name="cpu">
+                  <ServiceLoadTrendChart :records="trendCache[row.appName] || []" metric="cpu" />
+                </el-tab-pane>
+                <el-tab-pane label="内存" name="memory">
+                  <ServiceLoadTrendChart :records="trendCache[row.appName] || []" metric="memory" />
+                </el-tab-pane>
+                <el-tab-pane label="QPS" name="qps">
+                  <ServiceLoadTrendChart :records="trendCache[row.appName] || []" metric="qps" />
+                </el-tab-pane>
+              </el-tabs>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="CPU 增长" width="110" align="right">
+        <el-table-column prop="appName" label="服务" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            <span :class="row.cpuGrowth >= 30 ? 'metric-warning' : row.cpuGrowth >= 0 ? 'metric-normal' : 'metric-normal'">
-              {{ row.cpuGrowth >= 0 ? '+' : '' }}{{ row.cpuGrowth }}%
-            </span>
+            <span class="app-name">{{ row.appName }}</span>
+            <el-tag v-if="row.partialToday === 1" size="small" type="warning" effect="plain" style="margin-left: 6px">今日半天</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="内存峰值" width="120" align="right">
+        <el-table-column label="CPU 峰值" width="150">
           <template #default="{ row }">
-            <span :class="getMemoryClass(row.maxMemory)">{{ formatNum(row.maxMemory) }}%</span>
+            <div class="metric-cell" v-if="row.cpuPeak != null">
+              <span :class="waterTextClass(row.cpuWaterLevel)">{{ row.cpuPeak }}%</span>
+              <el-progress :percentage="barPct(row.cpuPeak)" :color="waterColor(row.cpuWaterLevel)" :stroke-width="6" :show-text="false" />
+            </div>
+            <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="QPS 峰值" width="120" align="right">
-          <template #default="{ row }">{{ formatNum(row.maxQps) }}</template>
-        </el-table-column>
-        <el-table-column label="QPS 增长" width="110" align="right">
+        <el-table-column label="内存峰值" width="150">
           <template #default="{ row }">
-            <span :class="row.qpsGrowth >= 30 ? 'metric-warning' : 'metric-normal'">
-              {{ row.qpsGrowth >= 0 ? '+' : '' }}{{ row.qpsGrowth }}%
-            </span>
+            <div class="metric-cell" v-if="row.memPeak != null">
+              <span :class="waterTextClass(row.memWaterLevel)">{{ row.memPeak }}%</span>
+              <el-progress :percentage="barPct(row.memPeak)" :color="waterColor(row.memWaterLevel)" :stroke-width="6" :show-text="false" />
+            </div>
+            <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="平均 RT" width="100" align="right">
-          <template #default="{ row }">{{ formatNum(row.avgRt) }}ms</template>
-        </el-table-column>
-        <el-table-column label="扩容建议" width="140" align="center">
+        <el-table-column label="QPS 峰值" width="100" align="right">
           <template #default="{ row }">
-            <el-tag :type="getAssessmentType(row)" size="small">{{ getAssessmentText(row) }}</el-tag>
+            <span v-if="row.qpsPeak != null">{{ row.qpsPeak }}</span>
+            <span v-else class="no-data">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="环比（近7天）" width="130">
+          <template #default="{ row }">
+            <div class="growth-cell">
+              <div>
+                <span class="growth-key">CPU</span>
+                <span :class="growthClass(row.cpuGrowthPct)">{{ growthText(row.cpuGrowthPct) }}</span>
+              </div>
+              <div>
+                <span class="growth-key">内存</span>
+                <span :class="growthClass(row.memGrowthPct)">{{ growthText(row.memGrowthPct) }}</span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="预测触顶" min-width="150">
+          <template #default="{ row }">
+            <div class="predict-cell">
+              <span>{{ row.prediction || '—' }}</span>
+              <el-tag v-if="row.confidence && row.confidence !== 'LOW'" size="small" :type="confidenceType(row.confidence)" effect="plain">
+                {{ confidenceLabel(row.confidence) }}置信
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="扩容建议" width="110" align="center">
+          <template #default="{ row }">
+            <el-tooltip :content="row.adviceText" placement="top" :disabled="!row.adviceText">
+              <el-tag size="small" :type="adviceType(row.adviceLevel)">{{ adviceLabel(row.adviceLevel) }}</el-tag>
+            </el-tooltip>
+            <div v-if="row.adviceTargets" class="advice-target">{{ row.adviceTargets }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据完整度" width="110">
+          <template #default="{ row }">
+            <div class="completeness-cell">
+              <span :class="row.completeness < 60 ? 'metric-warning' : 'metric-normal'">{{ row.completeness }}%</span>
+              <span class="completeness-detail">{{ row.sampleCount }}/{{ row.coverageDays }}天</span>
+            </div>
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-tip">点击行首箭头展开单服务趋势（CPU / 内存 / QPS），含阈值线与半天数据标记</div>
     </div>
 
     <!-- 空状态 -->
-    <div v-if="!loading && appList.length === 0" class="empty-state">
-      <el-empty description="暂无数据，请先采集数据" />
+    <div v-if="!loading && items.length === 0" class="empty-state">
+      <el-empty description="暂无服务负载数据">
+        <div class="empty-guide">
+          <p>服务负载数据每日 00:00 / 12:00 自动采集，依赖内网数据源（Prometheus / SLS）。</p>
+          <p>当前可手动触发采集（需内网可达），或生成演示数据体验页面功能。</p>
+          <div class="empty-actions">
+            <el-button type="primary" size="small" @click="collectNow" :loading="collecting">立即采集</el-button>
+            <el-button size="small" @click="generateDemo" :loading="generating">生成演示数据</el-button>
+          </div>
+        </div>
+      </el-empty>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import * as echarts from 'echarts'
-import { getServiceLoadApps, getServiceLoadTrend } from '@/api/service-load.js'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { getAssessment, getServiceLoadTrend, manualCollectServiceLoad, generateDemoData } from '@/api/service-load.js'
+import ServiceLoadTrendChart from './ServiceLoadTrendChart.vue'
 
 const timeRange = ref('30')
-const selectedApps = ref([])
-const appList = ref([])
-const allData = ref({})
+const nameFilter = ref('')
+const activeLevel = ref('')
 const loading = ref(false)
+const collecting = ref(false)
+const generating = ref(false)
 
-const cpuChartRef = ref(null)
-const memoryChartRef = ref(null)
-const qpsChartRef = ref(null)
+const items = ref([])
+const summary = ref({})
+const generatedAt = ref('')
 
-let cpuChart = null
-let memoryChart = null
-let qpsChart = null
+const trendCache = reactive({})
+const trendLoading = reactive({})
+const activeTab = reactive({})
 
-const formatNum = (val) => {
-  if (val === null || val === undefined) return '-'
-  return Number(val).toFixed(1)
+const LEVEL_ORDER = { URGENT: 0, SUGGEST: 1, WATCH: 2, NORMAL: 3, INSUFFICIENT: 4 }
+
+const sortedItems = computed(() => {
+  return [...items.value].sort((a, b) =>
+    (LEVEL_ORDER[a.adviceLevel] ?? 9) - (LEVEL_ORDER[b.adviceLevel] ?? 9) || a.appName.localeCompare(b.appName))
+})
+
+const toggleLevel = (level) => {
+  activeLevel.value = activeLevel.value === level ? '' : level
 }
 
-const getCpuClass = (val) => {
-  if (val >= 90) return 'metric-critical'
-  if (val >= 80) return 'metric-warning'
-  return 'metric-normal'
-}
-
-const getMemoryClass = (val) => {
-  if (val >= 95) return 'metric-critical'
-  if (val >= 85) return 'metric-warning'
-  return 'metric-normal'
-}
-
-const getAssessmentType = (row) => {
-  // 紧急扩容：资源峰值过高或业务增长过快
-  if (row.maxCpu >= 90 || row.maxMemory >= 95) return 'danger'
-  if (row.qpsGrowth >= 50 || row.cpuGrowth >= 50) return 'danger'
-  
-  // 建议扩容：资源接近阈值或业务有明显增长
-  if (row.maxCpu >= 80 || row.maxMemory >= 85) return 'warning'
-  if (row.qpsGrowth >= 30 || row.cpuGrowth >= 30) return 'warning'
-  
-  return 'success'
-}
-
-const getAssessmentText = (row) => {
-  // 紧急扩容
-  if (row.maxCpu >= 90 || row.maxMemory >= 95) return '紧急扩容'
-  if (row.qpsGrowth >= 50) return '业务激增'
-  if (row.cpuGrowth >= 50) return '负载激增'
-  
-  // 建议扩容
-  if (row.maxCpu >= 80 || row.maxMemory >= 85) return '建议扩容'
-  if (row.qpsGrowth >= 30) return '业务增长'
-  if (row.cpuGrowth >= 30) return '负载上升'
-  
-  return '正常'
-}
-
-const assessmentData = ref([])
-
-const fetchApps = async () => {
-  try {
-    const res = await getServiceLoadApps()
-    if (res.code === 200 && res.data && res.data.length > 0) {
-      appList.value = res.data
-      // 默认选中第一个服务
-      selectedApps.value = [res.data[0]]
-      // 加载数据
-      await fetchData()
-    }
-  } catch (e) {
-    console.error('获取应用列表失败:', e)
+const filteredItems = computed(() => {
+  let list = sortedItems.value
+  if (activeLevel.value) {
+    list = list.filter(i => i.adviceLevel === activeLevel.value)
   }
+  const kw = nameFilter.value.trim().toLowerCase()
+  if (kw) {
+    list = list.filter(i => i.appName.toLowerCase().includes(kw))
+  }
+  return list
+})
+
+const formatDate = (d) => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
-const fetchData = async () => {
-  if (selectedApps.value.length === 0) {
-    assessmentData.value = []
-    return
-  }
+const startDateStr = () => {
+  const d = new Date()
+  d.setDate(d.getDate() - parseInt(timeRange.value))
+  return formatDate(d)
+}
 
+const fetchAssessment = async () => {
   loading.value = true
-  const startDate = new Date()
-  startDate.setDate(startDate.getDate() - parseInt(timeRange.value))
-  const startDateStr = startDate.toISOString().split('T')[0]
-
   try {
-    allData.value = {}
-    for (const app of selectedApps.value) {
-      const res = await getServiceLoadTrend(app, startDateStr)
-      if (res.code === 200 && res.data) {
-        allData.value[app] = res.data
-      }
+    const res = await getAssessment(parseInt(timeRange.value))
+    if (res.code === 200 && res.data) {
+      items.value = res.data.items || []
+      summary.value = res.data.summary || {}
+      generatedAt.value = (res.data.generatedAt || '').replace('T', ' ').substring(0, 16)
     }
-    await nextTick()
-    renderCharts()
-    buildAssessment()
   } catch (e) {
-    console.error('获取数据失败:', e)
+    console.error('获取扩容评估失败:', e)
   } finally {
     loading.value = false
   }
 }
 
-const buildAssessment = () => {
-  assessmentData.value = selectedApps.value.map(app => {
-    const data = allData.value[app] || []
-    if (data.length === 0) {
-      return { appName: app, maxCpu: 0, maxMemory: 0, maxQps: 0, avgRt: 0, gcCount: 0, qpsGrowth: 0, cpuGrowth: 0 }
-    }
-    
-    // 计算峰值
-    const maxCpu = Math.max(...data.map(d => d.maxCpu || 0))
-    const maxMemory = Math.max(...data.map(d => d.maxMemory || 0))
-    const maxQps = Math.max(...data.map(d => d.maxQps || 0))
-    const avgRt = data.reduce((sum, d) => sum + (d.avgRt || 0), 0) / data.length
-    const gcCount = data.reduce((sum, d) => sum + (d.gcCount || 0), 0)
-    
-    // 计算业务增长趋势（对比最近7天与前7天）
-    const sortedData = [...data].sort((a, b) => new Date(a.statDate) - new Date(b.statDate))
-    const recentDays = sortedData.slice(-7) // 最近7天
-    const previousDays = sortedData.slice(-14, -7) // 前7天
-    
-    let qpsGrowth = 0
-    let cpuGrowth = 0
-    
-    if (previousDays.length > 0 && recentDays.length > 0) {
-      const prevAvgQps = previousDays.reduce((sum, d) => sum + (d.maxQps || 0), 0) / previousDays.length
-      const recentAvgQps = recentDays.reduce((sum, d) => sum + (d.maxQps || 0), 0) / recentDays.length
-      qpsGrowth = prevAvgQps > 0 ? ((recentAvgQps - prevAvgQps) / prevAvgQps * 100) : 0
-      
-      const prevAvgCpu = previousDays.reduce((sum, d) => sum + (d.maxCpu || 0), 0) / previousDays.length
-      const recentAvgCpu = recentDays.reduce((sum, d) => sum + (d.maxCpu || 0), 0) / recentDays.length
-      cpuGrowth = prevAvgCpu > 0 ? ((recentAvgCpu - prevAvgCpu) / prevAvgCpu * 100) : 0
-    }
-    
-    return {
-      appName: app,
-      maxCpu,
-      maxMemory,
-      maxQps,
-      avgRt,
-      gcCount,
-      qpsGrowth: Math.round(qpsGrowth * 10) / 10,
-      cpuGrowth: Math.round(cpuGrowth * 10) / 10
-    }
-  })
+const refresh = () => fetchAssessment()
+
+const onRangeChange = () => {
+  Object.keys(trendCache).forEach(k => delete trendCache[k])
+  fetchAssessment()
 }
 
-const renderCharts = () => {
-  const apps = selectedApps.value
-  if (apps.length === 0) return
-
-  // 获取所有日期（取第一个应用的日期作为基准）
-  const firstAppData = allData.value[apps[0]] || []
-  const dates = firstAppData.map(d => d.statDate)
-
-  // CPU 图表
-  if (cpuChartRef.value) {
-    if (!cpuChart) cpuChart = echarts.init(cpuChartRef.value)
-    const series = apps.map((app, idx) => ({
-      name: app,
-      type: 'line',
-      smooth: true,
-      data: (allData.value[app] || []).map(d => d.maxCpu),
-      lineStyle: { width: 2 },
-      markLine: idx === 0 ? {
-        silent: true,
-        data: [
-          { yAxis: 80, lineStyle: { color: '#e6a23c', type: 'dashed' }, label: { formatter: '80%' } },
-          { yAxis: 90, lineStyle: { color: '#f56c6c', type: 'dashed' }, label: { formatter: '90%' } }
-        ]
-      } : undefined
-    }))
-    cpuChart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: apps, bottom: 0, type: 'scroll' },
-      grid: { left: 50, right: 20, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
-      series
-    }, true)
-  }
-
-  // 内存图表
-  if (memoryChartRef.value) {
-    if (!memoryChart) memoryChart = echarts.init(memoryChartRef.value)
-    const series = apps.map((app, idx) => ({
-      name: app,
-      type: 'line',
-      smooth: true,
-      data: (allData.value[app] || []).map(d => d.maxMemory),
-      lineStyle: { width: 2 },
-      markLine: idx === 0 ? {
-        silent: true,
-        data: [
-          { yAxis: 85, lineStyle: { color: '#e6a23c', type: 'dashed' }, label: { formatter: '85%' } },
-          { yAxis: 95, lineStyle: { color: '#f56c6c', type: 'dashed' }, label: { formatter: '95%' } }
-        ]
-      } : undefined
-    }))
-    memoryChart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: apps, bottom: 0, type: 'scroll' },
-      grid: { left: 50, right: 20, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
-      series
-    }, true)
-  }
-
-  // QPS 图表
-  if (qpsChartRef.value) {
-    if (!qpsChart) qpsChart = echarts.init(qpsChartRef.value)
-    const series = apps.map(app => ({
-      name: app,
-      type: 'line',
-      smooth: true,
-      data: (allData.value[app] || []).map(d => d.maxQps),
-      lineStyle: { width: 2 }
-    }))
-    qpsChart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { data: apps, bottom: 0, type: 'scroll' },
-      grid: { left: 60, right: 20, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value' },
-      series
-    }, true)
+const handleExpand = async (row, expandedRows) => {
+  if (!expandedRows.includes(row)) return
+  if (!activeTab[row.appName]) activeTab[row.appName] = 'cpu'
+  if (trendCache[row.appName]) return
+  trendLoading[row.appName] = true
+  try {
+    const res = await getServiceLoadTrend(row.appName, startDateStr())
+    if (res.code === 200 && res.data) {
+      trendCache[row.appName] = res.data
+    }
+  } catch (e) {
+    console.error('获取趋势数据失败:', e)
+  } finally {
+    trendLoading[row.appName] = false
   }
 }
 
-const handleResize = () => {
-  cpuChart?.resize()
-  memoryChart?.resize()
-  qpsChart?.resize()
+const collectNow = async () => {
+  collecting.value = true
+  try {
+    const res = await manualCollectServiceLoad(formatDate(new Date()))
+    if (res.code === 200) {
+      ElMessage.success('采集任务完成')
+      await fetchAssessment()
+    } else {
+      ElMessage.error(res.message || '采集失败')
+    }
+  } catch (e) {
+    ElMessage.error('采集失败：' + (e.message || '请检查内网数据源可达性'))
+  } finally {
+    collecting.value = false
+  }
 }
 
-onMounted(async () => {
-  await fetchApps()
-  window.addEventListener('resize', handleResize)
-})
+const generateDemo = async () => {
+  generating.value = true
+  try {
+    const res = await generateDemoData()
+    if (res.code === 200) {
+      ElMessage.success('演示数据生成成功')
+      await fetchAssessment()
+    } else {
+      ElMessage.error(res.message || '生成失败')
+    }
+  } catch (e) {
+    ElMessage.error('生成失败：' + (e.message || '未知错误'))
+  } finally {
+    generating.value = false
+  }
+}
 
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  cpuChart?.dispose()
-  memoryChart?.dispose()
-  qpsChart?.dispose()
-})
+const waterColor = (level) => {
+  if (level === 'red') return '#f56c6c'
+  if (level === 'yellow') return '#e6a23c'
+  return '#67c23a'
+}
+
+const waterTextClass = (level) => {
+  if (level === 'red') return 'metric-critical'
+  if (level === 'yellow') return 'metric-warning'
+  return 'metric-normal'
+}
+
+const barPct = (val) => {
+  const n = Number(val)
+  if (isNaN(n)) return 0
+  return Math.max(0, Math.min(100, n))
+}
+
+const growthText = (g) => (g === null || g === undefined) ? '—' : `${g >= 0 ? '+' : ''}${g}%`
+
+const growthClass = (g) => {
+  if (g === null || g === undefined) return 'no-data'
+  if (g >= 30) return 'metric-critical'
+  if (g >= 15) return 'metric-warning'
+  return 'metric-normal'
+}
+
+const confidenceLabel = (c) => ({ HIGH: '高', MEDIUM: '中', LOW: '低' }[c] || c)
+const confidenceType = (c) => ({ HIGH: 'success', MEDIUM: 'warning', LOW: 'info' }[c] || 'info')
+
+const adviceLabel = (level) => ({
+  URGENT: '紧急扩容', SUGGEST: '建议扩容', WATCH: '关注', NORMAL: '正常', INSUFFICIENT: '数据不足'
+}[level] || level)
+
+const adviceType = (level) => ({
+  URGENT: 'danger', SUGGEST: 'warning', WATCH: 'primary', NORMAL: 'success', INSUFFICIENT: 'info'
+}[level] || 'info')
+
+onMounted(fetchAssessment)
 </script>
 
 <style scoped>
@@ -372,6 +375,12 @@ onUnmounted(() => {
   color: #303133;
 }
 
+.page-subtitle {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
 .filter-bar {
   background: white;
   padding: 12px 20px;
@@ -383,7 +392,6 @@ onUnmounted(() => {
 }
 
 .threshold-info {
-  margin-left: auto;
   display: flex;
   gap: 16px;
   font-size: 12px;
@@ -396,41 +404,147 @@ onUnmounted(() => {
   gap: 4px;
 }
 
+.source-note {
+  margin-left: auto;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
 
-.dot.yellow {
-  background: #e6a23c;
+.dot.yellow { background: #e6a23c; }
+.dot.red { background: #f56c6c; }
+
+.summary-cards {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
 }
 
-.dot.red {
-  background: #f56c6c;
+.summary-card {
+  flex: 0 0 110px;
+  background: white;
+  border-radius: 4px;
+  padding: 12px 16px;
+  text-align: center;
+  border-top: 3px solid var(--card-color, #dcdfe6);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s, box-shadow 0.15s;
 }
 
-.chart-section {
+.summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.summary-card.active {
+  box-shadow: 0 0 0 2px var(--card-color, #dcdfe6);
+}
+
+.summary-card.urgent { --card-color: #f56c6c; }
+.summary-card.suggest { --card-color: #e6a23c; }
+.summary-card.watch { --card-color: #409eff; }
+.summary-card.normal { --card-color: #67c23a; }
+.summary-card.insufficient { --card-color: #909399; }
+
+.summary-card .summary-count { color: var(--card-color, #909399); }
+
+.summary-count {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.summary-meta {
+  margin-left: auto;
+  align-self: center;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.table-section {
   background: white;
   border-radius: 4px;
   padding: 16px;
 }
 
-.section-title {
-  font-size: 13px;
+.table-tip {
+  font-size: 12px;
+  color: #c0c4cc;
+  margin-top: 8px;
+}
+
+.drilldown {
+  padding: 8px 16px 16px;
+  background: #fafbfc;
+}
+
+.drilldown-loading {
+  padding: 16px;
+}
+
+.app-name {
   font-weight: 500;
-  color: #606266;
-  margin-bottom: 12px;
 }
 
-.chart-container {
-  height: 260px;
+.metric-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.assessment-section {
-  background: white;
-  border-radius: 4px;
-  padding: 16px;
+.metric-cell .el-progress {
+  width: 90%;
+}
+
+.growth-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.growth-key {
+  display: inline-block;
+  width: 32px;
+  color: #909399;
+}
+
+.predict-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.completeness-cell {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.completeness-detail {
+  color: #909399;
+}
+
+.advice-target {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #909399;
+}
+
+.no-data {
+  color: #c0c4cc;
 }
 
 .empty-state {
@@ -441,6 +555,20 @@ onUnmounted(() => {
   background: white;
   border-radius: 4px;
   min-height: 300px;
+}
+
+.empty-guide {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.8;
+}
+
+.empty-guide p {
+  margin: 0;
+}
+
+.empty-actions {
+  margin-top: 12px;
 }
 
 .metric-critical {
@@ -465,5 +593,9 @@ onUnmounted(() => {
   background: #f5f7fa;
   color: #606266;
   font-weight: 500;
+}
+
+:deep(.el-table .el-table__expanded-cell) {
+  padding: 0;
 }
 </style>
