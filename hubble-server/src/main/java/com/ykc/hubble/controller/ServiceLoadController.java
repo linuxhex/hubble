@@ -1,6 +1,7 @@
 package com.ykc.hubble.controller;
 
 import com.ykc.hubble.entity.ServiceLoadDaily;
+import com.ykc.hubble.service.ServiceLoadAssessmentService;
 import com.ykc.hubble.service.ServiceLoadService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -15,6 +16,20 @@ import java.util.*;
 public class ServiceLoadController {
 
     private final ServiceLoadService serviceLoadService;
+    private final ServiceLoadAssessmentService assessmentService;
+
+    /**
+     * 扩容决策评估：全服务峰值水位 + 环比 + 触顶预测 + 建议分级
+     */
+    @GetMapping("/assessment")
+    public Map<String, Object> getAssessment(@RequestParam(defaultValue = "30") int days) {
+        if (days < 7) days = 7;
+        if (days > 365) days = 365;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", 200);
+        result.put("data", assessmentService.assessAll(days));
+        return result;
+    }
 
     /**
      * 获取应用列表

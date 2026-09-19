@@ -17,9 +17,6 @@ public class ServiceLoadDaily {
     @TableField("app_name")
     private String appName;
 
-    @TableField("pid")
-    private String pid;
-
     @TableField("stat_date")
     private LocalDate statDate;
 
@@ -35,12 +32,6 @@ public class ServiceLoadDaily {
     @TableField("max_memory")
     private BigDecimal maxMemory;
 
-    @TableField("gc_count")
-    private Integer gcCount;
-
-    @TableField("gc_time")
-    private BigDecimal gcTime;
-
     @TableField("max_qps")
     private BigDecimal maxQps;
 
@@ -49,6 +40,10 @@ public class ServiceLoadDaily {
 
     @TableField("total_count")
     private Long totalCount;
+
+    /** 1=当日12点采集仅半天数据 */
+    @TableField("partial_day")
+    private Integer partialDay;
 
     @TableField("created_at")
     private LocalDateTime createdAt;

@@ -1,48 +1,68 @@
-INSERT INTO sys_dict (dict_type, dict_value, dict_label) VALUES
-('category', 'performance', '性能监控'),
-('category', 'availability', '可用性监控'),
-('category', 'business', '业务监控'),
-('tag', 'core', '核心服务'),
-('tag', 'gateway', '网关层'),
-('tag', 'database', '数据库'),
-('sls_tag', 'core', '核心服务'),
-('sls_tag', 'gateway', '网关层'),
-('sls_tag', 'database', '数据库'),
-('application', 'user-service', '用户服务'),
-('application', 'order-service', '订单服务'),
-('application', 'payment-service', '支付服务'),
-('application', 'gateway-api', '网关API'),
-('application', 'notification-service', '通知服务');
+-- 幂等种子数据：文件库模式下每次启动都会执行，全部走 NOT EXISTS 防重复插入
 
-INSERT INTO alert_config (title, description, keyword_template_id, start_time, end_time, collection_interval, alert_threshold, yellow_threshold_ratio, peak_start_time, peak_end_time, peak_alert_threshold, enabled) VALUES
-('统计服务错误监控', '监控statistics-server的ERROR日志', 'tpl-statistics-server', '00:00:00', '23:59:59', 60, 2000, 0.75, '09:00:00', '12:00:00', 3000, 1),
-('统计TOB错误监控', '监控statistics-tob的ERROR日志', 'tpl-statistics-tob', '00:00:00', '23:59:59', 60, 1200, 0.67, '09:00:00', '12:00:00', 1800, 1),
-('交易订单错误监控', '监控trade-order的ERROR日志', 'tpl-trade-order', '00:00:00', '23:59:59', 60, 300, 0.67, '10:00:00', '14:00:00', 450, 1),
-('设备维护错误监控', '监控device-maint的ERROR日志', 'tpl-device-maint', '00:00:00', '23:59:59', 60, 200, 0.75, '09:00:00', '18:00:00', 300, 1),
-('推送服务错误监控', '监控zdl-push-server的ERROR日志', 'tpl-zdl-push', '00:00:00', '23:59:59', 60, 200, 0.67, '10:00:00', '12:00:00', 300, 1);
+INSERT INTO sys_dict (dict_type, dict_value, dict_label)
+SELECT t.a, t.b, t.c FROM (
+  SELECT 'category' AS a, 'performance' AS b, '性能监控' AS c UNION ALL
+  SELECT 'category', 'availability', '可用性监控' UNION ALL
+  SELECT 'category', 'business', '业务监控' UNION ALL
+  SELECT 'tag', 'core', '核心服务' UNION ALL
+  SELECT 'tag', 'gateway', '网关层' UNION ALL
+  SELECT 'tag', 'database', '数据库' UNION ALL
+  SELECT 'sls_tag', 'core', '核心服务' UNION ALL
+  SELECT 'sls_tag', 'gateway', '网关层' UNION ALL
+  SELECT 'sls_tag', 'database', '数据库' UNION ALL
+  SELECT 'application', 'user-service', '用户服务' UNION ALL
+  SELECT 'application', 'order-service', '订单服务' UNION ALL
+  SELECT 'application', 'payment-service', '支付服务' UNION ALL
+  SELECT 'application', 'gateway-api', '网关API' UNION ALL
+  SELECT 'application', 'notification-service', '通知服务'
+) t
+WHERE NOT EXISTS (
+  SELECT 1 FROM sys_dict d WHERE d.dict_type = t.a AND d.dict_value = t.b
+);
 
-INSERT INTO middleware_alert_config (middleware_type, instance_id, metric_name, red_threshold, yellow_threshold, compare_type, enabled) VALUES
-('redis', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
-('redis', NULL, 'memoryUsage', 85.00, 70.00, '>', 1),
-('redis', NULL, 'connections', 10000.00, 8000.00, '>', 1),
-('mysql', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
-('mysql', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
-('mysql', NULL, 'connections', 80.00, 60.00, '>', 1),
-('rocketmq', NULL, 'messageAccumulation', 100000.00, 50000.00, '>', 1),
-('rocketmq', NULL, 'consumeLatency', 60.00, 30.00, '>', 1),
-('kafka', NULL, 'lag', 100000.00, 50000.00, '>', 1),
-('lindorm', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
-('lindorm', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
-('elasticsearch', NULL, 'cpuUsage', 80.00, 60.00, '>', 1),
-('elasticsearch', NULL, 'diskUsage', 85.00, 70.00, '>', 1),
-('elasticsearch', NULL, 'jvmMemory', 85.00, 75.00, '>', 1),
-('oss', NULL, 'errorRate5xx', 1.00, 0.10, '>', 1),
-('oss', NULL, 'errorRate4xx', 5.00, 1.00, '>', 1);
+INSERT INTO alert_config (title, description, keyword_template_id, start_time, end_time, collection_interval, alert_threshold, yellow_threshold_ratio, peak_start_time, peak_end_time, peak_alert_threshold, enabled)
+SELECT t.a, t.b, t.c, t.d, t.e, t.f, t.g, t.h, t.i, t.j, t.k, t.l FROM (
+  SELECT '统计服务错误监控' AS a, '监控statistics-server的ERROR日志' AS b, 'tpl-statistics-server' AS c, '00:00:00' AS d, '23:59:59' AS e, 60 AS f, 2000 AS g, 0.75 AS h, '09:00:00' AS i, '12:00:00' AS j, 3000 AS k, 1 AS l UNION ALL
+  SELECT '统计TOB错误监控', '监控statistics-tob的ERROR日志', 'tpl-statistics-tob', '00:00:00', '23:59:59', 60, 1200, 0.67, '09:00:00', '12:00:00', 1800, 1 UNION ALL
+  SELECT '交易订单错误监控', '监控trade-order的ERROR日志', 'tpl-trade-order', '00:00:00', '23:59:59', 60, 300, 0.67, '10:00:00', '14:00:00', 450, 1 UNION ALL
+  SELECT '设备维护错误监控', '监控device-maint的ERROR日志', 'tpl-device-maint', '00:00:00', '23:59:59', 60, 200, 0.75, '09:00:00', '18:00:00', 300, 1 UNION ALL
+  SELECT '推送服务错误监控', '监控zdl-push-server的ERROR日志', 'tpl-zdl-push', '00:00:00', '23:59:59', 60, 200, 0.67, '10:00:00', '12:00:00', 300, 1
+) t
+WHERE NOT EXISTS (
+  SELECT 1 FROM alert_config d WHERE d.title = t.a
+);
+
+INSERT INTO middleware_alert_config (middleware_type, instance_id, metric_name, red_threshold, yellow_threshold, compare_type, enabled)
+SELECT t.a, t.b, t.c, t.d, t.e, t.f, t.g FROM (
+  SELECT 'redis' AS a, NULL AS b, 'cpuUsage' AS c, 80.00 AS d, 60.00 AS e, '>' AS f, 1 AS g UNION ALL
+  SELECT 'redis', NULL, 'memoryUsage', 85.00, 70.00, '>', 1 UNION ALL
+  SELECT 'redis', NULL, 'connections', 10000.00, 8000.00, '>', 1 UNION ALL
+  SELECT 'mysql', NULL, 'cpuUsage', 80.00, 60.00, '>', 1 UNION ALL
+  SELECT 'mysql', NULL, 'diskUsage', 85.00, 70.00, '>', 1 UNION ALL
+  SELECT 'mysql', NULL, 'connections', 80.00, 60.00, '>', 1 UNION ALL
+  SELECT 'rocketmq', NULL, 'messageAccumulation', 100000.00, 50000.00, '>', 1 UNION ALL
+  SELECT 'rocketmq', NULL, 'consumeLatency', 60.00, 30.00, '>', 1 UNION ALL
+  SELECT 'kafka', NULL, 'lag', 100000.00, 50000.00, '>', 1 UNION ALL
+  SELECT 'lindorm', NULL, 'cpuUsage', 80.00, 60.00, '>', 1 UNION ALL
+  SELECT 'lindorm', NULL, 'diskUsage', 85.00, 70.00, '>', 1 UNION ALL
+  SELECT 'elasticsearch', NULL, 'cpuUsage', 80.00, 60.00, '>', 1 UNION ALL
+  SELECT 'elasticsearch', NULL, 'diskUsage', 85.00, 70.00, '>', 1 UNION ALL
+  SELECT 'elasticsearch', NULL, 'jvmMemory', 85.00, 75.00, '>', 1 UNION ALL
+  SELECT 'oss', NULL, 'errorRate5xx', 1.00, 0.10, '>', 1 UNION ALL
+  SELECT 'oss', NULL, 'errorRate4xx', 5.00, 1.00, '>', 1
+) t
+WHERE NOT EXISTS (
+  SELECT 1 FROM middleware_alert_config d
+  WHERE d.middleware_type = t.a
+    AND d.metric_name = t.c
+    AND ((d.instance_id IS NULL AND t.b IS NULL) OR d.instance_id = t.b)
+);
 
 -- 预置告警阈值配置
 INSERT INTO alert_threshold_config (config_key, config_value, description) VALUES
 ('degradation_threshold', '220', '接口劣化告警幅度阈值(%)'),
-('degradation_min_rt', '300', '接口劣化告警最小RT阈值(ms)，低于此值不告警'),
+('degradation_min_rt', '1000', '接口劣化告警最小RT阈值(ms)，RT低于此值（毫秒级）不告警'),
 ('traffic_surge_threshold', '200', '流量暴涨告警涨幅阈值(%)'),
 ('traffic_surge_min_qps', '50', '流量暴涨告警最小QPS，低于此值不告警'),
 ('minute_red_threshold', '50', '分钟级红盘阈值（错误数）'),
@@ -64,8 +84,16 @@ INSERT INTO alert_threshold_config (config_key, config_value, description) VALUE
 ('mw_yoy_abs_floor', '30', '中间件告警同比绝对值下限，当前值低于此值不告警')
 ON DUPLICATE KEY UPDATE config_value = config_value;
 
+-- 历史默认值自愈迁移：仅当配置仍是旧默认值时升级为新默认值，不覆盖页面自定义值
+UPDATE alert_threshold_config SET config_value = '1000' WHERE config_key = 'degradation_min_rt' AND config_value = '300';
+
 -- 预置钉钉机器人演示数据
-INSERT INTO dingtalk_robot (name, webhook, secret, remark, enabled, created_at, updated_at) VALUES
-('运维群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-ops-001', 'SEC-demo-ops-secret-key', '通知到运维群，接收服务器告警和故障通知', 1, NOW(), NOW()),
-('技术告警群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-tech-002', 'SEC-demo-tech-secret-key', '通知到技术告警群，接收中间件和服务异常告警', 1, NOW(), NOW()),
-('业务监控群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-biz-003', NULL, '通知到业务监控群，接收业务指标异常告警', 0, NOW(), NOW());
+INSERT INTO dingtalk_robot (name, webhook, secret, remark, enabled, created_at, updated_at)
+SELECT t.a, t.b, t.c, t.d, t.e, NOW(), NOW() FROM (
+  SELECT '运维群机器人' AS a, 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-ops-001' AS b, 'SEC-demo-ops-secret-key' AS c, '通知到运维群，接收服务器告警和故障通知' AS d, 1 AS e UNION ALL
+  SELECT '技术告警群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-tech-002', 'SEC-demo-tech-secret-key', '通知到技术告警群，接收中间件和服务异常告警', 1 UNION ALL
+  SELECT '业务监控群机器人', 'https://oapi.dingtalk.com/robot/send?access_token=demo-token-biz-003', NULL, '通知到业务监控群，接收业务指标异常告警', 0
+) t
+WHERE NOT EXISTS (
+  SELECT 1 FROM dingtalk_robot d WHERE d.name = t.a
+);

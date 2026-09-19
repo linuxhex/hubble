@@ -1,6 +1,7 @@
 package com.ykc.hubble.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.ykc.hubble.client.GrafanaClient;
 import com.ykc.hubble.client.SlsQueryClient;
 import com.ykc.hubble.config.MonitorProperties;
@@ -40,6 +41,7 @@ public class ServiceLoadService {
     private String fallbackServicesStr;
 
     private Map<String, String> promAppBySls = Map.of();
+    private Map<String, String> slsByProm = Map.of();
     private List<String> fallbackServices = List.of();
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
@@ -56,6 +58,10 @@ public class ServiceLoadService {
         }
         promAppBySls = Collections.unmodifiableMap(map);
 
+        Map<String, String> reverse = new HashMap<>();
+        map.forEach((sls, prom) -> reverse.putIfAbsent(prom, sls));
+        slsByProm = Collections.unmodifiableMap(reverse);
+
         // 解析备用服务列表
         if (fallbackServicesStr != null && !fallbackServicesStr.isBlank()) {
             fallbackServices = Arrays.stream(fallbackServicesStr.split(","))
@@ -63,7 +69,7 @@ public class ServiceLoadService {
         } else {
             fallbackServices = List.of();
         }
-        log.info("服务负载配置加载完成: {} 个映射, {} 个备用服务", promAppBySls.size(), fallbackServices.size());
+        log.info("服务负载配置加载完成: {} 个别名映射, {} 个备用服务", promAppBySls.size(), fallbackServices.size());
     }
 
     public List<ServiceLoadDaily> queryByAppNameAndDateRange(String appName, LocalDate startDate) {
@@ -121,8 +127,8 @@ public class ServiceLoadService {
 
                 ServiceLoadDaily load = new ServiceLoadDaily();
                 load.setAppName(appName);
-                load.setPid("N/A");
                 load.setStatDate(date);
+                load.setPartialDay(0);
 
                 double baseCpu = 20 + random.nextDouble() * 40;
                 double avgCpu = Math.max(5, Math.min(95, baseCpu + random.nextGaussian() * 10));
@@ -140,8 +146,6 @@ public class ServiceLoadService {
                 load.setMaxCpu(BigDecimal.valueOf(maxCpu).setScale(2, RoundingMode.HALF_UP));
                 load.setAvgMemory(BigDecimal.valueOf(avgMemory).setScale(2, RoundingMode.HALF_UP));
                 load.setMaxMemory(BigDecimal.valueOf(maxMemory).setScale(2, RoundingMode.HALF_UP));
-                load.setGcCount(100 + random.nextInt(400));
-                load.setGcTime(BigDecimal.valueOf(500 + random.nextDouble() * 1500).setScale(2, RoundingMode.HALF_UP));
                 load.setMaxQps(BigDecimal.valueOf(maxQps).setScale(2, RoundingMode.HALF_UP));
                 load.setAvgRt(BigDecimal.valueOf(avgRt).setScale(2, RoundingMode.HALF_UP));
                 load.setTotalCount((long) (maxQps * 3600 * (0.5 + random.nextDouble() * 0.5)));
@@ -217,15 +221,15 @@ public class ServiceLoadService {
         return result;
     }
 
-    private void collectFromSls(LocalDate targetDate) throws Exception {
+    int collectFromSls(LocalDate targetDate) throws Exception {
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        List<String> services = discoverServices();
+        LinkedHashMap<String, String> services = discoverServicesWithRaw();
         if (services.isEmpty()) {
-            log.warn("SLS 未发现任何服务");
-            return;
+            log.warn("服务发现为空，跳过采集: date={}", targetDate);
+            return 0;
         }
-        log.info("SLS 发现 {} 个服务: {}", services.size(), services);
+        log.info("服务发现 {} 个: {}", services.size(), services.keySet());
 
         long peakFrom = toEpochSecond(targetDate, LocalTime.of(9, 0));
         long peakTo = toEpochSecond(targetDate, LocalTime.of(11, 0));
@@ -235,83 +239,151 @@ public class ServiceLoadService {
         long dayFrom = targetDate.atStartOfDay(ZONE).toEpochSecond();
         long dayTo = targetDate.plusDays(1).atStartOfDay(ZONE).toEpochSecond();
 
+        boolean partialDay = targetDate.equals(LocalDate.now(ZONE));
         int collected = 0;
         Map<String, CpuMemResult> cpuMemMap = queryDayCpuMem(targetDate);
 
-        for (String service : services) {
+        for (Map.Entry<String, String> entry : services.entrySet()) {
+            String appName = entry.getKey();
+            String slsName = entry.getValue();
             try {
                 ServiceLoadDaily load = new ServiceLoadDaily();
-                load.setAppName(service);
-                load.setPid("N/A");
+                load.setAppName(appName);
                 load.setStatDate(targetDate);
+                load.setPartialDay(partialDay ? 1 : 0);
 
-                CpuMemResult cpuMem = cpuMemMap.get(service);
+                CpuMemResult cpuMem = cpuMemMap.get(appName);
                 if (cpuMem != null) {
                     load.setAvgCpu(cpuMem.avgCpu);
                     load.setMaxCpu(cpuMem.maxCpu);
                     load.setAvgMemory(cpuMem.avgMem);
                     load.setMaxMemory(cpuMem.maxMem);
-                } else {
-                    load.setAvgCpu(BigDecimal.ZERO);
-                    load.setMaxCpu(BigDecimal.ZERO);
-                    load.setAvgMemory(BigDecimal.ZERO);
-                    load.setMaxMemory(BigDecimal.ZERO);
                 }
-                load.setGcCount(0);
-                load.setGcTime(BigDecimal.ZERO);
 
-                PeakResult peak = queryPeakQps(logstore, service, peakFrom, peakTo, peakFrom2, peakTo2);
+                PeakResult peak = queryPeakQps(logstore, slsName, peakFrom, peakTo, peakFrom2, peakTo2);
                 load.setMaxQps(peak.maxQps);
                 load.setTotalCount(peak.totalCount);
                 load.setAvgRt(peak.avgRt);
 
                 if (peak.totalCount == 0) {
-                    DayResult day = queryDayStats(logstore, service, dayFrom, dayTo);
+                    DayResult day = queryDayStats(logstore, slsName, dayFrom, dayTo);
                     load.setTotalCount(day.totalCount);
                     load.setMaxQps(day.maxQps);
-                    if (load.getAvgRt() == null || load.getAvgRt().compareTo(BigDecimal.ZERO) == 0) {
+                    if (load.getAvgRt() == null) {
                         load.setAvgRt(day.avgRt);
                     }
+                }
+
+                // 指标全缺失时不落库，避免0值污染
+                boolean hasCpuMem = load.getMaxCpu() != null || load.getMaxMemory() != null;
+                boolean hasTraffic = load.getTotalCount() != null && load.getTotalCount() > 0;
+                if (!hasCpuMem && !hasTraffic) {
+                    log.debug("服务无任何负载数据，跳过落库: service={}, date={}", appName, targetDate);
+                    continue;
                 }
 
                 upsertLoad(load);
                 collected++;
             } catch (Exception e) {
-                log.warn("采集服务负载失败: service={}, err={}", service, e.getMessage());
+                log.warn("采集服务负载失败: service={}, err={}", appName, e.getMessage());
             }
         }
 
-        log.info("SLS服务负载采集完成: date={}, collected={}/{}", targetDate, collected, services.size());
+        log.info("服务负载采集完成: date={}, collected={}/{}", targetDate, collected, services.size());
+        return collected;
+    }
+
+    /**
+     * 从 Prometheus application 标签自动发现应用
+     */
+    private Set<String> discoverApplicationsFromProm() {
+        Set<String> apps = new LinkedHashSet<>();
+        String ds = grafanaClient.getDsUid();
+        String[] promqls = {
+                "count by (application) (system_cpu_usage)",
+                "count by (application) (jvm_memory_used_bytes{area=\"heap\"})"
+        };
+        for (String promql : promqls) {
+            try {
+                List<Map<String, Object>> rows = grafanaClient.queryInstant(promql, ds);
+                for (Map<String, Object> row : rows) {
+                    Object app = row.get("application");
+                    if (app == null) continue;
+                    String name = String.valueOf(app).trim();
+                    if (name.isEmpty() || "unknown".equalsIgnoreCase(name) || "null".equalsIgnoreCase(name)) continue;
+                    apps.add(name);
+                }
+            } catch (Exception e) {
+                log.warn("Prometheus 应用自动发现失败: promql={}, err={}", promql, e.getMessage());
+            }
+        }
+        return apps;
+    }
+
+    /**
+     * 四级服务发现（Prom → SLS → DB → 备用列表），返回 归一化应用名 → SLS容器原始名
+     */
+    private LinkedHashMap<String, String> discoverServicesWithRaw() {
+        LinkedHashMap<String, String> services = new LinkedHashMap<>();
+
+        Set<String> promApps = discoverApplicationsFromProm();
+        for (String app : promApps) {
+            addAlias(services, app, app);
+        }
+        if (!promApps.isEmpty()) {
+            log.info("从Prometheus发现 {} 个应用: {}", promApps.size(), promApps);
+        }
+
+        String logstore = monitorProperties.getDefaultQueryLogstore();
+        long now = System.currentTimeMillis() / 1000;
+        try {
+            List<LogEntry> rawLogs = slsQueryClient.queryLogstore(logstore, "*", now - 3600, now, 0, 500);
+            int slsCount = 0;
+            for (LogEntry entry : rawLogs) {
+                String container = entry.getContainerName();
+                if (container == null || container.isBlank()) continue;
+                container = container.trim();
+                String norm = promAppBySls.getOrDefault(container, container);
+                // 已有条目刷新为真实容器名，保证QPS过滤用对名字
+                services.put(norm, container);
+                slsCount++;
+            }
+            if (slsCount > 0) {
+                log.info("从SLS发现 {} 个容器", slsCount);
+            }
+        } catch (Exception e) {
+            log.warn("从SLS发现服务失败: {}", e.getMessage());
+        }
+
+        try {
+            List<String> dbApps = serviceLoadDailyMapper.selectDistinctAppNames();
+            if (dbApps != null) {
+                for (String app : dbApps) {
+                    if (app == null || app.isBlank()) continue;
+                    String norm = app.trim();
+                    addAlias(services, norm, slsByProm.getOrDefault(norm, norm));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("从DB查询历史应用失败: {}", e.getMessage());
+        }
+
+        for (String app : fallbackServices) {
+            addAlias(services, app, app);
+        }
+
+        return services;
+    }
+
+    private boolean addAlias(LinkedHashMap<String, String> services, String normName, String slsRaw) {
+        if (normName == null || normName.isBlank()) return false;
+        String norm = normName.trim();
+        return services.putIfAbsent(norm, slsRaw == null ? norm : slsRaw) == null;
     }
 
     private List<String> discoverServices() {
-        String logstore = monitorProperties.getDefaultQueryLogstore();
-        long now = System.currentTimeMillis() / 1000;
-        long from = now - 3600;
-
-        try {
-            List<LogEntry> rawLogs = slsQueryClient.queryLogstore(logstore, "*", from, now, 0, 500);
-            Set<String> names = new LinkedHashSet<>();
-            for (LogEntry entry : rawLogs) {
-                if (entry.getContainerName() != null && !entry.getContainerName().isBlank()) {
-                    names.add(entry.getContainerName());
-                }
-            }
-            if (!names.isEmpty()) {
-                log.info("从SLS发现 {} 个服务: {}", names.size(), names);
-                return new ArrayList<>(names);
-            }
-        } catch (Exception e) {
-            log.warn("从SLS发现服务失败，使用备用列表: {}", e.getMessage());
-        }
-
-        List<String> dbApps = serviceLoadDailyMapper.selectDistinctAppNames();
-        if (dbApps != null && !dbApps.isEmpty()) {
-            return dbApps;
-        }
-
-        log.info("SLS服务发现失败且DB为空，使用备用服务列表");
-        return new ArrayList<>(fallbackServices);
+        LinkedHashMap<String, String> services = discoverServicesWithRaw();
+        return new ArrayList<>(services.keySet());
     }
 
     private PeakResult queryPeakQps(String logstore, String service,
@@ -342,7 +414,9 @@ public class ServiceLoadService {
             }
         }
 
-        result.maxQps = BigDecimal.valueOf(result.maxQpsValue).setScale(2, RoundingMode.HALF_UP);
+        if (result.totalCount > 0) {
+            result.maxQps = BigDecimal.valueOf(result.maxQpsValue).setScale(2, RoundingMode.HALF_UP);
+        }
         result.avgRt = extractAvgRt(logstore, service, from1, to2);
         return result;
     }
@@ -369,7 +443,10 @@ public class ServiceLoadService {
                 }
             }
 
-            result.maxQps = BigDecimal.valueOf(result.maxQpsValue).setScale(2, RoundingMode.HALF_UP);
+            if (result.totalCount > 0) {
+                result.maxQps = BigDecimal.valueOf(result.maxQpsValue).setScale(2, RoundingMode.HALF_UP);
+                result.avgRt = extractAvgRt(logstore, service, from, to);
+            }
         } catch (Exception e) {
             log.warn("全天统计查询失败(service={}): {}", service, e.getMessage());
         }
@@ -396,7 +473,7 @@ public class ServiceLoadService {
         } catch (Exception e) {
             log.debug("RT提取失败(service={}): {}", service, e.getMessage());
         }
-        return BigDecimal.ZERO;
+        return null;
     }
 
     private double extractDuration(LogEntry entry) {
@@ -458,25 +535,24 @@ public class ServiceLoadService {
                 }
             }
 
-            for (Map.Entry<String, String> entry : promAppBySls.entrySet()) {
-                String slsName = entry.getKey();
-                String promApp = entry.getValue();
-                List<Double> cpuVals = cpuByApp.get(promApp);
-                List<Double> memVals = memByApp.get(promApp);
-                if (cpuVals != null || memVals != null) {
-                    CpuMemResult r = new CpuMemResult();
-                    if (cpuVals != null && !cpuVals.isEmpty()) {
-                        r.avgCpu = avgBig(cpuVals);
-                        r.maxCpu = maxBig(cpuVals);
-                    }
-                    if (memVals != null && !memVals.isEmpty()) {
-                        r.avgMem = avgBig(memVals);
-                        r.maxMem = maxBig(memVals);
-                    }
-                    result.put(slsName, r);
+            Set<String> apps = new LinkedHashSet<>();
+            apps.addAll(cpuByApp.keySet());
+            apps.addAll(memByApp.keySet());
+            for (String app : apps) {
+                CpuMemResult r = new CpuMemResult();
+                List<Double> cpuVals = cpuByApp.get(app);
+                List<Double> memVals = memByApp.get(app);
+                if (cpuVals != null && !cpuVals.isEmpty()) {
+                    r.avgCpu = avgBig(cpuVals);
+                    r.maxCpu = maxBig(cpuVals);
                 }
+                if (memVals != null && !memVals.isEmpty()) {
+                    r.avgMem = avgBig(memVals);
+                    r.maxMem = maxBig(memVals);
+                }
+                result.put(app, r);
             }
-            log.info("Grafana CPU/内存采集完成: {}/{} 个服务有数据", result.size(), promAppBySls.size());
+            log.info("Grafana CPU/内存采集完成: {} 个应用有数据", result.size());
         } catch (Exception e) {
             log.warn("Grafana CPU/内存查询失败: {}", e.getMessage());
         }
@@ -506,12 +582,22 @@ public class ServiceLoadService {
                         .eq(ServiceLoadDaily::getAppName, load.getAppName())
                         .eq(ServiceLoadDaily::getStatDate, load.getStatDate())
         );
-        if (existing != null) {
-            load.setId(existing.getId());
-            serviceLoadDailyMapper.updateById(load);
-        } else {
+        if (existing == null) {
             serviceLoadDailyMapper.insert(load);
+            return;
         }
+        // 显式 set（含 null），避免旧值粘滞
+        LambdaUpdateWrapper<ServiceLoadDaily> uw = new LambdaUpdateWrapper<ServiceLoadDaily>()
+                .eq(ServiceLoadDaily::getId, existing.getId())
+                .set(ServiceLoadDaily::getAvgCpu, load.getAvgCpu())
+                .set(ServiceLoadDaily::getMaxCpu, load.getMaxCpu())
+                .set(ServiceLoadDaily::getAvgMemory, load.getAvgMemory())
+                .set(ServiceLoadDaily::getMaxMemory, load.getMaxMemory())
+                .set(ServiceLoadDaily::getMaxQps, load.getMaxQps())
+                .set(ServiceLoadDaily::getAvgRt, load.getAvgRt())
+                .set(ServiceLoadDaily::getTotalCount, load.getTotalCount())
+                .set(ServiceLoadDaily::getPartialDay, load.getPartialDay());
+        serviceLoadDailyMapper.update(null, uw);
     }
 
     private void cleanupOldData() {
@@ -531,29 +617,24 @@ public class ServiceLoadService {
         try { return Long.parseLong(s); } catch (NumberFormatException e) { return 0; }
     }
 
-    private double parseDouble(String s) {
-        if (s == null || s.isBlank()) return 0;
-        try { return Double.parseDouble(s); } catch (NumberFormatException e) { return 0; }
-    }
-
     private static class PeakResult {
-        BigDecimal maxQps = BigDecimal.ZERO;
+        BigDecimal maxQps;
         double maxQpsValue = 0;
         long totalCount = 0;
-        BigDecimal avgRt = BigDecimal.ZERO;
+        BigDecimal avgRt;
     }
 
     private static class DayResult {
-        BigDecimal maxQps = BigDecimal.ZERO;
+        BigDecimal maxQps;
         double maxQpsValue = 0;
         long totalCount = 0;
-        BigDecimal avgRt = BigDecimal.ZERO;
+        BigDecimal avgRt;
     }
 
     private static class CpuMemResult {
-        BigDecimal avgCpu = BigDecimal.ZERO;
-        BigDecimal maxCpu = BigDecimal.ZERO;
-        BigDecimal avgMem = BigDecimal.ZERO;
-        BigDecimal maxMem = BigDecimal.ZERO;
+        BigDecimal avgCpu;
+        BigDecimal maxCpu;
+        BigDecimal avgMem;
+        BigDecimal maxMem;
     }
 }
