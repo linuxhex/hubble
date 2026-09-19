@@ -5,6 +5,7 @@ import com.ykc.hubble.client.DingTalkClient;
 import com.ykc.hubble.client.SlsQueryClient;
 import com.ykc.hubble.config.MonitorProperties;
 import com.ykc.hubble.config.SlsConfig;
+import com.ykc.hubble.mapper.AlertThresholdConfigMapper;
 import com.ykc.hubble.vo.ApiDegradationVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,10 +27,9 @@ import static org.mockito.Mockito.verify;
 
 /**
  * GatewayService 接口劣化 / 流量暴涨告警条件回归测试。
- * 覆盖三个修复点：
- * 1. 劣化告警：幅度 >220% 且当前 P60 RT >100ms 才告警
+ * 覆盖告警条件：
+ * 1. 劣化告警：幅度 >220% 且当前 P60 RT 超过秒级阈值（>1000ms，毫秒级不告警）
  * 2. 流量暴涨告警：涨幅 >200% 且 QPS >50 才告警
- * 3. （时段对比逻辑在 loadXxx 内部，此处聚焦告警条件）
  */
 class GatewayServiceAlertTest {
 
@@ -49,6 +49,9 @@ class GatewayServiceAlertTest {
         Executor queryExecutor = Runnable::run;
         alertPushService = mock(AlertPushService.class);
         dingTalkClient = mock(DingTalkClient.class);
+        // 真实 AlertThresholdService + 空 mapper：selectOne 返回 null 时走代码默认值
+        AlertThresholdService alertThresholdService =
+                new AlertThresholdService(mock(AlertThresholdConfigMapper.class));
 
         // 用反射构造，绕过 @Qualifier 字段注入限制
         @SuppressWarnings("unchecked")
@@ -57,7 +60,7 @@ class GatewayServiceAlertTest {
         gatewayService = ctor.newInstance(
                 slsQueryClient, armsClient, monitorProperties, slsConfig,
                 overviewSnapshotCache, pageDataCacheService, queryExecutor,
-                alertPushService, dingTalkClient);
+                alertPushService, dingTalkClient, alertThresholdService);
 
         // 清空防抖 map，避免用例间干扰
         Field f = GatewayService.class.getDeclaredField("trafficAlertLastSent");
@@ -93,30 +96,30 @@ class GatewayServiceAlertTest {
     // ==================== 接口劣化告警 ====================
 
     @Test
-    @DisplayName("劣化幅度>220% 且 当前RT>300ms → 应告警")
+    @DisplayName("劣化幅度>220% 且 当前RT>1000ms → 应告警")
     void degradation_highRate_highRt_shouldAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 500.0, 1000)));
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 1500.0, 1000)));
         verify(alertPushService, times(1)).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
-    @DisplayName("劣化幅度>220% 但 当前RT<=300ms → 不告警（低RT接口劣化无实际影响）")
+    @DisplayName("劣化幅度>220% 但 当前RT仍是毫秒级(<=1000ms) → 不告警")
     void degradation_highRate_lowRt_shouldNotAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 200.0, 1000)));
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 900.0, 1000)));
         verify(alertPushService, never()).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
     @DisplayName("劣化幅度<220% → 不告警（幅度小不告警）")
     void degradation_lowRate_shouldNotAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 100.0, 500.0, 1000)));
+        invokeDegradationAlert(List.of(vo("/api/a", 100.0, 1500.0, 1000)));
         verify(alertPushService, never()).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test
-    @DisplayName("当前RT恰好300ms → 不告警（边界，必须 >300ms）")
-    void degradation_boundaryRt300_shouldNotAlert() throws Exception {
-        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 300.0, 1000)));
+    @DisplayName("当前RT恰好1000ms → 不告警（边界，必须 >1000ms）")
+    void degradation_boundaryRt1000_shouldNotAlert() throws Exception {
+        invokeDegradationAlert(List.of(vo("/api/a", 300.0, 1000.0, 1000)));
         verify(alertPushService, never()).pushAlert(org.mockito.ArgumentMatchers.anyMap());
     }
 

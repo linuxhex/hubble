@@ -207,6 +207,20 @@ public class SlsQueryClient {
             long toTime,
             Integer offset,
             Integer limit) {
+        return queryLogstore(slsConfig.getProject(), logstore, query, fromTime, toTime, offset, limit);
+    }
+
+    /**
+     * 查询指定 project 的 logstore（AI 排查工具多环境查询用）
+     */
+    public List<LogEntry> queryLogstore(
+            String project,
+            String logstore,
+            String query,
+            long fromTime,
+            long toTime,
+            Integer offset,
+            Integer limit) {
 
         try {
             // 验证时间戳
@@ -222,7 +236,7 @@ public class SlsQueryClient {
             // 调用SLS API
             Client client = slsClientFactory.getClient();
             GetLogsRequest request = new GetLogsRequest(
-                    slsConfig.getProject(),
+                    project,
                     logstore,
                     (int) fromTime,
                     (int) toTime,
@@ -241,7 +255,7 @@ public class SlsQueryClient {
 
         } catch (Exception e) {
             log.error("SLS查询失败: project={}, logstore={}, query={}",
-                    slsConfig.getProject(), logstore, query, e);
+                    project, logstore, query, e);
             throw new RuntimeException("SLS查询失败: " + e.getMessage(), e);
         }
     }
@@ -256,12 +270,25 @@ public class SlsQueryClient {
             long fromTime,
             long toTime,
             int limit) {
+        return queryAnalytics(slsConfig.getProject(), logstore, query, fromTime, toTime, limit);
+    }
+
+    /**
+     * 指定 project 的 SQL 分析查询（AI 排查工具多环境查询用）
+     */
+    public List<Map<String, String>> queryAnalytics(
+            String project,
+            String logstore,
+            String query,
+            long fromTime,
+            long toTime,
+            int limit) {
 
         List<Map<String, String>> results = new ArrayList<>();
         try {
             Client client = slsClientFactory.getClient();
             GetLogsRequest request = new GetLogsRequest(
-                    slsConfig.getProject(),
+                    project,
                     logstore,
                     (int) fromTime,
                     (int) toTime,
@@ -283,7 +310,7 @@ public class SlsQueryClient {
             }
         } catch (Exception e) {
             log.error("SLS分析查询失败: project={}, logstore={}, query={}",
-                    slsConfig.getProject(), logstore, query, e);
+                    project, logstore, query, e);
             throw new RuntimeException("SLS分析查询失败: " + e.getMessage(), e);
         }
         return results;
@@ -303,6 +330,18 @@ public class SlsQueryClient {
             String query,
             long fromTime,
             long toTime) {
+        return countLogstore(slsConfig.getProject(), logstore, query, fromTime, toTime);
+    }
+
+    /**
+     * 指定 project 的日志总数统计（AI 排查工具多环境查询用）
+     */
+    public long countLogstore(
+            String project,
+            String logstore,
+            String query,
+            long fromTime,
+            long toTime) {
 
         try {
             // 验证时间戳
@@ -317,11 +356,11 @@ public class SlsQueryClient {
 
             // 调用SLS GetHistograms API获取总数
             Client client = slsClientFactory.getClient();
-            
+
             // 执行查询（带超时和重试）
             GetHistogramsResponse response = executeCountQueryWithRetry(
                     client,
-                    slsConfig.getProject(),
+                    project,
                     logstore,
                     (int) fromTime,
                     (int) toTime,
@@ -342,7 +381,7 @@ public class SlsQueryClient {
 
         } catch (Exception e) {
             log.error("SLS count查询失败: project={}, logstore={}, query={}",
-                    slsConfig.getProject(), logstore, query, e);
+                    project, logstore, query, e);
             throw new RuntimeException("SLS count查询失败: " + e.getMessage(), e);
         }
     }

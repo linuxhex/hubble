@@ -81,6 +81,11 @@ public class AiChatEndpoint {
                 }
 
                 @Override
+                public void onToolStatus(String status) {
+                    sendJson(session, Map.of("type", "tool_status", "content", status));
+                }
+
+                @Override
                 public void onComplete() {
                     sendJson(session, Map.of("type", "done"));
                 }
