@@ -1603,20 +1603,20 @@ public class GatewayService {
     }
 
     /**
-     * 接口劣化告警：RT 劣化幅度 >220% 且当前 P60 RT >300ms 才触发钉钉 + SSE，同一接口 24 小时内不重复告警。
-     * 劣化幅度小（<220%）不告警；幅度达标但当前 RT 未超 300ms（本身很快）也不告警，避免对低 RT 接口的误报。
+     * 接口劣化告警：RT 劣化幅度 >220% 且当前 P60 RT 超过秒级阈值（>1000ms）才触发钉钉 + SSE，同一接口 24 小时内不重复告警。
+     * 劣化幅度小（<220%）不告警；幅度达标但当前 RT 仍是毫秒级（≤1000ms，接口本身很快）也不告警，避免对低 RT 接口的误报。
      */
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
         long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000); // 防抖，同一接口冷却期内只告警一次
         // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
         double degradationThreshold = alertThresholdService.getDouble("degradation_threshold", 220.0);
-        double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 300.0);
+        double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 1000.0);
 
         for (ApiDegradationVO vo : degradationList) {
             // 劣化幅度小不告警
             if (vo.getDegradationRate() < degradationThreshold) continue;
-            // 劣化时当前 RT 必须超过 300ms 才告警，避免对本身很快的接口误报
+            // RT 仍是毫秒级（≤1000ms）说明接口本身很快，劣化无实际感知，不告警
             if (vo.getCurrentAvgTime() <= minRtMs) continue;
 
             String apiPath = vo.getApiPath();

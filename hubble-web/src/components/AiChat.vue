@@ -82,6 +82,15 @@ function handleWsMessage(data) {
         scrollToBottom()
       }
       break
+    case 'tool_status':
+      if (currentAssistantMsg) {
+        if (!Array.isArray(currentAssistantMsg.toolStatuses)) {
+          currentAssistantMsg.toolStatuses = []
+        }
+        currentAssistantMsg.toolStatuses.push(data.content || '正在执行工具...')
+        scrollToBottom()
+      }
+      break
     case 'done':
       isThinking.value = false
       currentAssistantMsg = null
@@ -141,7 +150,7 @@ function sendMessage() {
 }
 
 function doSend(text) {
-  currentAssistantMsg = { role: 'assistant', content: '' }
+  currentAssistantMsg = { role: 'assistant', content: '', toolStatuses: [] }
   messages.value.push(currentAssistantMsg)
   isThinking.value = true
   scrollToBottom()
@@ -258,6 +267,22 @@ function askQuick(q) {
             :class="msg.role"
           >
             <div class="ai-msg-bubble">
+              <div
+                v-if="msg.role === 'assistant' && msg.toolStatuses && msg.toolStatuses.length"
+                class="ai-tool-statuses"
+              >
+                <div
+                  v-for="(tool, tIdx) in msg.toolStatuses"
+                  :key="tIdx"
+                  class="ai-tool-status"
+                >
+                  <span
+                    class="ai-tool-spinner"
+                    :class="{ done: tIdx < msg.toolStatuses.length - 1 || !isThinking }"
+                  ></span>
+                  <span>{{ tool }}</span>
+                </div>
+              </div>
               <div
                 v-if="msg.role === 'assistant'"
                 class="ai-msg-markdown"
@@ -520,6 +545,45 @@ function askQuick(q) {
   display: flex;
   gap: 4px;
   padding: 4px 0;
+}
+
+.ai-tool-statuses {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ai-tool-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #409eff;
+  background: #ecf5ff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  line-height: 1.4;
+}
+
+.ai-tool-spinner {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border: 2px solid #a0cfff;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+}
+
+.ai-tool-spinner.done {
+  border-color: #b3e19d;
+  border-top-color: #67c23a;
+  animation: none;
+}
+
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
 }
 
 .ai-typing span {

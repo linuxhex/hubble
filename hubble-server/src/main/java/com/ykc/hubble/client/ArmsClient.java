@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -147,8 +148,42 @@ public class ArmsClient {
     /**
      * 查询指标数据（重载方法，默认按天聚合）
      */
-    public QueryMetricByPageResponse queryMetrics(String metric, List<String> measures, 
+    public QueryMetricByPageResponse queryMetrics(String metric, List<String> measures,
             long fromMs, long toMs, String pid) throws Exception {
         return queryMetrics(metric, measures, fromMs, toMs, pid, 86400);
+    }
+
+    /**
+     * 查询指标数据（带维度聚合，如 dimensions=["rpc"] 按接口聚合，AI 排查工具用）
+     */
+    public QueryMetricByPageResponse queryMetricsWithDimension(String metric, List<String> measures,
+            long fromMs, long toMs, String pid, int intervalInSec, List<String> dimensions) throws Exception {
+        QueryMetricByPageRequest req = new QueryMetricByPageRequest();
+        req.setRegionId(armsConfig.getRegion());
+        req.setMetric(metric);
+        req.setMeasuress(measures);
+        req.setStartTime(fromMs);
+        req.setEndTime(toMs);
+        req.setIntervalInSec(intervalInSec);
+        req.setCurrentPage(1);
+        req.setPageSize(1000);
+        if (dimensions != null && !dimensions.isEmpty()) {
+            req.setDimensionss(dimensions);
+        }
+
+        List<QueryMetricByPageRequest.Filters> filters = new ArrayList<>();
+        if (pid != null && !pid.isEmpty()) {
+            QueryMetricByPageRequest.Filters pidFilter = new QueryMetricByPageRequest.Filters();
+            pidFilter.setKey("pid");
+            pidFilter.setValue(pid);
+            filters.add(pidFilter);
+        }
+        QueryMetricByPageRequest.Filters regionFilter = new QueryMetricByPageRequest.Filters();
+        regionFilter.setKey("regionId");
+        regionFilter.setValue(armsConfig.getRegion());
+        filters.add(regionFilter);
+        req.setFilterss(filters);
+
+        return client.getAcsResponse(req);
     }
 }

@@ -35,6 +35,12 @@ public class SlsConfig {
     private String project;
 
     /**
+     * 多环境 project 映射（AI 排查工具用）：key=环境名(prod/uat/test)，value=SLS project。
+     * 未配置的环境回落到 {@link #project}。
+     */
+    private java.util.Map<String, String> projects = new java.util.LinkedHashMap<>();
+
+    /**
      * 查询配置
      */
     private QueryConfig query = new QueryConfig();
