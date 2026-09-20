@@ -110,23 +110,28 @@ public class MiddlewareAlertService {
                     boolean triggered = isTriggered(value, config);
                     if (!triggered) continue;
 
-                    // 昨天同时段同比双条件：涨幅 ≥ mw_yoy_surge_threshold 且 当前值 ≥ mw_yoy_abs_floor 才真正告警。
-                    // 昨天 value 不可得（数据源不支持/无数据）时跳过同比，保持原阈值判断，避免漏报。
-                    Double yesterday = resolveYesterdayValue(inst, metricName);
+                    boolean isRed = isRedLevel(value, config);
+
+                    // 红色=硬水位（如内存>85%），无条件告警不做过滤——持续高水位是真实风险必须报；
+                    // 黄色触发走"昨天同时段同比双条件"：涨幅 ≥ mw_yoy_surge_threshold 且当前值 ≥ mw_yoy_abs_floor
+                    // 才告警，避免常规水位刷屏。昨天值不可得时跳过过滤，防漏报。
                     Map<String, Object> yoyInfo = null;
-                    if (yesterday != null) {
-                        double surgeThreshold = thresholdService.getDouble("mw_yoy_surge_threshold", 300);
-                        double absFloor = thresholdService.getDouble("mw_yoy_abs_floor", 30);
-                        double surge = yesterday > 0 ? (value - yesterday) / yesterday * 100 : Double.MAX_VALUE;
-                        if (surge < surgeThreshold || value < absFloor) {
-                            log.info("同比过滤: {} {} {} 当前={} 昨天={} 涨幅={}（要求涨幅≥{}% 且当前值≥{}），不告警",
-                                    middlewareType, instKey, metricName, round2(value), round2(yesterday),
-                                    surge == Double.MAX_VALUE ? "∞" : round2(surge), surgeThreshold, absFloor);
-                            continue;
+                    if (!isRed) {
+                        Double yesterday = resolveYesterdayValue(inst, metricName);
+                        if (yesterday != null) {
+                            double surgeThreshold = thresholdService.getDouble("mw_yoy_surge_threshold", 300);
+                            double absFloor = thresholdService.getDouble("mw_yoy_abs_floor", 30);
+                            double surge = yesterday > 0 ? (value - yesterday) / yesterday * 100 : Double.MAX_VALUE;
+                            if (surge < surgeThreshold || value < absFloor) {
+                                log.info("同比过滤: {} {} {} 当前={} 昨天={} 涨幅={}（要求涨幅≥{}% 且当前值≥{}），不告警",
+                                        middlewareType, instKey, metricName, round2(value), round2(yesterday),
+                                        surge == Double.MAX_VALUE ? "∞" : round2(surge), surgeThreshold, absFloor);
+                                continue;
+                            }
+                            yoyInfo = new LinkedHashMap<>();
+                            yoyInfo.put("yesterdayValue", round2(yesterday));
+                            yoyInfo.put("surgePercent", surge == Double.MAX_VALUE ? "∞" : round2(surge));
                         }
-                        yoyInfo = new LinkedHashMap<>();
-                        yoyInfo.put("yesterdayValue", round2(yesterday));
-                        yoyInfo.put("surgePercent", surge == Double.MAX_VALUE ? "∞" : round2(surge));
                     }
 
                     Map<String, Object> detail = new LinkedHashMap<>();
@@ -139,7 +144,6 @@ public class MiddlewareAlertService {
                         detail.putAll(yoyInfo);
                     }
 
-                    boolean isRed = isRedLevel(value, config);
                     detail.put("level", isRed ? "red" : "yellow");
 
                     if ("red".equals(detail.get("level"))) {

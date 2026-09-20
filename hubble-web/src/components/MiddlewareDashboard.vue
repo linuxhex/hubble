@@ -16,7 +16,7 @@
           <el-radio-button value="jvm">JVM</el-radio-button>
           <el-radio-button value="threadpool">线程池</el-radio-button>
         </el-radio-group>
-        <el-button size="small" @click="fetchData" :loading="loading">刷新</el-button>
+        <el-button size="small" @click="fetchData()" :loading="loading">刷新</el-button>
         <el-button size="small" @click="handleExport">导出</el-button>
       </div>
     </div>
@@ -570,7 +570,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { exportCSV } from '@/utils/export-csv.js'
 import {
   getRedisInstances, getMysqlInstances, getRocketmqInstances, getKafkaInstances,
@@ -674,8 +674,8 @@ const fetchAlerts = async (type, dataRef) => {
   }
 }
 
-const fetchData = async () => {
-  loading.value = true
+const fetchData = async (silent = false) => {
+  if (!silent) loading.value = true
   try {
     if (activeTab.value === 'redis') {
       const res = await getRedisInstances()
@@ -737,7 +737,7 @@ const fetchData = async () => {
   } catch (error) {
     console.error('Fetch error:', error)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -765,7 +765,15 @@ const handleExport = () => {
   exportCSV(filename, data, columns)
 }
 
-onMounted(() => fetchData())
+// 后端每 60s 巡检告警，前端同步周期刷新保证告警状态不依赖手动刷新页面
+let refreshTimer = null
+onMounted(() => {
+  fetchData()
+  refreshTimer = setInterval(() => fetchData(true), 60 * 1000)
+})
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
 </script>
 
 <style scoped>

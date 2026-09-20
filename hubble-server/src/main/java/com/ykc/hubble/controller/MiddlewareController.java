@@ -118,6 +118,12 @@ public class MiddlewareController {
         return Result.success(middlewareMonitorService.lindormMetricsDiscovery());
     }
 
+    @GetMapping("/redis/metrics-discovery")
+    public Result<Map<String, Object>> redisMetricsDiscovery(
+            @RequestParam(required = false) String instanceId) {
+        return Result.success(middlewareMonitorService.redisMetricsDiscovery(instanceId));
+    }
+
     @GetMapping("/elasticsearch/top-indices")
     public Result<List<Map<String, Object>>> elasticsearchTopIndices() {
         return Result.success(middlewareMonitorService.elasticsearchTopIndices());

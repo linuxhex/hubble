@@ -322,7 +322,12 @@ const formatTime = (ms) => { if (!ms) return '-'; const d = new Date(ms); const 
 
 // ===== SSE =====
 const handleAlert = (payload) => {
-  ElNotification({ type: 'error', title: `告警：${payload.title || '监控项'}`, message: `日志数 ${payload.logCount} ≥ 阈值 ${payload.threshold}`, duration: 5000 })
+  if (payload.status === 'RECOVERED') {
+    const dur = payload.durationMinutes ? `，持续约 ${payload.durationMinutes} 分钟` : ''
+    ElNotification({ type: 'success', title: `已恢复：${payload.title || '监控项'}`, message: `连续多次采集正常${dur}，当前错误数 ${payload.logCount}`, duration: 8000 })
+  } else {
+    ElNotification({ type: 'error', title: `告警：${payload.title || '监控项'}`, message: `日志数 ${payload.logCount} ≥ 阈值 ${payload.threshold}`, duration: 5000 })
+  }
   if (payload.configId) { flashMap[payload.configId] = true; setTimeout(() => delete flashMap[payload.configId], 5000); loadAll() }
 }
 

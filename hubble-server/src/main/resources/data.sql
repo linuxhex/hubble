@@ -21,13 +21,16 @@ WHERE NOT EXISTS (
   SELECT 1 FROM sys_dict d WHERE d.dict_type = t.a AND d.dict_value = t.b
 );
 
-INSERT INTO alert_config (title, description, keyword_template_id, start_time, end_time, collection_interval, alert_threshold, yellow_threshold_ratio, peak_start_time, peak_end_time, peak_alert_threshold, enabled)
-SELECT t.a, t.b, t.c, t.d, t.e, t.f, t.g, t.h, t.i, t.j, t.k, t.l FROM (
-  SELECT '统计服务错误监控' AS a, '监控statistics-server的ERROR日志' AS b, 'tpl-statistics-server' AS c, '00:00:00' AS d, '23:59:59' AS e, 60 AS f, 2000 AS g, 0.75 AS h, '09:00:00' AS i, '12:00:00' AS j, 3000 AS k, 1 AS l UNION ALL
-  SELECT '统计TOB错误监控', '监控statistics-tob的ERROR日志', 'tpl-statistics-tob', '00:00:00', '23:59:59', 60, 1200, 0.67, '09:00:00', '12:00:00', 1800, 1 UNION ALL
-  SELECT '交易订单错误监控', '监控trade-order的ERROR日志', 'tpl-trade-order', '00:00:00', '23:59:59', 60, 300, 0.67, '10:00:00', '14:00:00', 450, 1 UNION ALL
-  SELECT '设备维护错误监控', '监控device-maint的ERROR日志', 'tpl-device-maint', '00:00:00', '23:59:59', 60, 200, 0.75, '09:00:00', '18:00:00', 300, 1 UNION ALL
-  SELECT '推送服务错误监控', '监控zdl-push-server的ERROR日志', 'tpl-zdl-push', '00:00:00', '23:59:59', 60, 200, 0.67, '10:00:00', '12:00:00', 300, 1
+INSERT INTO alert_config (title, description, keyword_template_id, logstore, start_time, end_time, collection_interval, alert_threshold, yellow_threshold_ratio, peak_start_time, peak_end_time, peak_alert_threshold, enabled)
+SELECT t.a, t.b, t.c, t.d, t.e, t.f, t.g, t.h, t.i, t.j, t.k, t.l, t.m FROM (
+  SELECT '统计服务错误监控' AS a, '监控statistics-server的ERROR日志' AS b, 'tpl-statistics-server' AS c, NULL AS d, '00:00:00' AS e, '23:59:59' AS f, 60 AS g, 2000 AS h, 0.75 AS i, '09:00:00' AS j, '12:00:00' AS k, 3000 AS l, 1 AS m UNION ALL
+  SELECT '统计TOB错误监控', '监控statistics-tob的ERROR日志', 'tpl-statistics-tob', NULL, '00:00:00', '23:59:59', 60, 1200, 0.67, '09:00:00', '12:00:00', 1800, 1 UNION ALL
+  SELECT '交易订单错误监控', '监控trade-order的ERROR日志', 'tpl-trade-order', NULL, '00:00:00', '23:59:59', 60, 300, 0.67, '10:00:00', '14:00:00', 450, 1 UNION ALL
+  SELECT '设备维护错误监控', '监控device-maint的ERROR日志', 'tpl-device-maint', NULL, '00:00:00', '23:59:59', 60, 200, 0.75, '09:00:00', '18:00:00', 300, 1 UNION ALL
+  SELECT '推送服务错误监控', '监控zdl-push-server的ERROR日志', 'tpl-zdl-push', NULL, '00:00:00', '23:59:59', 60, 200, 0.67, '10:00:00', '12:00:00', 300, 1 UNION ALL
+  SELECT '充电服务错误监控', '监控charge-server的ERROR日志（停充链路/Feign超时）', 'tpl-charge-server', NULL, '00:00:00', '23:59:59', 60, 100, 0.67, '10:00:00', '14:00:00', 150, 1 UNION ALL
+  SELECT '指令下发服务错误监控', '监控device-post的ERROR日志（日志在device-post专属库）', 'tpl-device-post', 'device-post', '00:00:00', '23:59:59', 60, 300, 0.67, NULL, NULL, NULL, 1 UNION ALL
+  SELECT '桩业务服务错误监控', '监控device-business的ERROR日志（日志在device-business专属库）', 'tpl-device-business', 'device-business', '00:00:00', '23:59:59', 60, 200, 0.67, NULL, NULL, NULL, 1
 ) t
 WHERE NOT EXISTS (
   SELECT 1 FROM alert_config d WHERE d.title = t.a
@@ -81,7 +84,8 @@ INSERT INTO alert_threshold_config (config_key, config_value, description) VALUE
 ('consecutive_red_count', '3', '连续红盘次数达到此值才触发钉钉告警'),
 ('min_request_count', '10', '劣化/暴涨统计最小请求数，低于此值不参与排名'),
 ('mw_yoy_surge_threshold', '300', '中间件告警同比涨幅阈值(%)，当前值相对昨天同一5分钟窗口'),
-('mw_yoy_abs_floor', '30', '中间件告警同比绝对值下限，当前值低于此值不告警')
+('mw_yoy_abs_floor', '30', '中间件告警同比绝对值下限，当前值低于此值不告警'),
+('consecutive_recover_count', '3', '恢复通知：连续正常采集达到此次数才推送已恢复通知')
 ON DUPLICATE KEY UPDATE config_value = config_value;
 
 -- 历史默认值自愈迁移：仅当配置仍是旧默认值时升级为新默认值，不覆盖页面自定义值

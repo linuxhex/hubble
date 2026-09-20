@@ -146,25 +146,26 @@ public class MiddlewareMonitorService {
 
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
 
-                    item.put("cpuUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "CpuUsage", "ShardingCpuUsage", dim, startTime, endTime, true));
+                    item.put("cpuUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "ShardingCpuUsage", "CpuUsage", dim, startTime, endTime, true));
 
-                    // 连接数：尝试多个可能的指标名称
-                    double connections = queryLatestMetricWithFallbackThrottled("acs_kvstore", "ConnectionUsage", "ShardingConnectionCount", dim, startTime, endTime);
+                    // 连接数：集群版 proxy 架构 ShardingUsedConnection 恒为 0（节点级不上报），真实指标是 ShardingProxyUsedConnection；
+                    // 标准版用 UsedConnection（绝对连接数）；tair 兜底 ShardingUsedConnection。实测确认（2026-09-20），勿用 GroupConnectionUsage（实例级查询返回噪音）
+                    double connections = queryLatestMetricWithFallbackThrottled("acs_kvstore", "ShardingProxyUsedConnection", "UsedConnection", dim, startTime, endTime);
                     if (connections == 0) {
                         connections = queryLatestMetricThrottled("acs_kvstore", "ShardingUsedConnection", dim, startTime, endTime);
                     }
                     if (connections == 0) {
-                        connections = queryLatestMetricThrottled("acs_kvstore", "UsedConnection", dim, startTime, endTime);
+                        connections = queryLatestMetricThrottled("acs_kvstore", "ShardingLBActiveConnPs", dim, startTime, endTime);
                     }
                     item.put("connections", connections);
 
-                    item.put("memoryUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "MemoryUsage", "ShardingMemoryUsage", dim, startTime, endTime, true));
-                    item.put("qps", queryLatestMetricThrottled("acs_kvstore", "ShardingCommandQPS", dim, startTime, endTime));
+                    item.put("memoryUsage", queryLatestMetricWithFallbackThrottled("acs_kvstore", "ShardingMemoryUsage", "MemoryUsage", dim, startTime, endTime, true));
+                    item.put("qps", queryLatestMetricWithFallbackThrottled("acs_kvstore", "ShardingCommandQPS", "UsedQPS", dim, startTime, endTime));
 
                     Map<String, Object> yoy = new LinkedHashMap<>();
-                    yoy.put("cpuUsage", yoyCm("acs_kvstore", dim, "CpuUsage|ShardingCpuUsage"));
-                    yoy.put("memoryUsage", yoyCm("acs_kvstore", dim, "MemoryUsage|ShardingMemoryUsage"));
-                    yoy.put("connections", yoyCm("acs_kvstore", dim, "ConnectionUsage|ShardingConnectionCount|ShardingUsedConnection|UsedConnection"));
+                    yoy.put("cpuUsage", yoyCm("acs_kvstore", dim, "ShardingCpuUsage|CpuUsage"));
+                    yoy.put("memoryUsage", yoyCm("acs_kvstore", dim, "ShardingMemoryUsage|MemoryUsage"));
+                    yoy.put("connections", yoyCm("acs_kvstore", dim, "ShardingProxyUsedConnection|UsedConnection|ShardingUsedConnection|ShardingLBActiveConnPs"));
                     item.put("_yoy", yoy);
                     return item;
                 })
@@ -185,6 +186,43 @@ public class MiddlewareMonitorService {
             log.error("查询 Redis 监控失败: {}", e.getMessage());
         }
         return list;
+    }
+
+    /**
+     * 诊断：实测 Redis（acs_kvstore）可用指标——元数据清单 + 对指定（或第一个）prod 实例逐个试查候选指标，
+     * 用于确定标准版/集群版实例真实支持的指标名，避免盲试报 400。
+     */
+    public Map<String, Object> redisMetricsDiscovery(String instanceId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<String> candidates = List.of(
+                "CpuUsage", "ShardingCpuUsage", "GroupCpuUsage", "GroupMemoryUsage",
+                "MemoryUsage", "ShardingMemoryUsage", "UsedMemory", "ShardingUsedMemory",
+                "ConnectionUsage", "UsedConnection", "StandardUsedConnection",
+                "ShardingConnectionUsage", "ShardingUsedConnection",
+                "ShardingProxyUsedConnection", "ShardingProxyConnectionUsage",
+                "ShardingQuotaConnection", "GroupConnectionUsage", "ShardingLBActiveConnPs",
+                "ShardingCommandQPS", "ShardingProxyTotalQps", "ShardingUsedQPS", "UsedQPS",
+                "RealtimeKeys", "HitRatio", "ShardingAvgRt");
+        try {
+            var prod = cloudMonitorClient.listRedisInstances().stream()
+                    .filter(inst -> inst.getInstanceName() != null && inst.getInstanceName().startsWith("prod-"))
+                    .toList();
+            result.put("prodInstanceCount", prod.size());
+            if (prod.isEmpty()) {
+                result.put("error", "无 prod 实例");
+                return result;
+            }
+            var target = prod.stream()
+                    .filter(inst -> inst.getInstanceId().equals(instanceId))
+                    .findFirst()
+                    .orElse(prod.get(0));
+            result.put("probeInstance", target.getInstanceId() + " / " + target.getInstanceName()
+                    + " / class=" + target.getInstanceClass());
+            result.putAll(cloudMonitorClient.probeMetrics("acs_kvstore", target.getInstanceId(), candidates));
+        } catch (Exception e) {
+            result.put("error", e.getMessage());
+        }
+        return result;
     }
 
     /**

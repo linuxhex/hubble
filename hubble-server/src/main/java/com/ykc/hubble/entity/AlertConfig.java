@@ -39,6 +39,12 @@ public class AlertConfig {
     private String keywordTemplateId;
 
     /**
+     * 查询的 SLS logstore（空则用默认聚合库 all；device-post 等服务日志不在聚合库需显式指定）
+     */
+    @TableField("logstore")
+    private String logstore;
+
+    /**
      * 每日监控开始时间 HH:mm:ss
      */
     @TableField("start_time")

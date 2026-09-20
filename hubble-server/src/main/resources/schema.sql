@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS alert_config (
   title VARCHAR(100) NOT NULL,
   description VARCHAR(500),
   keyword_template_id VARCHAR(64) NOT NULL,
+  logstore VARCHAR(64),
   start_time VARCHAR(8) NOT NULL DEFAULT '00:00:00',
   end_time VARCHAR(8) NOT NULL DEFAULT '23:59:59',
   collection_interval INT NOT NULL DEFAULT 60,
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS alert_config (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );
+ALTER TABLE alert_config ADD COLUMN IF NOT EXISTS logstore VARCHAR(64);
 CREATE TABLE IF NOT EXISTS sys_dict (
   id BIGINT NOT NULL AUTO_INCREMENT,
   dict_type VARCHAR(50) NOT NULL,

@@ -101,23 +101,6 @@ public class ServiceLoadController {
     }
 
     /**
-     * 生成演示数据（用于测试页面功能）
-     */
-    @PostMapping("/generate-demo-data")
-    public Map<String, Object> generateDemoData() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        try {
-            serviceLoadService.generateDemoData();
-            result.put("code", 200);
-            result.put("message", "演示数据生成成功");
-        } catch (Exception e) {
-            result.put("code", 500);
-            result.put("message", "生成失败: " + e.getMessage());
-        }
-        return result;
-    }
-
-    /**
      * 调试：发现 SLS 中实际的容器名称
      */
     @GetMapping("/discover-services")
