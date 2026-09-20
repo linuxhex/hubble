@@ -11,9 +11,9 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -65,27 +65,32 @@ public class ServiceLoadBackfillRunner {
         LocalDate today = LocalDate.now(ZONE);
         LocalDate startDate = today.minusDays(backfillDays);
 
-        Set<LocalDate> present = new HashSet<>();
+        // 按日期统计应用数：仅判断“日期缺失”会让单应用缺天永不补采，
+        // 需同时判断当日应用数是否明显少于完整日（阈值 90%）
+        Map<LocalDate, Integer> countByDate = new HashMap<>();
         List<ServiceLoadDaily> rows = serviceLoadService.queryAllByDateRange(startDate);
         if (rows != null) {
             for (ServiceLoadDaily row : rows) {
                 if (row.getStatDate() != null) {
-                    present.add(row.getStatDate());
+                    countByDate.merge(row.getStatDate(), 1, Integer::sum);
                 }
             }
         }
+        int maxApps = countByDate.values().stream().max(Integer::compareTo).orElse(0);
+        int minApps = Math.max(1, (int) Math.floor(maxApps * 0.9));
 
         List<LocalDate> missing = new ArrayList<>();
         for (LocalDate d = startDate; !d.isAfter(today); d = d.plusDays(1)) {
-            if (!present.contains(d)) {
+            Integer c = countByDate.get(d);
+            if (c == null || c < minApps) {
                 missing.add(d);
             }
         }
         if (missing.isEmpty()) {
-            log.info("服务负载启动补采: 最近 {} 天数据完整，无需补采", backfillDays);
+            log.info("服务负载启动补采: 最近 {} 天数据完整(每日应用数≥{})，无需补采", backfillDays, minApps);
             return;
         }
-        log.info("服务负载启动补采: 缺 {} 天: {}", missing.size(), missing);
+        log.info("服务负载启动补采: 缺 {} 天(完整日应用数={}): {}", missing.size(), maxApps, missing);
 
         int consecutiveEmpty = 0;
         for (LocalDate date : missing) {

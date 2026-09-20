@@ -107,56 +107,6 @@ public class ServiceLoadService {
         }
     }
 
-    public void generateDemoData() throws Exception {
-        List<String> services = discoverServices();
-        if (services.isEmpty()) {
-            log.warn("无可用服务列表，无法生成演示数据");
-            return;
-        }
-
-        LocalDate endDate = LocalDate.now(ZONE);
-        LocalDate startDate = endDate.minusDays(30);
-        log.info("开始生成演示数据: {} 个应用, {} 到 {}", services.size(), startDate, endDate);
-
-        int totalInserted = 0;
-        Random random = new Random(42);
-
-        for (String appName : services) {
-            for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
-                if (date.getDayOfMonth() % 2 != 0) continue;
-
-                ServiceLoadDaily load = new ServiceLoadDaily();
-                load.setAppName(appName);
-                load.setStatDate(date);
-                load.setPartialDay(0);
-
-                double baseCpu = 20 + random.nextDouble() * 40;
-                double avgCpu = Math.max(5, Math.min(95, baseCpu + random.nextGaussian() * 10));
-                double maxCpu = Math.min(100, avgCpu * (1.2 + random.nextDouble() * 0.3));
-
-                double baseMemory = 40 + random.nextDouble() * 30;
-                double avgMemory = Math.max(10, Math.min(95, baseMemory + random.nextGaussian() * 5));
-                double maxMemory = Math.min(100, avgMemory * (1.1 + random.nextDouble() * 0.15));
-
-                double baseQps = 10 + random.nextDouble() * 150;
-                double maxQps = Math.max(1, baseQps + random.nextGaussian() * 20);
-                double avgRt = 5 + random.nextDouble() * 80;
-
-                load.setAvgCpu(BigDecimal.valueOf(avgCpu).setScale(2, RoundingMode.HALF_UP));
-                load.setMaxCpu(BigDecimal.valueOf(maxCpu).setScale(2, RoundingMode.HALF_UP));
-                load.setAvgMemory(BigDecimal.valueOf(avgMemory).setScale(2, RoundingMode.HALF_UP));
-                load.setMaxMemory(BigDecimal.valueOf(maxMemory).setScale(2, RoundingMode.HALF_UP));
-                load.setMaxQps(BigDecimal.valueOf(maxQps).setScale(2, RoundingMode.HALF_UP));
-                load.setAvgRt(BigDecimal.valueOf(avgRt).setScale(2, RoundingMode.HALF_UP));
-                load.setTotalCount((long) (maxQps * 3600 * (0.5 + random.nextDouble() * 0.5)));
-
-                upsertLoad(load);
-                totalInserted++;
-            }
-        }
-        log.info("演示数据生成完成: {} 条记录", totalInserted);
-    }
-
     public Map<String, Object> discoverServicesFromSls() {
         Map<String, Object> result = new LinkedHashMap<>();
         String logstore = monitorProperties.getDefaultQueryLogstore();
@@ -224,7 +174,8 @@ public class ServiceLoadService {
     int collectFromSls(LocalDate targetDate) throws Exception {
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
-        LinkedHashMap<String, String> services = discoverServicesWithRaw();
+        Map<String, String> deployToApp = buildDeployToAppMap(grafanaClient.getDsUid());
+        LinkedHashMap<String, String> services = discoverServicesWithRaw(deployToApp);
         if (services.isEmpty()) {
             log.warn("服务发现为空，跳过采集: date={}", targetDate);
             return 0;
@@ -242,6 +193,7 @@ public class ServiceLoadService {
         boolean partialDay = targetDate.equals(LocalDate.now(ZONE));
         int collected = 0;
         Map<String, CpuMemResult> cpuMemMap = queryDayCpuMem(targetDate);
+        Map<String, TrafficResult> promTraffic = queryDayTrafficProm(targetDate);
 
         for (Map.Entry<String, String> entry : services.entrySet()) {
             String appName = entry.getKey();
@@ -260,17 +212,30 @@ public class ServiceLoadService {
                     load.setMaxMemory(cpuMem.maxMem);
                 }
 
-                PeakResult peak = queryPeakQps(logstore, slsName, peakFrom, peakTo, peakFrom2, peakTo2);
-                load.setMaxQps(peak.maxQps);
-                load.setTotalCount(peak.totalCount);
-                load.setAvgRt(peak.avgRt);
+                TrafficResult pt = promTraffic.get(appName);
+                if (pt != null && (pt.totalCount > 0 || pt.maxQps != null)) {
+                    // 优先真实请求指标
+                    load.setMaxQps(pt.maxQps);
+                    load.setTotalCount(pt.totalCount);
+                    if (pt.avgRt != null) {
+                        load.setAvgRt(pt.avgRt);
+                    } else {
+                        load.setAvgRt(extractAvgRt(logstore, slsName, dayFrom, dayTo));
+                    }
+                } else {
+                    // 回落 SLS 日志口径（日志行数≈请求数，非精确值）
+                    PeakResult peak = queryPeakQps(logstore, slsName, peakFrom, peakTo, peakFrom2, peakTo2);
+                    load.setMaxQps(peak.maxQps);
+                    load.setTotalCount(peak.totalCount);
+                    load.setAvgRt(peak.avgRt);
 
-                if (peak.totalCount == 0) {
-                    DayResult day = queryDayStats(logstore, slsName, dayFrom, dayTo);
-                    load.setTotalCount(day.totalCount);
-                    load.setMaxQps(day.maxQps);
-                    if (load.getAvgRt() == null) {
-                        load.setAvgRt(day.avgRt);
+                    if (peak.totalCount == 0) {
+                        DayResult day = queryDayStats(logstore, slsName, dayFrom, dayTo);
+                        load.setTotalCount(day.totalCount);
+                        load.setMaxQps(day.maxQps);
+                        if (load.getAvgRt() == null) {
+                            load.setAvgRt(day.avgRt);
+                        }
                     }
                 }
 
@@ -300,7 +265,7 @@ public class ServiceLoadService {
         Set<String> apps = new LinkedHashSet<>();
         String ds = grafanaClient.getDsUid();
         String[] promqls = {
-                "count by (application) (system_cpu_usage)",
+                "count by (application) (process_cpu_usage)",
                 "count by (application) (jvm_memory_used_bytes{area=\"heap\"})"
         };
         for (String promql : promqls) {
@@ -321,9 +286,11 @@ public class ServiceLoadService {
     }
 
     /**
-     * 四级服务发现（Prom → SLS → DB → 备用列表），返回 归一化应用名 → SLS容器原始名
+     * 四级服务发现（Prom → SLS → DB → 备用列表），返回 归一化应用名 → SLS容器原始名。
+     * SLS 容器名先走 deployment↔application 对照表归一化，避免同一服务的
+     * k8s 名（charge-server）与 spring 名（DeviceBusinessServer）被拆成两个应用。
      */
-    private LinkedHashMap<String, String> discoverServicesWithRaw() {
+    private LinkedHashMap<String, String> discoverServicesWithRaw(Map<String, String> deployToApp) {
         LinkedHashMap<String, String> services = new LinkedHashMap<>();
 
         Set<String> promApps = discoverApplicationsFromProm();
@@ -343,7 +310,8 @@ public class ServiceLoadService {
                 String container = entry.getContainerName();
                 if (container == null || container.isBlank()) continue;
                 container = container.trim();
-                String norm = promAppBySls.getOrDefault(container, container);
+                String norm = deployToApp.getOrDefault(container,
+                        promAppBySls.getOrDefault(container, container));
                 // 已有条目刷新为真实容器名，保证QPS过滤用对名字
                 services.put(norm, container);
                 slsCount++;
@@ -382,7 +350,7 @@ public class ServiceLoadService {
     }
 
     private List<String> discoverServices() {
-        LinkedHashMap<String, String> services = discoverServicesWithRaw();
+        LinkedHashMap<String, String> services = discoverServicesWithRaw(buildDeployToAppMap(grafanaClient.getDsUid()));
         return new ArrayList<>(services.keySet());
     }
 
@@ -396,21 +364,29 @@ public class ServiceLoadService {
         String query = filter + sql;
 
         for (long[] window : new long[][]{{from1, to1}, {from2, to2}}) {
-            try {
-                List<Map<String, String>> rows = slsQueryClient.queryAnalytics(
-                        logstore, query, window[0], window[1], 100);
-
-                for (Map<String, String> row : rows) {
-                    long cnt = parseLong(row.get("cnt"));
-                    result.totalCount += cnt;
-
-                    double qps = cnt / 300.0;
-                    if (qps > result.maxQpsValue) {
-                        result.maxQpsValue = qps;
+            List<Map<String, String>> rows = null;
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    rows = slsQueryClient.queryAnalytics(logstore, query, window[0], window[1], 100);
+                    break;
+                } catch (Exception e) {
+                    if (attempt == 2) {
+                        log.warn("高峰时段QPS查询重试后仍失败: service={}, window={}, err={}", service, window[0], e.getMessage());
+                    } else {
+                        log.warn("高峰时段QPS查询失败，重试: service={}, err={}", service, e.getMessage());
                     }
                 }
-            } catch (Exception e) {
-                log.debug("高峰时段QPS查询失败(service={}): {}", service, e.getMessage());
+            }
+            if (rows == null) continue;
+
+            for (Map<String, String> row : rows) {
+                long cnt = parseLong(row.get("cnt"));
+                result.totalCount += cnt;
+
+                double qps = cnt / 300.0;
+                if (qps > result.maxQpsValue) {
+                    result.maxQpsValue = qps;
+                }
             }
         }
 
@@ -483,7 +459,10 @@ public class ServiceLoadService {
             for (String key : new String[]{"duration", "cost", "rt", "useTime", "elapsed"}) {
                 String val = fields.get(key);
                 if (val != null && !val.isBlank()) {
-                    try { return Double.parseDouble(val); } catch (NumberFormatException ignored) {}
+                    try {
+                        double rt = Double.parseDouble(val);
+                        if (rt > 0 && rt <= MAX_PLAUSIBLE_RT_MS) return rt;
+                    } catch (NumberFormatException ignored) {}
                 }
             }
         }
@@ -493,63 +472,55 @@ public class ServiceLoadService {
                     .compile("(?:cost|useTime|took|elapsed|rt|duration|time|耗时)[:\\s=]+(\\d+(?:\\.\\d+)?)\\s*(?:ms)?")
                     .matcher(message);
             if (m.find()) {
-                try { return Double.parseDouble(m.group(1)); } catch (NumberFormatException ignored) {}
+                try {
+                    double rt = Double.parseDouble(m.group(1));
+                    if (rt > 0 && rt <= MAX_PLAUSIBLE_RT_MS) return rt;
+                } catch (NumberFormatException ignored) {}
             }
         }
         return 0;
     }
 
+    // RT 单位 ms；超过 10 分钟的值必为误提取（时间戳/字节数等非耗时字段），丢弃避免插入失败
+    private static final double MAX_PLAUSIBLE_RT_MS = 600000;
+
     private Map<String, CpuMemResult> queryDayCpuMem(LocalDate date) {
         Map<String, CpuMemResult> result = new HashMap<>();
         String ds = grafanaClient.getDsUid();
-        long fromSec = date.atStartOfDay(ZONE).toEpochSecond();
-        long toSec = date.plusDays(1).atStartOfDay(ZONE).toEpochSecond();
-        String from = Instant.ofEpochSecond(fromSec).toString();
-        String to = Instant.ofEpochSecond(toSec).toString();
+        // instant 查询 eval 于 to 时刻，[24h:5m] 子查询回看正好覆盖目标日全天
+        String from = date.atStartOfDay(ZONE).toInstant().toString();
+        String to = date.plusDays(1).atStartOfDay(ZONE).toInstant().toString();
 
-        String cpuPromql = "avg by (application) (system_cpu_usage)*100";
-        String memPromql = "(sum by (application) (jvm_memory_used_bytes{area=\"heap\"}) * 100) / "
-                + "sum by (application) (jvm_memory_max_bytes{area=\"heap\"})";
+        // CPU：process_cpu_usage 为进程口径（0~1）；日峰值取最热副本（扩容视角），日均取副本平均
+        String cpuMaxPromql = "max by (application) (max_over_time(process_cpu_usage{application!=\"\"}[24h:5m])) * 100";
+        String cpuAvgPromql = "avg by (application) (avg_over_time(process_cpu_usage{application!=\"\"}[24h:5m])) * 100";
+        // 内存：容器口径 working_set / 容器 limit（含堆外，能反映 OOM 风险）；
+        // cAdvisor 指标无 application 标签，PromQL 从 pod 名提取 deployment，Java 侧再映射回应用名
+        String memRatio = "container_memory_working_set_bytes{namespace=\"default\",container!=\"\",container!=\"POD\"}"
+                + " / on(pod,container) group_left() kube_pod_container_resource_limits{namespace=\"default\",resource=\"memory\"}";
+        String memMaxPromql = "max by (deployment) (label_replace(max_over_time((" + memRatio + ")[24h:5m]),"
+                + " \"deployment\", \"$1\", \"pod\", \"(.+)-[a-z0-9]+-[a-z0-9]+$\")) * 100";
+        String memAvgPromql = "avg by (deployment) (label_replace(avg_over_time((" + memRatio + ")[24h:5m]),"
+                + " \"deployment\", \"$1\", \"pod\", \"(.+)-[a-z0-9]+-[a-z0-9]+$\")) * 100";
 
         try {
-            List<Map<String, Object>> cpuRows = grafanaClient.queryRange(cpuPromql, from, to, ds);
-            List<Map<String, Object>> memRows = grafanaClient.queryRange(memPromql, from, to, ds);
-
-            Map<String, List<Double>> cpuByApp = new HashMap<>();
-            for (Map<String, Object> row : cpuRows) {
-                String app = String.valueOf(row.getOrDefault("application", ""));
-                if (app.isEmpty()) continue;
-                double val = parseDoubleObj(row.get("value"));
-                if (val > 0) {
-                    cpuByApp.computeIfAbsent(app, k -> new ArrayList<>()).add(val);
-                }
-            }
-
-            Map<String, List<Double>> memByApp = new HashMap<>();
-            for (Map<String, Object> row : memRows) {
-                String app = String.valueOf(row.getOrDefault("application", ""));
-                if (app.isEmpty()) continue;
-                double val = parseDoubleObj(row.get("value"));
-                if (val > 0) {
-                    memByApp.computeIfAbsent(app, k -> new ArrayList<>()).add(val);
-                }
-            }
+            Map<String, String> deployToApp = buildDeployToAppMap(ds);
+            Map<String, BigDecimal> cpuMaxByApp = collectByMetric(grafanaClient.queryInstant(cpuMaxPromql, ds, from, to), "application", Map.of());
+            Map<String, BigDecimal> cpuAvgByApp = collectByMetric(grafanaClient.queryInstant(cpuAvgPromql, ds, from, to), "application", Map.of());
+            Map<String, BigDecimal> memMaxByApp = collectByMetric(grafanaClient.queryInstant(memMaxPromql, ds, from, to), "deployment", deployToApp);
+            Map<String, BigDecimal> memAvgByApp = collectByMetric(grafanaClient.queryInstant(memAvgPromql, ds, from, to), "deployment", deployToApp);
 
             Set<String> apps = new LinkedHashSet<>();
-            apps.addAll(cpuByApp.keySet());
-            apps.addAll(memByApp.keySet());
+            apps.addAll(cpuMaxByApp.keySet());
+            apps.addAll(cpuAvgByApp.keySet());
+            apps.addAll(memMaxByApp.keySet());
+            apps.addAll(memAvgByApp.keySet());
             for (String app : apps) {
                 CpuMemResult r = new CpuMemResult();
-                List<Double> cpuVals = cpuByApp.get(app);
-                List<Double> memVals = memByApp.get(app);
-                if (cpuVals != null && !cpuVals.isEmpty()) {
-                    r.avgCpu = avgBig(cpuVals);
-                    r.maxCpu = maxBig(cpuVals);
-                }
-                if (memVals != null && !memVals.isEmpty()) {
-                    r.avgMem = avgBig(memVals);
-                    r.maxMem = maxBig(memVals);
-                }
+                r.maxCpu = cpuMaxByApp.get(app);
+                r.avgCpu = cpuAvgByApp.get(app);
+                r.maxMem = memMaxByApp.get(app);
+                r.avgMem = memAvgByApp.get(app);
                 result.put(app, r);
             }
             log.info("Grafana CPU/内存采集完成: {} 个应用有数据", result.size());
@@ -559,15 +530,95 @@ public class ServiceLoadService {
         return result;
     }
 
-    private BigDecimal avgBig(List<Double> vals) {
-        double sum = 0;
-        for (double v : vals) sum += v;
-        return BigDecimal.valueOf(sum / vals.size()).setScale(2, RoundingMode.HALF_UP);
+    /**
+     * 真实请求指标（http_server_requests）：totalCount=全天请求计数增量、maxQps=全天最忙5分钟、
+     * avgRt=总耗时/总请求数（ms）。相比 SLS 日志行数口径，这是真实请求数。
+     */
+    private Map<String, TrafficResult> queryDayTrafficProm(LocalDate date) {
+        Map<String, TrafficResult> result = new HashMap<>();
+        String ds = grafanaClient.getDsUid();
+        String from = date.atStartOfDay(ZONE).toInstant().toString();
+        String to = date.plusDays(1).atStartOfDay(ZONE).toInstant().toString();
+
+        String countMetric = "http_server_requests_seconds_count{application!=\"\"}";
+        String totalCountPromql = "sum by (application) (increase(" + countMetric + "[24h:5m]))";
+        String maxQpsPromql = "max by (application) (max_over_time((sum by (application) (rate(" + countMetric + "[5m])))[24h:5m]))";
+        String avgRtPromql = "1000 * (sum by (application) (increase(http_server_requests_seconds_sum{application!=\"\"}[24h:5m]))"
+                + " / sum by (application) (increase(" + countMetric + "[24h:5m])))";
+
+        try {
+            Map<String, Double> totalByApp = collectDoubleByMetric(grafanaClient.queryInstant(totalCountPromql, ds, from, to), "application", Map.of());
+            Map<String, Double> qpsByApp = collectDoubleByMetric(grafanaClient.queryInstant(maxQpsPromql, ds, from, to), "application", Map.of());
+            Map<String, Double> rtByApp = collectDoubleByMetric(grafanaClient.queryInstant(avgRtPromql, ds, from, to), "application", Map.of());
+
+            Set<String> apps = new LinkedHashSet<>();
+            apps.addAll(totalByApp.keySet());
+            apps.addAll(qpsByApp.keySet());
+            apps.addAll(rtByApp.keySet());
+            for (String app : apps) {
+                TrafficResult t = new TrafficResult();
+                Double total = totalByApp.get(app);
+                if (total != null) t.totalCount = Math.round(total);
+                Double qps = qpsByApp.get(app);
+                if (qps != null) t.maxQps = BigDecimal.valueOf(qps).setScale(2, RoundingMode.HALF_UP);
+                Double rt = rtByApp.get(app);
+                if (rt != null && rt > 0 && rt <= MAX_PLAUSIBLE_RT_MS) t.avgRt = BigDecimal.valueOf(rt).setScale(2, RoundingMode.HALF_UP);
+                if (t.totalCount > 0 || t.maxQps != null || t.avgRt != null) {
+                    result.put(app, t);
+                }
+            }
+            log.info("Prom 真实请求指标采集完成: {} 个应用", result.size());
+        } catch (Exception e) {
+            log.warn("Prom 请求指标查询失败，流量/RT将回落 SLS 日志口径: {}", e.getMessage());
+        }
+        return result;
     }
 
-    private BigDecimal maxBig(List<Double> vals) {
-        double max = vals.stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        return BigDecimal.valueOf(max).setScale(2, RoundingMode.HALF_UP);
+    /**
+     * 构建 k8s deployment 名 → Prom application 名 对照表：
+     * 优先用指标自带的 devops_aliyun_com_app_name 标签（云效注入），其次用配置的 app-map
+     */
+    private Map<String, String> buildDeployToAppMap(String ds) {
+        Map<String, String> map = new HashMap<>();
+        map.putAll(promAppBySls);
+        try {
+            List<Map<String, Object>> rows = grafanaClient.queryInstant(
+                    "max by (application, devops_aliyun_com_app_name) (process_cpu_usage{application!=\"\"})", ds);
+            for (Map<String, Object> row : rows) {
+                Object k8s = row.get("devops_aliyun_com_app_name");
+                Object app = row.get("application");
+                if (k8s != null && app != null && !String.valueOf(k8s).isBlank()) {
+                    map.put(String.valueOf(k8s), String.valueOf(app));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询应用对照表失败: {}", e.getMessage());
+        }
+        return map;
+    }
+
+    private Map<String, BigDecimal> collectByMetric(List<Map<String, Object>> rows, String labelKey, Map<String, String> aliasMap) {
+        return toScale2(collectDoubleByMetric(rows, labelKey, aliasMap));
+    }
+
+    private Map<String, Double> collectDoubleByMetric(List<Map<String, Object>> rows, String labelKey, Map<String, String> aliasMap) {
+        Map<String, Double> out = new HashMap<>();
+        if (rows == null) return out;
+        for (Map<String, Object> row : rows) {
+            String key = String.valueOf(row.getOrDefault(labelKey, ""));
+            if (key.isEmpty()) continue;
+            double val = parseDoubleObj(row.get("value"));
+            if (val > 0) {
+                out.put(aliasMap.getOrDefault(key, key), val);
+            }
+        }
+        return out;
+    }
+
+    private Map<String, BigDecimal> toScale2(Map<String, Double> in) {
+        Map<String, BigDecimal> out = new HashMap<>();
+        in.forEach((k, v) -> out.put(k, BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP)));
+        return out;
     }
 
     private double parseDoubleObj(Object obj) {
@@ -615,6 +666,12 @@ public class ServiceLoadService {
     private long parseLong(String s) {
         if (s == null || s.isBlank()) return 0;
         try { return Long.parseLong(s); } catch (NumberFormatException e) { return 0; }
+    }
+
+    private static class TrafficResult {
+        long totalCount;
+        BigDecimal maxQps;
+        BigDecimal avgRt;
     }
 
     private static class PeakResult {

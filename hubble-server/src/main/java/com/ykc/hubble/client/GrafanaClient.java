@@ -58,14 +58,22 @@ public class GrafanaClient {
     }
 
     /**
-     * 执行 PromQL instant 查询（指定数据源）
+     * 执行 PromQL instant 查询（指定数据源，eval 时刻 = now）
      */
     public List<Map<String, Object>> queryInstant(String promql, String targetDsUid) {
+        return queryInstant(promql, targetDsUid, "now-1h", "now");
+    }
+
+    /**
+     * 执行 PromQL instant 查询（指定数据源与 eval 时间点，eval 发生在 to 时刻，
+     * 配合 [24h:5m] 子查询可回看目标日全天）
+     */
+    public List<Map<String, Object>> queryInstant(String promql, String targetDsUid, String from, String to) {
         List<Map<String, Object>> results = new ArrayList<>();
         try {
             String body = String.format(
-                    "{\"queries\":[{\"refId\":\"A\",\"datasource\":{\"type\":\"prometheus\",\"uid\":\"%s\"},\"expr\":%s,\"instant\":true}],\"from\":\"now-1h\",\"to\":\"now\"}",
-                    targetDsUid, JSON.toJSONString(promql));
+                    "{\"queries\":[{\"refId\":\"A\",\"datasource\":{\"type\":\"prometheus\",\"uid\":\"%s\"},\"expr\":%s,\"instant\":true}],\"from\":\"%s\",\"to\":\"%s\"}",
+                    targetDsUid, JSON.toJSONString(promql), from, to);
 
             String authHeader;
             if (grafanaApiKey != null && !grafanaApiKey.isEmpty()) {

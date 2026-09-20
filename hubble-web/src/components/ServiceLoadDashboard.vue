@@ -165,10 +165,9 @@
       <el-empty description="暂无服务负载数据">
         <div class="empty-guide">
           <p>服务负载数据每日 00:00 / 12:00 自动采集，依赖内网数据源（Prometheus / SLS）。</p>
-          <p>当前可手动触发采集（需内网可达），或生成演示数据体验页面功能。</p>
+          <p>当前可手动触发采集（需内网可达）。</p>
           <div class="empty-actions">
             <el-button type="primary" size="small" @click="collectNow" :loading="collecting">立即采集</el-button>
-            <el-button size="small" @click="generateDemo" :loading="generating">生成演示数据</el-button>
           </div>
         </div>
       </el-empty>
@@ -179,7 +178,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getAssessment, getServiceLoadTrend, manualCollectServiceLoad, generateDemoData } from '@/api/service-load.js'
+import { getAssessment, getServiceLoadTrend, manualCollectServiceLoad } from '@/api/service-load.js'
 import ServiceLoadTrendChart from './ServiceLoadTrendChart.vue'
 
 const timeRange = ref('30')
@@ -187,7 +186,6 @@ const nameFilter = ref('')
 const activeLevel = ref('')
 const loading = ref(false)
 const collecting = ref(false)
-const generating = ref(false)
 
 const items = ref([])
 const summary = ref({})
@@ -287,23 +285,6 @@ const collectNow = async () => {
     ElMessage.error('采集失败：' + (e.message || '请检查内网数据源可达性'))
   } finally {
     collecting.value = false
-  }
-}
-
-const generateDemo = async () => {
-  generating.value = true
-  try {
-    const res = await generateDemoData()
-    if (res.code === 200) {
-      ElMessage.success('演示数据生成成功')
-      await fetchAssessment()
-    } else {
-      ElMessage.error(res.message || '生成失败')
-    }
-  } catch (e) {
-    ElMessage.error('生成失败：' + (e.message || '未知错误'))
-  } finally {
-    generating.value = false
   }
 }
 

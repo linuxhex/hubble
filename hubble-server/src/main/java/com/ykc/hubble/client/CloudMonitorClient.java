@@ -33,8 +33,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -56,6 +60,8 @@ public class CloudMonitorClient {
     private String region;
 
     private IAcsClient acsClient;
+
+    private static final DateTimeFormatter FMT_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @PostConstruct
     public void init() {
@@ -80,8 +86,21 @@ public class CloudMonitorClient {
      * @param endTime    结束时间
      * @return 指标数据点列表（每个点含 timestamp + value）
      */
+    // 已确认不存在的指标（namespace|metric -> 标记时间），1 小时内跳过查询，避免巡检反复报 400
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> MISSING_METRICS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long MISSING_METRIC_TTL_MS = 60 * 60 * 1000L;
+
     public List<double[]> queryMetric(String namespace, String metricName, String dimensions,
                                        int period, String startTime, String endTime) {
+        String metricKey = namespace + "|" + metricName;
+        Long missingAt = MISSING_METRICS.get(metricKey);
+        if (missingAt != null) {
+            if (System.currentTimeMillis() - missingAt < MISSING_METRIC_TTL_MS) {
+                return new ArrayList<>();
+            }
+            MISSING_METRICS.remove(metricKey);
+        }
         try {
             DescribeMetricListRequest req = new DescribeMetricListRequest();
             req.setNamespace(namespace);
@@ -109,7 +128,13 @@ public class CloudMonitorClient {
             }
             return result;
         } catch (Exception e) {
-            log.warn("CloudMonitor 查询失败: ns={}, metric={}, dim={}, error={}", namespace, metricName, dimensions, e.getMessage());
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            if (msg.contains("is not exist")) {
+                MISSING_METRICS.put(metricKey, System.currentTimeMillis());
+                log.warn("CloudMonitor 指标不存在（1小时内跳过）: ns={}, metric={}", namespace, metricName);
+            } else {
+                log.warn("CloudMonitor 查询失败: ns={}, metric={}, dim={}, error={}", namespace, metricName, dimensions, e.getMessage());
+            }
             return new ArrayList<>();
         }
     }
@@ -275,6 +300,8 @@ public class CloudMonitorClient {
         try {
             DescribeMetricMetaListRequest req = new DescribeMetricMetaListRequest();
             req.setNamespace(namespace);
+            req.setPageSize(100);
+            req.setPageNumber(1);
             DescribeMetricMetaListResponse resp = acsClient.getAcsResponse(req);
             List<String> metrics = new ArrayList<>();
             if (resp.getResources() != null) {
@@ -287,6 +314,39 @@ public class CloudMonitorClient {
             log.warn("查询指标元数据失败: ns={}, error={}", namespace, e.getMessage());
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * 诊断：对指定实例逐个试查候选指标，返回每个指标的数据点数（探测前会清除无效指标缓存，保证结果真实）
+     */
+    public Map<String, Object> probeMetrics(String namespace, String instanceId, List<String> candidates) {
+        String endTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(FMT_TIME);
+        String startTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30).format(FMT_TIME);
+        String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
+        Map<String, Object> probes = new LinkedHashMap<>();
+        for (String metric : candidates) {
+            MISSING_METRICS.remove(namespace + "|" + metric);
+            Map<String, Object> st = new LinkedHashMap<>();
+            try {
+                List<double[]> points = queryMetric(namespace, metric, dim, 60, startTime, endTime);
+                st.put("points", points.size());
+                if (!points.isEmpty()) {
+                    points.sort((a, b) -> Double.compare(a[0], b[0]));
+                    double latest = points.get(points.size() - 1)[1];
+                    double max = points.stream().mapToDouble(p -> p[1]).max().orElse(0);
+                    st.put("latest", Math.round(latest * 100.0) / 100.0);
+                    st.put("max", Math.round(max * 100.0) / 100.0);
+                }
+            } catch (Exception e) {
+                st.put("error", e.getMessage());
+            }
+            probes.put(metric, st);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("instanceId", instanceId);
+        result.put("metaMetrics", listMetricMeta(namespace));
+        result.put("probes", probes);
+        return result;
     }
 
     /**

@@ -52,6 +52,8 @@ public class MonitorSnapshotService {
     private final Map<Long, Integer> consecutiveRedCount = new ConcurrentHashMap<>();
     // 上次钉钉告警时间（防抖：同一监控项 3 小时内不重复告警）
     private final Map<Long, Long> lastAlertTime = new ConcurrentHashMap<>();
+    // 恢复检测：告警后连续 N 次正常采集即推送恢复通知
+    private final Map<Long, Integer> consecutiveNormalCount = new ConcurrentHashMap<>();
 
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -159,6 +161,11 @@ public class MonitorSnapshotService {
                 log.debug("模板查询失败(Milvus可能未运行)，使用默认查询: {}", e.getMessage());
             }
 
+            // 监控项显式配置的 logstore 优先（部分服务日志不在默认聚合库，如 device-post/device-business）
+            if (cfg.getLogstore() != null && !cfg.getLogstore().isBlank()) {
+                logstore = cfg.getLogstore();
+            }
+
             int interval = cfg.getCollectionInterval() == null ? 60 : cfg.getCollectionInterval();
             long from = now - interval;
 
@@ -213,6 +220,23 @@ public class MonitorSnapshotService {
                         && (prevStatus == null || prevStatus != HealthEvaluator.Status.YELLOW)) {
                     // 粉盘：仅 SSE 广播，不刷钉钉群
                     alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
+                }
+
+                // 恢复检测：此前发过钉钉告警，且连续 N 次正常采集 → 推送恢复通知
+                if (status == HealthEvaluator.Status.NORMAL && lastAlertTime.containsKey(cfg.getId())) {
+                    int consecutive = consecutiveNormalCount.merge(cfg.getId(), 1, Integer::sum);
+                    int recoverAfter = (int) alertThresholdService.getDouble("consecutive_recover_count", 3.0);
+                    if (consecutive >= recoverAfter) {
+                        long firedAt = lastAlertTime.remove(cfg.getId());
+                        long durationMinutes = Math.max(1, (System.currentTimeMillis() - firedAt) / 60000);
+                        consecutiveNormalCount.put(cfg.getId(), 0);
+                        log.info("监控项[{}] {} 已恢复正常，告警持续约 {} 分钟", cfg.getId(), cfg.getTitle(), durationMinutes);
+                        alertPushService.pushAlert(buildRecoveryAlert(cfg, count, now, durationMinutes));
+                        sendDingTalkRecovery(cfg, count, now, durationMinutes, effectiveThreshold);
+                    }
+                } else if (status != HealthEvaluator.Status.NORMAL) {
+                    // 粉盘说明尚未完全恢复，重置恢复计数
+                    consecutiveNormalCount.put(cfg.getId(), 0);
                 }
             }
         } catch (Exception e) {
@@ -287,26 +311,86 @@ public class MonitorSnapshotService {
             text.append(String.format("[🔍 查看详情 →](%s)", detailUrl));
 
             String cardTitle = String.format("%s %s - %s", statusIcon, serviceName, statusText);
-            // 查告警规则绑定的机器人，逐个发送到对应群；无绑定时回退到全局机器人
-            List<com.ykc.hubble.entity.DingtalkRobot> robots = dingtalkRobotService.listByAlertConfigId(cfg.getId());
-            if (robots.isEmpty()) {
-                dingTalkClient.sendRobotActionCard(cardTitle, text.toString(),
-                        "查看详情", detailUrl, true);
-            } else {
-                for (com.ykc.hubble.entity.DingtalkRobot robot : robots) {
-                    if (robot.getEnabled() != null && robot.getEnabled() == 1) {
-                        dingTalkClient.sendRobotActionCard(robot.getWebhook(), robot.getSecret(),
-                                cardTitle, text.toString(), "查看详情", detailUrl, true);
-                    }
-                }
-            }
+            sendCardToConfigRobots(cfg, cardTitle, text.toString(), detailUrl);
         } catch (Exception e) {
             log.error("监控项[{}]钉钉通知发送失败: {}", cfg.getId(), e.getMessage());
         }
     }
 
+    /**
+     * 查告警规则绑定的机器人，逐个发送到对应群；无绑定时回退到全局机器人
+     */
+    private void sendCardToConfigRobots(AlertConfig cfg, String cardTitle, String cardText, String detailUrl) {
+        List<com.ykc.hubble.entity.DingtalkRobot> robots = dingtalkRobotService.listByAlertConfigId(cfg.getId());
+        if (robots.isEmpty()) {
+            dingTalkClient.sendRobotActionCard(cardTitle, cardText, "查看详情", detailUrl, true);
+            return;
+        }
+        for (com.ykc.hubble.entity.DingtalkRobot robot : robots) {
+            if (robot.getEnabled() != null && robot.getEnabled() == 1) {
+                dingTalkClient.sendRobotActionCard(robot.getWebhook(), robot.getSecret(),
+                        cardTitle, cardText, "查看详情", detailUrl, true);
+            }
+        }
+    }
+
+    /**
+     * 构建恢复通知的 SSE 载荷（status=RECOVERED）
+     */
+    private Map<String, Object> buildRecoveryAlert(AlertConfig cfg, long count, long nowSec, long durationMinutes) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("configId", cfg.getId());
+        payload.put("title", cfg.getTitle() == null ? "" : cfg.getTitle());
+        payload.put("logCount", count);
+        payload.put("status", "RECOVERED");
+        payload.put("durationMinutes", durationMinutes);
+        payload.put("time", nowSec * 1000L);
+        return payload;
+    }
+
+    /**
+     * 恢复通知：告警后监控项连续多次恢复正常时推送绿色卡片
+     */
+    private void sendDingTalkRecovery(AlertConfig cfg, long count, long nowSec,
+                                      long durationMinutes, int effectiveThreshold) {
+        try {
+            String timeStr = java.time.Instant.ofEpochSecond(nowSec)
+                    .atZone(java.time.ZoneId.of("Asia/Shanghai"))
+                    .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+
+            String serviceName = extractServiceName(cfg.getKeywordTemplateId());
+            String dashboardUrl = monitorProperties.getDashboardUrl();
+            String detailUrl = String.format("%s/#/alert-dashboard?configId=%d", dashboardUrl, cfg.getId());
+
+            StringBuilder text = new StringBuilder();
+            text.append("## 🟢 **已恢复**\n\n");
+            text.append("**服务**：`").append(serviceName).append("`\n\n");
+            if (cfg.getTitle() != null && !cfg.getTitle().isBlank()) {
+                text.append("**监控项**：").append(cfg.getTitle()).append("\n\n");
+            }
+            text.append("---\n\n");
+            text.append("### 恢复情况\n\n");
+            text.append(String.format("> 告警持续：<font color=\"#52C41A\">**约 %d 分钟**</font>\n\n", durationMinutes));
+            text.append(String.format("> 当前错误量：**%d** 次（红盘阈值 %d）\n\n", count, effectiveThreshold));
+            text.append(String.format("> 恢复检测时间：%s\n\n", timeStr));
+            text.append("---\n\n");
+            text.append(String.format("[🔍 查看详情 →](%s)", detailUrl));
+
+            String cardTitle = String.format("🟢 %s - 已恢复", serviceName);
+            sendCardToConfigRobots(cfg, cardTitle, text.toString(), detailUrl);
+        } catch (Exception e) {
+            log.error("监控项[{}]恢复通知发送失败: {}", cfg.getId(), e.getMessage());
+        }
+    }
+
     private String extractServiceName(String keywordTemplateId) {
         if (keywordTemplateId == null) return "unknown-service";
+        if (keywordTemplateId.contains("charge-server") || keywordTemplateId.contains("tpl-charge"))
+            return "charge-server";
+        if (keywordTemplateId.contains("device-post") || keywordTemplateId.contains("tpl-dpost"))
+            return "device-post";
+        if (keywordTemplateId.contains("device-business") || keywordTemplateId.contains("tpl-dbiz"))
+            return "device-business";
         if (keywordTemplateId.contains("statistics-server") || keywordTemplateId.contains("tpl-stat"))
             return "statistics-server";
         if (keywordTemplateId.contains("statistics-tob") || keywordTemplateId.contains("tpl-tob"))
@@ -331,6 +415,9 @@ public class MonitorSnapshotService {
     }
 
     private String getDependencies(String serviceName) {
+        if ("charge-server".equals(serviceName)) return "device-post、base、order、Redis";
+        if ("device-post".equals(serviceName)) return "device-business、充电桩网关节点";
+        if ("device-business".equals(serviceName)) return "MySQL、Redis";
         if ("statistics-server".equals(serviceName)) return "MySQL、Redis";
         if ("statistics-tob".equals(serviceName)) return "MySQL、statistics-server";
         if ("trade-order".equals(serviceName)) return "MySQL、Redis、MQ";
@@ -346,9 +433,17 @@ public class MonitorSnapshotService {
             return "__tag__:_container_name_: statistics-server and level: ERROR";
         if (keywordTemplateId.contains("statistics-tob") || keywordTemplateId.contains("tpl-tob")) 
             return "__tag__:_container_name_: statistics-tob and level: ERROR";
-        if (keywordTemplateId.contains("trade-order") || keywordTemplateId.contains("tpl-order")) 
+        if (keywordTemplateId.contains("trade-order") || keywordTemplateId.contains("tpl-order"))
             return "__tag__:_container_name_: trade-order and level: ERROR";
-        if (keywordTemplateId.contains("device-maint") || keywordTemplateId.contains("tpl-device")) 
+        // charge-server/device-post/device-business：需在 tpl-device 之前匹配，避免 tpl-device-* 被兜到 device-maint
+        // device-post/device-business 专属库无结构化 level 字段，只能全文搜 ERROR
+        if (keywordTemplateId.contains("charge-server") || keywordTemplateId.contains("tpl-charge"))
+            return "__tag__:_container_name_: charge-server and level: ERROR";
+        if (keywordTemplateId.contains("device-post") || keywordTemplateId.contains("tpl-dpost"))
+            return "__tag__:_container_name_: device-post and ERROR";
+        if (keywordTemplateId.contains("device-business") || keywordTemplateId.contains("tpl-dbiz"))
+            return "__tag__:_container_name_: device-business and ERROR";
+        if (keywordTemplateId.contains("device-maint") || keywordTemplateId.contains("tpl-device"))
             return "__tag__:_container_name_: device-maint and level: ERROR";
         if (keywordTemplateId.contains("zdl-push") || keywordTemplateId.contains("tpl-push") || keywordTemplateId.contains("tpl-notification")) 
             return "__tag__:_container_name_: zdl-push-server and level: ERROR";

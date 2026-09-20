@@ -20,7 +20,3 @@ export function manualCollectServiceLoad(date) {
   // 采集需逐服务查询 SLS/Grafana，耗时约1-3分钟，单独放宽超时
   return request.post('/service-load/collect', null, { params: { date }, timeout: 600000 })
 }
-
-export function generateDemoData() {
-  return request.post('/service-load/generate-demo-data')
-}

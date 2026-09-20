@@ -334,6 +334,10 @@ public class AlertDataService {
         if (templateId.contains("trade-order")) return "trade-order";
         if (templateId.contains("device-maint")) return "device-maint";
         if (templateId.contains("zdl-push")) return "zdl-push-server";
+        // 需在 tpl-device 之前匹配，避免 tpl-device-post/business 被兜到 device-maint
+        if (templateId.contains("charge-server") || templateId.contains("tpl-charge")) return "charge-server";
+        if (templateId.contains("device-post") || templateId.contains("tpl-dpost")) return "device-post";
+        if (templateId.contains("device-business") || templateId.contains("tpl-dbiz")) return "device-business";
         if (templateId.contains("tpl-stat")) return "statistics-server";
         if (templateId.contains("tpl-tob")) return "statistics-tob";
         if (templateId.contains("tpl-order")) return "trade-order";
@@ -354,6 +358,13 @@ public class AlertDataService {
             return "__tag__:_container_name_: device-maint AND level: ERROR";
         if (templateId.contains("zdl-push"))
             return "__tag__:_container_name_: zdl-push-server AND level: ERROR";
+        // 需在 tpl-device 之前匹配，避免 tpl-device-post/business 被兜到 device-maint
+        if (templateId.contains("charge-server") || templateId.contains("tpl-charge"))
+            return "__tag__:_container_name_: charge-server AND level: ERROR";
+        if (templateId.contains("device-post") || templateId.contains("tpl-dpost"))
+            return "__tag__:_container_name_: device-post AND ERROR";
+        if (templateId.contains("device-business") || templateId.contains("tpl-dbiz"))
+            return "__tag__:_container_name_: device-business AND ERROR";
         if (templateId.contains("tpl-stat"))
             return "__tag__:_container_name_: statistics-server AND level: ERROR";
         if (templateId.contains("tpl-tob"))
@@ -470,20 +481,23 @@ public class AlertDataService {
         String logstore = monitorProperties.getDefaultQueryLogstore();
 
         List<String> serviceNames = new ArrayList<>();
-        // 分页采样发现服务名（SLS 每次最多返回 100 条，需要分页）
+        // 服务名发现：窗口均分 10 个子区间探针采样（每区间取 100 条）。
+        // 原实现只分页采窗口一端共 1000 条，大窗口下覆盖率不足 1%，
+        // 中途爆发的服务（如 charge-server Feign 超时风暴）进不了服务名单，大盘直接不展示该列。
         try {
-            int pageSize = 100;
-            int maxPages = 10;
-            for (int page = 0; page < maxPages; page++) {
-                List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", from, now, page * pageSize, pageSize);
-                if (sample == null || sample.isEmpty()) break;
+            int probes = 10;
+            long span = Math.max(1, (now - from) / probes);
+            for (int i = 0; i < probes; i++) {
+                long subFrom = from + i * span;
+                long subTo = (i == probes - 1) ? now : subFrom + span;
+                List<LogEntry> sample = slsQueryClient.queryLogstore(logstore, "level: ERROR", subFrom, subTo, 0, 100);
+                if (sample == null || sample.isEmpty()) continue;
                 for (LogEntry entry : sample) {
                     String svc = entry.getContainerName();
                     if (svc != null && !svc.isBlank() && !svc.startsWith("event-trac") && !serviceNames.contains(svc)) {
                         serviceNames.add(svc);
                     }
                 }
-                if (sample.size() < pageSize) break;
             }
             log.info("采样发现 {} 个服务", serviceNames.size());
         } catch (Exception e) {
