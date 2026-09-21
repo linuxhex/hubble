@@ -6,7 +6,6 @@ import GatewayDashboard from '../components/GatewayDashboard.vue'
 import GatewayTrace from '../components/GatewayTrace.vue'
 import GatewayLogs from '../components/GatewayLogs.vue'
 import UserBehavior from '../components/UserBehavior.vue'
-import UserBehaviorTraceQuery from '../components/UserBehaviorTraceQuery.vue'
 import TraceQuery from '../components/TraceQuery.vue'
 import KeywordLogQuery from '../components/KeywordLogQuery.vue'
 import TraceManagement from '../components/TraceManagement.vue'
@@ -69,8 +68,7 @@ const routes = [
   },
   {
     path: '/user-behavior-trace',
-    name: 'UserBehaviorTraceQuery',
-    component: UserBehaviorTraceQuery
+    redirect: '/user-behavior'
   },
   {
     path: '/keyword-log-query',

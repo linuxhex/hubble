@@ -37,7 +37,7 @@
         </el-row>
 
         <el-row :gutter="16">
-          <el-col :span="12">
+          <el-col :span="8">
             <el-form-item label="Logstore">
               <el-input
                 v-model="queryForm.logstore"
@@ -49,11 +49,30 @@
             </el-form-item>
           </el-col>
 
-          <el-col :span="12">
+          <el-col :span="8">
             <el-form-item label="排序方式">
               <el-select v-model="queryForm.sortOrder" size="small" style="width: 100%">
                 <el-option label="倒序（最新在前）" value="desc" />
                 <el-option label="正序（最早在前）" value="asc" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+
+          <el-col :span="8">
+            <el-form-item label="日志级别">
+              <el-select
+                v-model="levelFilter"
+                multiple
+                collapse-tags
+                clearable
+                placeholder="全部级别"
+                size="small"
+                style="width: 100%"
+              >
+                <el-option label="INFO" value="INFO" />
+                <el-option label="WARN" value="WARN" />
+                <el-option label="ERROR" value="ERROR" />
+                <el-option label="DEBUG" value="DEBUG" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -72,6 +91,9 @@
     <div v-if="hasResults || querying" class="results-area">
       <div class="list-header">
         <span>查询结果</span>
+        <span v-if="levelFilter.length > 0" class="filter-hint">
+          已按级别筛选：{{ filteredLogs.length }} / {{ allLogs.length }} 条
+        </span>
       </div>
       <div v-if="querying && allLogs.length === 0" class="loading-container">
         <el-icon class="is-loading"><Loading /></el-icon>
@@ -80,10 +102,11 @@
 
       <div v-else-if="hasResults">
         <LogViewer
-          :logs="allLogs"
+          :logs="filteredLogs"
           :start-time="currentTimeRange?.from"
           :end-time="currentTimeRange?.to"
           :logstore="queryForm.logstore || 'all'"
+          :highlight="queryForm.keyword"
         />
 
         <!-- 加载更多按钮 -->
@@ -202,6 +225,15 @@ const limit = 20 // 每次加载20条
 // 所有已加载的日志
 const allLogs = ref([])
 
+// 日志级别筛选（前端过滤，多选）
+const levelFilter = ref([])
+
+const filteredLogs = computed(() => {
+  if (!levelFilter.value || levelFilter.value.length === 0) return allLogs.value
+  const levels = new Set(levelFilter.value.map((s) => s.toUpperCase()))
+  return allLogs.value.filter((l) => levels.has((l.level || 'INFO').toUpperCase()))
+})
+
 const resultData = ref({
   logs: [],
   total: 0,
@@ -315,6 +347,7 @@ const handleReset = () => {
     logstore: 'all',
     sortOrder: 'desc'
   }
+  levelFilter.value = []
   timeRange.value = getTodayTimeRange() // 重置为今天
   allLogs.value = []
   resultData.value = {
@@ -369,6 +402,15 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   color: #333;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: #909399;
 }
 
 .loading-container {

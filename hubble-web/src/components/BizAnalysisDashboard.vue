@@ -6,7 +6,7 @@
     </div>
 
     <!-- 1. 汇总卡片 -->
-    <div class="summary-cards">
+    <div class="summary-cards" v-loading="overviewLoading" element-loading-text="概览数据加载中...">
       <div class="summary-card">
         <div class="card-label">累计订单量</div>
         <div class="card-value">{{ formatNum(overview.orderCnt) }}</div>
@@ -32,6 +32,12 @@
         <div class="card-value">{{ formatNum(overview.adClick) }}</div>
       </div>
     </div>
+    <el-alert v-if="overviewFailed" type="error" :closable="false" style="margin-bottom: 12px">
+      <template #title>
+        概览数据加载失败
+        <el-link type="primary" :underline="false" style="margin-left: 8px" @click="loadOverview">重试</el-link>
+      </template>
+    </el-alert>
 
     <!-- 1.5 今日 vs 昨日 小时订单对比 -->
     <div class="chart-section" v-if="hourlyCompData.hours && hourlyCompData.hours.length > 0">
@@ -208,10 +214,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { getOverview, getMonthlyTrend, getDaily, getScenario, getActiveUsers, getAppActive, getMauTrend, getYearlyComparison, getRevenueTrend, getUtilizationTrend, getRegionDistribution, getStationRanking, getHourlyDistribution, getHourlyOrderComparison, getHourlyChargingOrderComparison, getIdleStationRanking } from '@/api/biz-analysis.js'
 
 const loading = ref(false)
+const overviewLoading = ref(true)
+const overviewFailed = ref(false)
 const overview = ref({})
 const idleStationData = ref([])
 const monthlyData = ref([])
@@ -521,44 +530,66 @@ const renderHourlyChargingCompChart = () => {
   })
 }
 
+const loadOverview = async () => {
+  overviewLoading.value = true
+  overviewFailed.value = false
+  try {
+    const res = await getOverview()
+    overview.value = res.data || {}
+  } catch (e) {
+    console.error('业务监控概览加载失败:', e)
+    overviewFailed.value = true
+  } finally {
+    overviewLoading.value = false
+  }
+}
+
+const loadCharts = async () => {
+  const results = await Promise.allSettled([
+    getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
+    getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
+    getHourlyOrderComparison(), getHourlyChargingOrderComparison(), getIdleStationRanking(30, 20)
+  ])
+  const val = (r, fallback) => (r.status === 'fulfilled' ? (r.value.data ?? fallback) : fallback)
+  const [mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, hcRes, hccRes, idleRes] = results
+  monthlyData.value = val(mtRes, [])
+  dailyData.value = val(dRes, [])
+  scenario.value = val(scRes, {})
+  activeUsers.value = val(auRes, [])
+  appActiveData.value = val(aaRes, [])
+  mauData.value = val(mauRes, [])
+  yearlyData.value = val(ycRes, {})
+  revenueData.value = val(revRes, [])
+  utilizationData.value = val(utilRes, [])
+  regionData.value = val(regRes, [])
+  stationData.value = val(staRes, [])
+  hourlyData.value = val(hrRes, [])
+  hourlyCompData.value = val(hcRes, {})
+  hourlyChargingCompData.value = val(hccRes, {})
+  idleStationData.value = val(idleRes, [])
+
+  const failedCount = results.filter((r) => r.status === 'rejected').length
+  if (failedCount > 0) {
+    ElMessage.warning(`${failedCount} 个图表数据加载失败，可点击刷新重试`)
+  }
+
+  await nextTick()
+  renderMonthlyChart()
+  renderYearlyChart()
+  renderDailyChart()
+  renderAppActiveChart()
+  renderMauChart()
+  renderRevenueChart()
+  renderUtilizationChart()
+  renderHourlyChart()
+  renderHourlyCompChart()
+  renderHourlyChargingCompChart()
+}
+
 const fetchAll = async () => {
   loading.value = true
   try {
-    const [ovRes, mtRes, dRes, scRes, auRes, aaRes, mauRes, ycRes, revRes, utilRes, regRes, staRes, hrRes, hcRes, hccRes, idleRes] = await Promise.all([
-      getOverview(), getMonthlyTrend(), getDaily(30), getScenario(), getActiveUsers(20), getAppActive(30), getMauTrend(), getYearlyComparison(),
-      getRevenueTrend(30), getUtilizationTrend(30), getRegionDistribution(30), getStationRanking(30, 20), getHourlyDistribution(7),
-      getHourlyOrderComparison(), getHourlyChargingOrderComparison(), getIdleStationRanking(30, 20)
-    ])
-    overview.value = ovRes.data || {}
-    monthlyData.value = mtRes.data || []
-    dailyData.value = dRes.data || []
-    scenario.value = scRes.data || {}
-    activeUsers.value = auRes.data || []
-    appActiveData.value = aaRes.data || []
-    mauData.value = mauRes.data || []
-    yearlyData.value = ycRes.data || {}
-    revenueData.value = revRes.data || []
-    utilizationData.value = utilRes.data || []
-    regionData.value = regRes.data || []
-    stationData.value = staRes.data || []
-    hourlyData.value = hrRes.data || []
-    hourlyCompData.value = hcRes.data || {}
-    hourlyChargingCompData.value = hccRes.data || {}
-    idleStationData.value = idleRes.data || []
-
-    await nextTick()
-    renderMonthlyChart()
-    renderYearlyChart()
-    renderDailyChart()
-    renderAppActiveChart()
-    renderMauChart()
-    renderRevenueChart()
-    renderUtilizationChart()
-    renderHourlyChart()
-    renderHourlyCompChart()
-    renderHourlyChargingCompChart()
-  } catch (e) {
-    console.error('业务监控加载失败:', e)
+    await Promise.all([loadOverview(), loadCharts()])
   } finally {
     loading.value = false
   }

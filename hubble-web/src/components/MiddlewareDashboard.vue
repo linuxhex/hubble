@@ -644,7 +644,10 @@ const formatBytes = (bytes) => {
 
 const formatTime = (ts) => {
   if (!ts) return '-'
-  const d = new Date(ts)
+  // 后端可能返回毫秒时间戳字符串（ARMS span），new Date(纯数字字符串) 会得到 Invalid Date
+  const n = Number(ts)
+  const d = Number.isFinite(n) && String(n) === String(ts).trim() ? new Date(n) : new Date(ts)
+  if (isNaN(d.getTime())) return '-'
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 

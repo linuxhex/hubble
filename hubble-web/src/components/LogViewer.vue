@@ -54,7 +54,7 @@
 
       <el-table-column prop="message" label="日志内容" min-width="300" show-overflow-tooltip>
         <template #default="{ row }">
-          <pre class="log-message">{{ row.message || row.line || formatFields(row.fields) }}</pre>
+          <pre class="log-message"><template v-for="(seg, i) in highlightSegments(row.message || row.line || formatFields(row.fields))" :key="i"><mark v-if="seg.hit" class="log-highlight">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></pre>
         </template>
       </el-table-column>
 
@@ -163,11 +163,36 @@ const props = defineProps({
   logstore: {
     type: String,
     default: undefined
+  },
+  highlight: {
+    type: String,
+    default: ''
   }
 })
 
 const detailVisible = ref(false)
 const detailLog = ref(null)
+
+// 关键字命中分段（纯文本分段渲染，避免 v-html 注入）
+const highlightSegments = (text) => {
+  const kw = (props.highlight || '').trim()
+  if (!kw || !text) return [{ text, hit: false }]
+  const parts = []
+  const lower = String(text).toLowerCase()
+  const lowerKw = kw.toLowerCase()
+  let idx = 0
+  while (idx < text.length) {
+    const found = lower.indexOf(lowerKw, idx)
+    if (found === -1) {
+      parts.push({ text: text.slice(idx), hit: false })
+      break
+    }
+    if (found > idx) parts.push({ text: text.slice(idx, found), hit: false })
+    parts.push({ text: text.slice(found, found + kw.length), hit: true })
+    idx = found + kw.length
+  }
+  return parts
+}
 
 // 按时间排序的日志列表（从早到晚）
 const sortedLogs = computed(() => {
@@ -323,6 +348,14 @@ const handleViewTrace = (traceId, timestamp = null) => {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.log-viewer .log-highlight {
+  background: #fdf6ec;
+  color: #b8860b;
+  font-weight: 600;
+  padding: 0 1px;
+  border-radius: 2px;
 }
 
 .trace-cell {

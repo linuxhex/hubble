@@ -22,6 +22,10 @@ const activeIndex = computed(() => {
   if (route.path === '/' || route.path === '/monitor' || route.path === '/gateway') return '/gateway'
   if (route.path === '/abnormal') return '/abnormal'
   if (route.path === '/gateway/trace') return '/gateway/trace'
+  if (route.path === '/trace-management') return '/trace-management'
+  if (route.path === '/traffic-surge') return '/traffic-surge'
+  if (route.path === '/middleware') return '/middleware'
+  if (route.path === '/service-load') return '/service-load'
   if (route.path === '/user-behavior') return '/user-behavior'
   if (route.path === '/gateway/logs') return '/gateway/logs'
   if (route.path === '/unauthorized') return '/unauthorized'
@@ -119,6 +123,10 @@ onUnmounted(() => {
           <el-menu-item index="/gateway/trace">
             <el-icon><Connection /></el-icon>
             <span>链路详情</span>
+          </el-menu-item>
+          <el-menu-item index="/trace-management">
+            <el-icon><Files /></el-icon>
+            <span>链路配置</span>
           </el-menu-item>
           <el-menu-item index="/user-behavior">
             <el-icon><Timer /></el-icon>
