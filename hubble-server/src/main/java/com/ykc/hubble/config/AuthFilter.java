@@ -38,7 +38,6 @@ public class AuthFilter extends OncePerRequestFilter {
             "/v3/api-docs",
 
             // 业务接口白名单
-            "/traces/query",
             "/sls-keywords/query",
 
             // 监控大盘接口（无需用户认证）

@@ -292,9 +292,22 @@ public class AiChatService {
         }
     }
 
+    /** 工具结果注入上下文的最大字符数 */
+    private static final int TOOL_RESULT_MAX_CHARS = 12000;
+    /** 超长时保留的尾部字符数（日志类结果最新内容通常在尾部） */
+    private static final int TOOL_RESULT_TAIL_CHARS = 3200;
+
+    /**
+     * 工具结果过长时保留头部+尾部：只留头部会让 AI 看不到最新的日志/数据得出片面结论。
+     * 中间省略并在提示中说明，引导模型缩小查询范围。
+     */
     private String truncateForContext(String s) {
         if (s == null) return "";
-        return s.length() <= 12000 ? s : s.substring(0, 12000) + "\n...（结果过长已截断）";
+        if (s.length() <= TOOL_RESULT_MAX_CHARS) return s;
+        int headChars = TOOL_RESULT_MAX_CHARS - TOOL_RESULT_TAIL_CHARS;
+        String note = "\n...（结果过长已截断：共 " + s.length() + " 字符，保留前 " + headChars
+                + " 字符与末尾 " + TOOL_RESULT_TAIL_CHARS + " 字符，中间省略；如需完整信息请缩小查询范围或减少返回条数）...\n";
+        return s.substring(0, headChars) + note + s.substring(s.length() - TOOL_RESULT_TAIL_CHARS);
     }
 
     public void clearSession(String sessionId) {

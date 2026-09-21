@@ -95,7 +95,12 @@ public class ServiceLoadAssessmentService {
 
         // 最新记录（可能为半天数据，仅作当前水位展示）
         ServiceLoadDaily latest = valid.get(valid.size() - 1);
-        if (latest.getPartialDay() != null && latest.getPartialDay() == 1) {
+        if (latest.getStatDate() != null) {
+            vo.setLatestStatDate(latest.getStatDate().toString());
+            vo.setLatestDataAgeDays((int) ChronoUnit.DAYS.between(latest.getStatDate(), LocalDate.now(ZONE)));
+        }
+        if (LocalDate.now(ZONE).equals(latest.getStatDate())
+                && latest.getPartialDay() != null && latest.getPartialDay() == 1) {
             vo.setPartialToday(1);
         }
 

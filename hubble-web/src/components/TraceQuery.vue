@@ -170,6 +170,18 @@
       </div>
     </div>
 
+    <!-- 空态引导 -->
+    <div v-if="!hasResults && !querying" class="empty-area">
+      <el-empty description="暂无查询结果">
+        <div class="empty-guide">
+          <p>按以下步骤开始查询：</p>
+          <p>1. 在上方选择要查询的业务链路（当前已配置 {{ traceList.length }} 条）</p>
+          <p>2. 填写必填查询变量（如订单号、用户 ID 等）</p>
+          <p>3. 确认时间范围后点击「查询」，支持结果导出与逐节点下钻</p>
+        </div>
+      </el-empty>
+    </div>
+
     <!-- 查询中提示 -->
     <div v-if="querying" class="querying-area">
       <el-result icon="loading" title="查询中..." sub-title="请稍候" />
@@ -592,6 +604,28 @@ onUnmounted(() => {
   background: white;
   border-radius: 4px;
   min-height: 300px;
+}
+
+.empty-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border-radius: 4px;
+  min-height: 300px;
+}
+
+.empty-guide {
+  text-align: left;
+  color: #606266;
+  font-size: 13px;
+  line-height: 2;
+}
+
+.empty-guide p:first-child {
+  font-weight: 600;
+  color: #303133;
 }
 
 :deep(.el-form-item__label) {

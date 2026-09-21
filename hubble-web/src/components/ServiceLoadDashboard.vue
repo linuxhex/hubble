@@ -90,6 +90,13 @@
           <template #default="{ row }">
             <span class="app-name">{{ row.appName }}</span>
             <el-tag v-if="row.partialToday === 1" size="small" type="warning" effect="plain" style="margin-left: 6px">今日半天</el-tag>
+            <el-tag
+              v-if="row.latestDataAgeDays != null && row.latestDataAgeDays >= 2"
+              size="small"
+              type="info"
+              effect="plain"
+              style="margin-left: 6px"
+            >数据滞后{{ row.latestDataAgeDays }}天</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="CPU 峰值" width="150">
