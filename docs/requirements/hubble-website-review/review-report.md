@@ -41,11 +41,14 @@
 
 隐藏路由：/trace-query（业务链路查询，从空态/引导可达）、/keyword-log-query（日志检索）、/sls-keyword-management、/widget-dashboard、/user-behavior-trace（已删除组件，redirect → /user-behavior）。
 
-### 2.3 免登白名单现状（AuthFilter EXCLUDE_PATHS，本轮收紧后）
+### 2.3 免登白名单现状（AuthFilter EXCLUDE_PATHS，两轮收紧后）
 - 健康与登录：/system/health、/auth/verify、/auth/dingtalk/login、/swagger-ui、/v3/api-docs
 - 监控大盘：/alert-data/*（query/service-health/minute-timeline/service-drilldown/service-logs/trace-logs/sse）、/error-analysis/query、/alert-threshold/、/dingtalk-robot/
-- 业务接口：/gateway/、/middleware/、/middleware-alert/、/biz-analysis/、/service-load/、/sls-keywords/query、/ws/ai/chat
-- **本轮移除**：/traces/query（业务链路查询，收紧后无 token 401）
+- 业务接口：/gateway/、/middleware/、/middleware-alert/、/service-load/、/ws/ai/chat
+- **显式保护路径（白名单前缀内仍要求认证）**：/gateway/logs/query（SLS 日志内容读取）
+- **已移除**：/traces/query（业务链路查询）、/sls-keywords/query（关键字模版配置）、/biz-analysis/（业务监控数据）——三者无 token 均 401
+
+> 评审误判纠正：最初认为 /sls-keywords/query 是日志内容读取接口；实际调查确认其为 SLS 关键字模版配置查询（列表/应用名/标签），真正免登暴露日志内容的是被 `/gateway/` 前缀放行的 POST /gateway/logs/query，已通过显式保护路径堵住。
 
 ### 2.4 数据源映射
 | 数据 | 来源 | 备注 |
@@ -115,6 +118,7 @@
 | H2 持久化 | alert_monitor_state | 告警状态跨重启恢复 |
 | 监控缓存 TTL | MiddlewareMonitorService 等 | 外部依赖抖动时返回缓存，防止雪崩放大 |
 | 外部调用限流 | EXTERNAL_CALL_SEM（3 并发） | ARMS trace 详情并行查询限流 |
+| **trace 详情总超时** | collectTraceResults（10s + isDone 部分收集） | 首查（缓存空）时外部依赖阻塞不再拖垮请求，超时返回已完成部分 |
 | 启动补采 | 服务负载 | 重启后历史数据回填 |
 | 接口失败隔离 | biz-analysis Promise.allSettled | 15 个图表接口单点失败不拖垮六卡与全页 |
 | 请求超时与防重 | axios 30s + 401 弹窗防重 | 避免长阻塞与弹窗风暴 |
@@ -122,8 +126,8 @@
 | 降噪阈值 | 劣化 <20%、暴涨 <50% | 抑制噪声告警刷屏 |
 
 ### 5.3 稳定性风险与观察项（按优先级）
-1. **[安全] 免登白名单暴露面**：/sls-keywords/query（读 SLS 日志内容）与 /biz-analysis/（业务数据）仍免登，与页面端 lianzi 限制不一致（页面守卫仅前端行为）。建议下一轮确认无匿名使用方后收紧。
-2. **[可用性] 外部依赖强耦合**：SLS/ARMS/CloudMonitor/Prom 任一不可用时，首查（缓存为空）可能阻塞至超时；已有 TTL 兜底，但建议后续为首查加快速失败。
+1. ~~[安全] 免登白名单暴露面~~ **已闭环（第 6 轮）**：日志内容读取 /gateway/logs/query 已要求登录；/sls-keywords/query、/biz-analysis/ 已移出白名单，接口鉴权与页面权限口径对齐，8 项接口矩阵实测通过。
+2. **[可用性] 外部依赖强耦合**：SLS/ARMS/CloudMonitor/Prom 任一不可用时，首查（缓存为空）可能阻塞——慢查询链路已加 10s 总超时 + 部分结果收集（第 6 轮）；其余链路后续可复制同一模式。
 3. **[体验] biz-analysis 图表仍为一次性并发**：allSettled 已保证失败隔离，如需进一步提速可做图表分组懒加载（可选，非必须）。
 4. **[环境] 本地开发环境**：Vite dev server 曾出现进程退出（环境问题非代码缺陷）；测试 JWT 1 小时时效，长会话需重签。
 
@@ -133,9 +137,9 @@
 ## 六、遗留事项与后续建议
 | # | 事项 | 优先级 | 说明 |
 |---|------|--------|------|
-| 1 | /sls-keywords/query 白名单收紧 | 高 | 读 SLS 日志内容，需先确认无匿名调用方 |
-| 2 | /biz-analysis/ 接口级鉴权与页面 lianzi 限制对齐 | 中 | 当前接口免登、仅页面限制，口径不一致 |
-| 3 | 外部依赖首查快速失败 | 中 | 缓存为空时避免阻塞至 axios 30s 超时 |
+| 1 | ~~/sls-keywords/query 白名单收紧~~ | ~~高~~ 已完成 | 第 6 轮收紧，无 token 401、页面带 token 正常 |
+| 2 | ~~biz-analysis 接口级鉴权与页面 lianzi 限制对齐~~ | ~~中~~ 已完成 | 第 6 轮移出白名单，六卡/图表带 token 实测正常 |
+| 3 | ~~外部依赖首查快速失败~~ | ~~中~~ 已完成（慢查询链路） | 10s 总超时 + isDone 部分收集；其余链路可复制该模式 |
 | 4 | biz-analysis 图表分组懒加载 | 低 | 首屏已优化到 6s，懒加载为锦上添花 |
 | 5 | trace-query / keyword-log-query 增加最近查询记录 | 低 | 空态引导已做，历史记录为增强项 |
 
@@ -145,3 +149,5 @@
 | 48adb74 | 09-21 11:01 | 数据准确性优化（诚实化 + 降噪 10 项） | 18 文件 +567/-292 |
 | 93bf8b9 | 09-21 13:32 | 用户体验优化 + /traces/query 白名单收紧（8 项） | 12 文件 +221/-39 |
 | 34155fe | 09-21 14:21 | 使用者视角优化（6 项，含删除 402 行旧页） | 11 文件 +245/-455 |
+| 14374b2 | 09-21 15:0x | 评审优化完整总结文档 | 1 文件 +147 |
+| （本轮） | 09-21 15:2x | 日志接口鉴权 + sls-keywords/biz-analysis 白名单收紧 + 慢查询首查超时保护 | AuthFilter + MiddlewareMonitorService + 文档 |

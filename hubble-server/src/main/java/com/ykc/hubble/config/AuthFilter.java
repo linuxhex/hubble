@@ -27,6 +27,14 @@ public class AuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
 
     /**
+     * 白名单前缀内仍要求认证的敏感路径（精确匹配，优先级高于白名单）
+     */
+    private static final String[] PROTECTED_PATHS = {
+            // /gateway/ 前缀下的日志内容读取接口（SLS 日志）
+            "/gateway/logs/query"
+    };
+
+    /**
      * 不需要认证的路径
      */
     private static final String[] EXCLUDE_PATHS = {
@@ -36,9 +44,6 @@ public class AuthFilter extends OncePerRequestFilter {
             "/auth/dingtalk/login",
             "/swagger-ui",
             "/v3/api-docs",
-
-            // 业务接口白名单
-            "/sls-keywords/query",
 
             // 监控大盘接口（无需用户认证）
             "/alert-data/query",
@@ -60,9 +65,6 @@ public class AuthFilter extends OncePerRequestFilter {
 
             // 中间件告警接口（无需用户认证）
             "/middleware-alert/",
-
-            // 业务监控接口（无需用户认证）
-            "/biz-analysis/",
 
             // 服务负载接口（无需用户认证）
             "/service-load/",
@@ -89,8 +91,8 @@ public class AuthFilter extends OncePerRequestFilter {
         // 去掉 /api 前缀，获取 Controller 相对路径
         String relativePath = requestPath.substring(4);
         
-        // 检查是否为排除路径
-        if (isExcludePath(relativePath)) {
+        // 检查是否为排除路径（白名单内的敏感路径仍要求认证）
+        if (!isProtectedPath(relativePath) && isExcludePath(relativePath)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -136,6 +138,18 @@ public class AuthFilter extends OncePerRequestFilter {
         }
         
         return null;
+    }
+
+    /**
+     * 检查是否为白名单内的敏感路径
+     */
+    private boolean isProtectedPath(String path) {
+        for (String protectedPath : PROTECTED_PATHS) {
+            if (path.equals(protectedPath)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

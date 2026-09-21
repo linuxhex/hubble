@@ -50,6 +50,7 @@ public class MiddlewareMonitorService {
     private List<Map<String, Object>> mysqlInstancesCache = null;
     private long mysqlInstancesCacheTime = 0;
     private static final long MONITOR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+    private static final long TRACE_DETAIL_TIMEOUT_MS = 10 * 1000; // 首查 trace 详情总超时，超时返回已完成部分
 
     private List<Map<String, Object>> rocketmqInstancesCache = null;
     private long rocketmqInstancesCacheTime = 0;
@@ -1680,6 +1681,37 @@ public class MiddlewareMonitorService {
      * Redis Slow Queries：从 ARMS 链路追踪查询应用级别的 Redis 慢调用
      * 思路：与 MySQL 慢查一致，查询 trace → 提取 Redis 类型的 span → 按耗时排序
      */
+    /**
+     * 等待 trace 详情查询完成并收集结果：总时长超限时立即返回已完成部分，
+     * 避免首查（缓存为空）时外部依赖阻塞拖垮请求
+     */
+    private int collectTraceResults(java.util.concurrent.CompletableFuture<?>[] traceFutures,
+                                    List<Map<String, Object>> list, String scene) {
+        try {
+            java.util.concurrent.CompletableFuture.allOf(traceFutures)
+                    .get(TRACE_DETAIL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("查询 trace 详情总超时 {}ms（{}），仅返回已完成部分", TRACE_DETAIL_TIMEOUT_MS, scene);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("查询 trace 详情被中断（{}）", scene);
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("查询 trace 详情异常（{}）: {}", scene, e.getMessage());
+        }
+        int traceCount = 0;
+        for (var f : traceFutures) {
+            if (!f.isDone()) continue;
+            try {
+                var results = (List<Map<String, Object>>) f.get();
+                if (!results.isEmpty()) {
+                    list.addAll(results);
+                    traceCount++;
+                }
+            } catch (Exception ignored) {}
+        }
+        return traceCount;
+    }
+
     public List<Map<String, Object>> redisSlowQueries() {
         long now = System.currentTimeMillis();
         if (redisSlowQueriesCache != null && now - redisSlowQueriesCacheTime < MONITOR_CACHE_TTL_MS) {
@@ -1795,17 +1827,7 @@ public class MiddlewareMonitorService {
                 }, queryExecutor);
             }
 
-            java.util.concurrent.CompletableFuture.allOf(traceFutures).join();
-            int traceCount = 0;
-            for (var f : traceFutures) {
-                try {
-                    var results = (List<Map<String, Object>>) f.get();
-                    if (!results.isEmpty()) {
-                        list.addAll(results);
-                        traceCount++;
-                    }
-                } catch (Exception ignored) {}
-            }
+            int traceCount = collectTraceResults(traceFutures, list, "Redis 慢查询");
 
             log.info("Redis Slow Queries: 从 ARMS 查询 {} 条 trace（已缓存）", traceCount);
 
@@ -2029,17 +2051,7 @@ public class MiddlewareMonitorService {
                 }, queryExecutor);
             }
 
-            java.util.concurrent.CompletableFuture.allOf(traceFutures).join();
-            int traceCount = 0;
-            for (var f : traceFutures) {
-                try {
-                    var results = (List<Map<String, Object>>) f.get();
-                    if (!results.isEmpty()) {
-                        list.addAll(results);
-                        traceCount++;
-                    }
-                } catch (Exception ignored) {}
-            }
+            int traceCount = collectTraceResults(traceFutures, list, "MySQL 慢查询");
 
             log.info("MySQL Slow Queries: 从 ARMS 查询 {} 条 trace（已缓存）", traceCount);
 
