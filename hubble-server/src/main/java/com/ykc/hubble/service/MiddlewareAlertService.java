@@ -357,11 +357,20 @@ public class MiddlewareAlertService {
                 });
             }
 
-            java.util.concurrent.CompletableFuture.allOf(futures).join();
+            try {
+                java.util.concurrent.CompletableFuture.allOf(futures)
+                        .get(90 * 1000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("定时告警巡检总超时 90s，仅收集已完成部分（防止单线程调度池被挂起阻塞）");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException e) {
+                log.warn("定时告警巡检异常: {}", e.getMessage());
+            }
 
             long totalRed = 0;
             for (var f : futures) {
-                try { totalRed += (long) f.get(); } catch (Exception ignored) {}
+                try { totalRed += (long) f.getNow(0L); } catch (Exception ignored) {}
             }
 
             if (totalRed > 0) {

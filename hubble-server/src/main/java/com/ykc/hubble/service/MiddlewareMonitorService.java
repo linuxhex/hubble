@@ -51,6 +51,7 @@ public class MiddlewareMonitorService {
     private long mysqlInstancesCacheTime = 0;
     private static final long MONITOR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
     private static final long TRACE_DETAIL_TIMEOUT_MS = 10 * 1000; // 首查 trace 详情总超时，超时返回已完成部分
+    private static final long METRIC_BATCH_TIMEOUT_MS = 60 * 1000; // 实例指标批量查询总超时（EXTERNAL_CALL_SEM 限流排队给足余量，降级时快速失败）
 
     private List<Map<String, Object>> rocketmqInstancesCache = null;
     private long rocketmqInstancesCacheTime = 0;
@@ -172,9 +173,12 @@ public class MiddlewareMonitorService {
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(futures).join();
+            awaitAll(futures, METRIC_BATCH_TIMEOUT_MS, "Redis 实例");
             for (var f : futures) {
-                list.add((Map<String, Object>) f.get());
+                try {
+                    var item = (Map<String, Object>) f.getNow(null);
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
 
             redisInstancesCache = list;
@@ -305,9 +309,12 @@ public class MiddlewareMonitorService {
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(futures).join();
+            awaitAll(futures, METRIC_BATCH_TIMEOUT_MS, "MySQL 实例");
             for (var f : futures) {
-                list.add((Map<String, Object>) f.get());
+                try {
+                    var item = (Map<String, Object>) f.getNow(null);
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
 
             // PolarDB 集群
@@ -353,9 +360,12 @@ public class MiddlewareMonitorService {
                 })
             ).toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(polarFutures).join();
+            awaitAll(polarFutures, METRIC_BATCH_TIMEOUT_MS, "PolarDB 实例");
             for (var f : polarFutures) {
-                list.add((Map<String, Object>) f.get());
+                try {
+                    var item = (Map<String, Object>) f.getNow(null);
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
 
             mysqlInstancesCache = list;
@@ -726,9 +736,12 @@ public class MiddlewareMonitorService {
                     }, queryExecutor))
                     .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-                java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+                awaitAll(itemFutures, METRIC_BATCH_TIMEOUT_MS, "Lindorm 实例(Prometheus)");
                 for (var f : itemFutures) {
-                    try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
+                    try {
+                        var item = (Map<String, Object>) f.getNow(null);
+                        if (item != null) list.add(item);
+                    } catch (Exception ignored) {}
                 }
                 log.info("Lindorm 实例监控(Prometheus): {} 个", list.size());
             } else {
@@ -781,9 +794,12 @@ public class MiddlewareMonitorService {
                     }, queryExecutor))
                     .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-                java.util.concurrent.CompletableFuture.allOf(cmFutures).join();
+                awaitAll(cmFutures, METRIC_BATCH_TIMEOUT_MS, "Lindorm 实例(CloudMonitor fallback)");
                 for (var f : cmFutures) {
-                    try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
+                    try {
+                        var item = (Map<String, Object>) f.getNow(null);
+                        if (item != null) list.add(item);
+                    } catch (Exception ignored) {}
                 }
             }
 
@@ -855,9 +871,12 @@ public class MiddlewareMonitorService {
                 }, queryExecutor))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            awaitAll(itemFutures, METRIC_BATCH_TIMEOUT_MS, "Elasticsearch 实例");
             for (var f : itemFutures) {
-                try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
+                try {
+                    var item = (Map<String, Object>) f.getNow(null);
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
 
             elasticsearchInstancesCache = list;
@@ -913,10 +932,10 @@ public class MiddlewareMonitorService {
                 }))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(futures).join();
+            awaitAll(futures, METRIC_BATCH_TIMEOUT_MS, "OSS Bucket");
             for (var f : futures) {
                 try {
-                    Map<String, Object> item = (Map<String, Object>) f.get();
+                    Map<String, Object> item = (Map<String, Object>) f.getNow(null);
                     if (item != null) list.add(item);
                 } catch (Exception ignored) {}
             }
@@ -1659,9 +1678,12 @@ public class MiddlewareMonitorService {
                 }, queryExecutor))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            awaitAll(itemFutures, METRIC_BATCH_TIMEOUT_MS, "Redis Big Keys");
             for (var f : itemFutures) {
-                try { list.add((Map<String, Object>) f.get()); } catch (Exception ignored) {}
+                try {
+                    var item = (Map<String, Object>) f.getNow(null);
+                    if (item != null) list.add(item);
+                } catch (Exception ignored) {}
             }
 
             list.sort((a, b) -> Double.compare(
@@ -1685,6 +1707,24 @@ public class MiddlewareMonitorService {
      * 等待 trace 详情查询完成并收集结果：总时长超限时立即返回已完成部分，
      * 避免首查（缓存为空）时外部依赖阻塞拖垮请求
      */
+    /**
+     * 并行批量查询的总超时等待：超时仅告警返回，由调用方用 getNow 收集已完成部分，
+     * 避免外部依赖（CloudMonitor/ARMS）降级限流排队时请求线程无限挂起
+     */
+    private void awaitAll(java.util.concurrent.CompletableFuture<?>[] futures, long timeoutMs, String scene) {
+        try {
+            java.util.concurrent.CompletableFuture.allOf(futures)
+                    .get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("并行查询总超时 {}ms（{}），仅收集已完成部分", timeoutMs, scene);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("并行查询被中断（{}）", scene);
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("并行查询异常（{}）: {}", scene, e.getMessage());
+        }
+    }
+
     private int collectTraceResults(java.util.concurrent.CompletableFuture<?>[] traceFutures,
                                     List<Map<String, Object>> list, String scene) {
         try {
@@ -2203,10 +2243,10 @@ public class MiddlewareMonitorService {
                 }, queryExecutor))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
 
-            java.util.concurrent.CompletableFuture.allOf(itemFutures).join();
+            awaitAll(itemFutures, METRIC_BATCH_TIMEOUT_MS, "Elasticsearch Top Indices");
             for (var f : itemFutures) {
                 try {
-                    var item = f.get();
+                    var item = f.getNow(null);
                     if (item != null) list.add((Map<String, Object>) item);
                 } catch (Exception ignored) {}
             }

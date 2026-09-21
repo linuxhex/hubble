@@ -113,6 +113,22 @@ CREATE TABLE IF NOT EXISTS business_trace (
   PRIMARY KEY (id)
 );
 
+-- 业务链路节点（trace 节点，含 SLS 查询模板）
+CREATE TABLE IF NOT EXISTS trace_node (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  trace_id BIGINT NOT NULL COMMENT '所属业务链路ID',
+  parent_id BIGINT COMMENT '父节点ID（null=顶级节点）',
+  name VARCHAR(200) NOT NULL COMMENT '节点名称',
+  description VARCHAR(500) COMMENT '节点描述',
+  sls_logstore VARCHAR(200) NOT NULL COMMENT 'SLS日志库名称',
+  query_template TEXT COMMENT '查询关键字模板（支持变量占位符）',
+  node_order INT NOT NULL DEFAULT 1 COMMENT '节点顺序',
+  deleted INT DEFAULT 0 COMMENT '删除标记',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+
 -- 服务每日负载数据（扩容决策参考，存储最近一年）
 CREATE TABLE IF NOT EXISTS service_load_daily (
   id BIGINT NOT NULL AUTO_INCREMENT,

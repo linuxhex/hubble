@@ -65,6 +65,21 @@
           </el-button>
         </el-form-item>
       </el-form>
+
+      <!-- 最近查询记录 -->
+      <div v-if="recentQueries.length > 0" class="recent-searches">
+        <span class="recent-label">最近查询：</span>
+        <el-tag
+          v-for="(item, index) in recentQueries"
+          :key="index"
+          class="recent-tag"
+          size="small"
+          type="info"
+          :title="formatTagTime(item.time)"
+          @click="applyRecentQuery(item)"
+        >{{ item.text }}</el-tag>
+        <el-link type="info" :underline="false" class="recent-clear" @click="handleClearRecent">清空</el-link>
+      </div>
     </div>
 
     <!-- 查询结果 -->
@@ -201,6 +216,9 @@ import { getTraceList, getTraceVariables } from '@/api/trace-management'
 import { queryLogsStream, queryChildNodesStream, exportQueryResults } from '@/api/trace-query'
 import LogViewer from '@/components/LogViewer.vue'
 import { ensureSecondTimestamp } from '@/utils/timestamp'
+import { loadRecentSearches, pushRecentSearch, clearRecentSearches } from '@/utils/recent-searches'
+
+const RECENT_KEY = 'hubble_recent_trace_queries'
 
 // 计算默认时间范围（一周前到今天）
 const getDefaultTimeRange = () => {
@@ -240,6 +258,49 @@ const abortController = ref(null)
 const childrenLoading = ref({})
 
 const hasResults = computed(() => queryResults.value.length > 0)
+
+// 最近查询记录
+const recentQueries = ref([])
+
+const formatTagTime = (time) => {
+  if (!time) return ''
+  return `查询于 ${new Date(time).toLocaleString()}`
+}
+
+const refreshRecentQueries = () => {
+  recentQueries.value = loadRecentSearches(RECENT_KEY)
+}
+
+const applyRecentQuery = async (item) => {
+  if (!item.traceId) return
+  queryForm.value.traceId = item.traceId
+  await handleTraceChange(item.traceId)
+  if (item.variables) {
+    Object.keys(queryForm.value.variables).forEach((k) => {
+      if (item.variables[k]) queryForm.value.variables[k] = item.variables[k]
+    })
+  }
+}
+
+const handleClearRecent = () => {
+  clearRecentSearches(RECENT_KEY)
+  recentQueries.value = []
+}
+
+const recordRecentQuery = () => {
+  const trace = traceList.value.find((t) => t.id === queryForm.value.traceId)
+  const traceName = trace?.name || queryForm.value.traceId
+  const varSummary = Object.entries(queryForm.value.variables)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' ')
+  pushRecentSearch(RECENT_KEY, {
+    text: `${traceName}${varSummary ? '：' + varSummary : ''}`.trim(),
+    traceId: queryForm.value.traceId,
+    variables: { ...queryForm.value.variables }
+  })
+  refreshRecentQueries()
+}
 
 const parseTime = (timeStr) => {
   const timeNum = parseInt(timeStr)
@@ -386,6 +447,7 @@ const handleQuery = () => {
     },
     () => {
       querying.value = false
+      recordRecentQuery()
       ElMessage.success('查询完成')
     }
   )
@@ -479,6 +541,7 @@ const handleDrillDown = (result) => {
 
 onMounted(() => {
   loadTraceList()
+  refreshRecentQueries()
 })
 
 onUnmounted(() => {
@@ -509,6 +572,30 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
+}
+
+.recent-searches {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #ebeef5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.recent-tag {
+  cursor: pointer;
+}
+
+.recent-clear {
+  margin-left: auto;
+  font-size: 12px;
 }
 
 .no-margin {
