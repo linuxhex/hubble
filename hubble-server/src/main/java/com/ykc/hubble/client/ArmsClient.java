@@ -50,6 +50,11 @@ public class ArmsClient {
                 armsConfig.getRegion(),
                 armsConfig.getAccessKeyId(),
                 armsConfig.getAccessKeySecret());
+        // 显式超时：默认无界，慢响应会占死调用线程（@Scheduled 单线程池会被饿死）
+        com.aliyuncs.http.HttpClientConfig httpClientConfig = com.aliyuncs.http.HttpClientConfig.getDefault();
+        httpClientConfig.setConnectionTimeoutMillis(5 * 1000L);
+        httpClientConfig.setReadTimeoutMillis(15 * 1000L);
+        profile.setHttpClientConfig(httpClientConfig);
         this.client = new DefaultAcsClient(profile);
         log.info("ARMS client 初始化: region={}", armsConfig.getRegion());
     }

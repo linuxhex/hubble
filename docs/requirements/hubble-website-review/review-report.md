@@ -98,6 +98,19 @@
 | 5 | 下钻抽屉耗时与卡片口径矛盾无说明 | 劣化/暴涨抽屉「口径说明」tooltip | hover 取得完整文案 |
 | 6 | 隐藏旧页 /user-behavior-trace 无入口 | 删除 UserBehaviorTraceQuery.vue（-402 行）+ 路由 redirect → /user-behavior | 旧 URL 重定向实测不落空白 |
 
+### 3.4 依赖服务 RT 环比巡检 + ARMS 解析根因修复（第 8~9 轮）
+
+**背景**：2026-09-21 16:46 真实生产 ARMS 告警（order-foundation-prod 依赖 http_client RT 97→1600ms，环比 1400%~2900%）未触发任何 Hubble 告警。排查结论：**检测维度盲区而非故障**——Hubble 全部告警为 SLS 日志条数计数型，"变慢不变错"的劣化无日志洪峰，计数规则天然抓不到（实测劣化窗口 Timeout 日志仅 5 条）。
+
+| # | 工作 | 说明 | 验证 |
+|---|------|------|------|
+| 1 | 新增 DependencyRtAlertService（每 5 分钟巡检） | 对齐 ARMS「依赖服务 RT 环比上升」口径：203 应用并行查 appstat.incall 双 5 分钟窗，加权平均 RT 环比 >500% 且绝对值 >1000ms、调用量 ≥10 时告警（SSE + 钉钉，3h 冷却）；阈值 5 键可配（dependency_rt_*） | 注入阈值实测 10 组合触发 + SSE 10 事件；**默认阈值下真实捕获 zdl-prod query_stations_info 160.9→1486.2ms（+823%）生产劣化** |
+| 2 | ARMS 返回解析根因修复 | 实测 appstat.incall 为**平铺结构**（rt/count/rpc/rpcType 直接在 item 顶层）且**值均为 String**，旧 measures 嵌套解析恒空（这是巡检调试中用探针程序实测确立的事实） | 203 应用 × 2184~2243 组合稳定出数 |
+| 3 | ChatToolService.armsApiMetrics 同根因修复 | AI 工具「接口性能查询」自上线起恒返回空表，改平铺解析 | 编译 + 启动回归 |
+| 4 | ArmsClient 显式超时 | 默认无界，203 应用批量查询会占死 @Scheduled 单线程池；连接 5s / 读 15s | 巡检 3 秒级完成 |
+| 5 | router 锚点选择器缺陷（第 9 轮回归发现） | hash 形式 URL 访问时 afterEach 将 to.hash 直喂 querySelector 抛 SyntaxError；加 try/catch | 编译 + 回归 |
+| 6 | 遗留：GatewayService 7 处 measures 嵌套解析 | appstat.transaction 无 pid 查询实测 0 条，7 处死解析（多有 SLS 兜底，影响待逐站点评估），记录至 §六 单独处理 | 探针实证 |
+
 ## 四、测试验证体系
 
 - **驱动**：ego-browser（Chromium 真实浏览器，任务空间隔离）；登录限制下用 CDP 预文档注入本地自签 JWT（.env.example 示例密钥，仅本地 18081 有效、1h 时效）
@@ -144,6 +157,7 @@
 | 4 | ~~biz-analysis 图表分组懒加载~~ | ~~低~~ 已完成 | 第 7 轮上线 IntersectionObserver 懒加载，首屏 2 个 canvas、滚动后 10 个 |
 | 5 | ~~trace-query / keyword-log-query 增加最近查询记录~~ | ~~低~~ 已完成 | 第 7 轮上线（localStorage 最多 10 条去重置顶），查询记录/点击回填/清空实测通过 |
 | 6 | trace_node 缺表缺陷（第 7 轮新发现，已修复） | 已闭环 | schema.sql 补 DDL；此前链路配置在任何新环境创建必 500 |
+| 7 | GatewayService 7 处 ARMS measures 嵌套死解析（第 9 轮新发现） | 中 | appstat.transaction 无 pid 实测 0 条；涉及 queryApiStats 错误数/RT 等估算分支，多有 SLS 兜底故页面表象正常；需逐站点确认功能口径后统一改平铺解析（参照 DependencyRtAlertService.toDouble 的 String 兼容写法） |
 
 ## 七、提交索引
 | Commit | 日期 | 主题 | 规模 |
@@ -154,3 +168,5 @@
 | 14374b2 | 09-21 15:0x | 评审优化完整总结文档 | 1 文件 +147 |
 | （本轮） | 09-21 15:2x | 日志接口鉴权 + sls-keywords/biz-analysis 白名单收紧 + 慢查询首查超时保护 | AuthFilter + MiddlewareMonitorService + 文档 |
 | （第 7 轮） | 09-21 16:1x | 超时快速失败铺开 12 处 + 最近查询记录 + 图表懒加载 + trace_node 缺表修复 | 4 后端文件 + 4 前端文件 + schema.sql + 文档 |
+| 45b9e7b | 09-21 16:45 | 第 8 轮：AI 工具结果截断运行时观测闭环（反射 11 断言 + 旁路审计） | 文档 |
+| （本轮） | 09-21 19:2x | 依赖服务 RT 环比巡检上线（补检测维度盲区）+ ARMS 平铺解析根因修复 + AI 接口性能工具修复 + router 锚点修复 | DependencyRtAlertService 新增 + ArmsClient + ChatToolService + router + 文档 |

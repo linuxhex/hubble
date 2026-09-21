@@ -324,35 +324,25 @@ public class ChatToolService {
                 if (!(itemObj instanceof Map)) continue;
                 @SuppressWarnings("unchecked")
                 Map<Object, Object> item = (Map<Object, Object>) itemObj;
-                @SuppressWarnings("unchecked")
-                Map<Object, Object> measures = (Map<Object, Object>) item.get("measures");
-                if (measures == null) continue;
-                String rpc = extractRpc(item);
+                // ARMS 返回为平铺结构（rpc/rt/count 直接在 item 顶层）且值均为 String，
+                // 无 dimensions/measures 嵌套（旧解析恒空表）
+                Object rpcObj = item.get("rpc");
+                if (rpcObj == null) continue;
+                String rpc = rpcObj.toString();
                 if (!keyword.isBlank() && !rpc.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT))) {
                     continue;
                 }
                 sb.append(String.format("%s | %s | %s | %s | %s\n",
                         rpc,
-                        measures.getOrDefault("count", "-"),
-                        measures.getOrDefault("rt", "-"),
-                        measures.getOrDefault("qps", "-"),
-                        measures.getOrDefault("errorrate", "-")));
+                        item.getOrDefault("count", "-"),
+                        item.getOrDefault("rt", "-"),
+                        item.getOrDefault("qps", "-"),
+                        item.getOrDefault("errorrate", "-")));
                 if (++rows >= 50) break;
             }
         }
         if (rows == 0) sb.append("无数据（pid 是否有效？时间范围是否有流量？）\n");
         return sb.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String extractRpc(Map<Object, Object> item) {
-        Object dims = item.get("dimensions");
-        if (dims instanceof Map) {
-            Object rpc = ((Map<Object, Object>) dims).get("rpc");
-            if (rpc != null) return rpc.toString();
-        }
-        Object rpc = item.get("rpc");
-        return rpc != null ? rpc.toString() : "-";
     }
 
     private String armsTraceDetail(Map<String, Object> args) throws Exception {
