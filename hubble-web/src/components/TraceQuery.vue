@@ -175,7 +175,10 @@
       <el-empty description="暂无查询结果">
         <div class="empty-guide">
           <p>按以下步骤开始查询：</p>
-          <p>1. 在上方选择要查询的业务链路（当前已配置 {{ traceList.length }} 条）</p>
+          <p v-if="traceList.length === 0">
+            1. 尚未配置业务链路，<el-link type="primary" @click="goTraceManagement">前往「链路配置」创建</el-link>
+          </p>
+          <p v-else>1. 在上方选择要查询的业务链路（当前已配置 {{ traceList.length }} 条）</p>
           <p>2. 填写必填查询变量（如订单号、用户 ID 等）</p>
           <p>3. 确认时间范围后点击「查询」，支持结果导出与逐节点下钻</p>
         </div>
@@ -191,6 +194,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { getTraceList, getTraceVariables } from '@/api/trace-management'
@@ -219,6 +223,9 @@ const queryForm = ref({
   variables: {},
   timeRange: defaultTimeRange
 })
+
+const router = useRouter()
+const goTraceManagement = () => router.push('/trace-management')
 
 const timeRange = ref([
   defaultTimeRange.from,

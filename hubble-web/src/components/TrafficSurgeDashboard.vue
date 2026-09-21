@@ -94,7 +94,12 @@
     <el-drawer v-model="drawerVisible" :title="drawerTitle" size="70%" direction="rtl" destroy-on-close>
       <div class="drill-content">
         <div class="trace-list-section">
-          <div class="section-title">最近链路 <span class="hint">点击链路查看调用链详情</span></div>
+          <div class="section-title">
+            最近链路 <span class="hint">点击链路查看调用链详情</span>
+            <el-tooltip content="列表为最近采样的实时链路，与上方列表的涨幅/请求数统计窗口口径不同，耗时仅供参考" placement="top">
+              <span class="hint metric-note">口径说明</span>
+            </el-tooltip>
+          </div>
           <el-table
             v-loading="traceListLoading"
             :data="traceList"
@@ -422,6 +427,12 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #999;
   font-weight: normal;
+}
+
+.metric-note {
+  color: #409eff;
+  cursor: help;
+  border-bottom: 1px dashed #409eff;
 }
 
 .duration-chart {

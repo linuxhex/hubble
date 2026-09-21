@@ -296,7 +296,12 @@ onBeforeUnmount(() => {
       <div class="drill-content">
         <!-- 链路列表 -->
         <div class="trace-list-section">
-          <div class="section-title">最近链路 <span class="hint">点击链路查看调用链详情</span></div>
+          <div class="section-title">
+            最近链路 <span class="hint">点击链路查看调用链详情</span>
+            <el-tooltip content="列表为最近采样的实时链路，与上方统计卡片（列表窗口内分位数）口径不同，耗时可能明显不一致" placement="top">
+              <span class="hint metric-note">口径说明</span>
+            </el-tooltip>
+          </div>
           <el-table
             v-loading="traceListLoading"
             :data="traceList"
@@ -493,6 +498,12 @@ onBeforeUnmount(() => {
   font-weight: normal;
   color: #999;
   margin-left: 8px;
+}
+
+.metric-note {
+  color: #409eff;
+  cursor: help;
+  border-bottom: 1px dashed #409eff;
 }
 
 .trace-id {
