@@ -159,8 +159,12 @@ router.beforeEach((to, from, next) => {
 router.afterEach((to) => {
   if (to.hash) {
     nextTick(() => {
-      const el = document.querySelector(to.hash)
-      if (el) el.scrollIntoView({ behavior: 'smooth' })
+      try {
+        const el = document.querySelector(to.hash)
+        if (el) el.scrollIntoView({ behavior: 'smooth' })
+      } catch (e) {
+        // 非法锚点（如 hash 路由形式的 #/xxx）不滚动，避免 querySelector 抛错
+      }
     })
   }
 })
