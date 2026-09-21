@@ -85,6 +85,21 @@
           <el-button size="small" @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>
+
+      <!-- 最近查询记录 -->
+      <div v-if="recentKeywords.length > 0" class="recent-searches">
+        <span class="recent-label">最近查询：</span>
+        <el-tag
+          v-for="(item, index) in recentKeywords"
+          :key="index"
+          class="recent-tag"
+          size="small"
+          type="info"
+          :title="formatTagTime(item.time)"
+          @click="applyRecentKeyword(item)"
+        >{{ item.text }}</el-tag>
+        <el-link type="info" :underline="false" class="recent-clear" @click="handleClearRecent">清空</el-link>
+      </div>
     </div>
 
     <!-- 查询结果 -->
@@ -146,6 +161,9 @@ import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { queryKeywordLogs } from '@/api/keyword-log-query'
 import LogViewer from '@/components/LogViewer.vue'
+import { loadRecentSearches, pushRecentSearch, clearRecentSearches } from '@/utils/recent-searches'
+
+const RECENT_KEY = 'hubble_recent_log_keywords'
 
 // 获取今天的时间范围（格式：YYYY-MM-DD HH:mm:ss）
 const getTodayTimeRange = () => {
@@ -228,6 +246,27 @@ const allLogs = ref([])
 // 日志级别筛选（前端过滤，多选）
 const levelFilter = ref([])
 
+// 最近查询记录
+const recentKeywords = ref([])
+
+const formatTagTime = (time) => {
+  if (!time) return ''
+  return `查询于 ${new Date(time).toLocaleString()}`
+}
+
+const refreshRecentKeywords = () => {
+  recentKeywords.value = loadRecentSearches(RECENT_KEY)
+}
+
+const applyRecentKeyword = (item) => {
+  queryForm.value.keyword = item.text
+}
+
+const handleClearRecent = () => {
+  clearRecentSearches(RECENT_KEY)
+  recentKeywords.value = []
+}
+
 const filteredLogs = computed(() => {
   if (!levelFilter.value || levelFilter.value.length === 0) return allLogs.value
   const levels = new Set(levelFilter.value.map((s) => s.toUpperCase()))
@@ -285,7 +324,9 @@ const handleQuery = async () => {
       resultData.value = res.data
       allLogs.value = res.data.logs
       currentOffset.value = res.data.logs.length
-      
+      pushRecentSearch(RECENT_KEY, { text: queryForm.value.keyword.trim() })
+      refreshRecentKeywords()
+
       if (resultData.value.logs.length === 0) {
         ElMessage.info('未查询到符合条件的日志')
       } else {
@@ -364,6 +405,7 @@ const handleReset = () => {
 onMounted(() => {
   // 默认选择今天
   timeRange.value = getTodayTimeRange()
+  refreshRecentKeywords()
 })
 </script>
 
@@ -385,6 +427,30 @@ onMounted(() => {
 
 .search-form {
   max-width: 900px;
+}
+
+.recent-searches {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #ebeef5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.recent-tag {
+  cursor: pointer;
+}
+
+.recent-clear {
+  margin-left: auto;
+  font-size: 12px;
 }
 
 .results-area {

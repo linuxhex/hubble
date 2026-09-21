@@ -91,13 +91,23 @@ public class MiddlewareAlertController {
             });
         }
 
-        java.util.concurrent.CompletableFuture.allOf(futures).join();
+        try {
+            java.util.concurrent.CompletableFuture.allOf(futures)
+                    .get(90 * 1000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.warn("中间件告警全量检查总超时 90s，仅收集已完成部分");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("中间件告警全量检查异常: {}", e.getMessage());
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
         int totalRed = 0, totalYellow = 0;
         for (var f : futures) {
             try {
-                var entry = (Map.Entry<String, Map<String, Object>>) f.get();
+                var entry = (Map.Entry<String, Map<String, Object>>) f.getNow(null);
+                if (entry == null) continue;
                 if (entry == null) continue;
                 result.put(entry.getKey(), entry.getValue());
                 totalRed += (int) entry.getValue().getOrDefault("redCount", 0);

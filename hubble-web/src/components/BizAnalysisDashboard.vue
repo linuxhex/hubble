@@ -530,6 +530,55 @@ const renderHourlyChargingCompChart = () => {
   })
 }
 
+// 图表懒加载：进入视口才初始化 ECharts 实例，避免首屏一次性渲染 10 个图表
+const chartDefs = [
+  { key: 'hourlyComp', el: () => hourlyCompChartRef.value, render: renderHourlyCompChart },
+  { key: 'hourlyChargingComp', el: () => hourlyChargingCompChartRef.value, render: renderHourlyChargingCompChart },
+  { key: 'monthly', el: () => monthlyChartRef.value, render: renderMonthlyChart },
+  { key: 'yearly', el: () => yearlyChartRef.value, render: renderYearlyChart },
+  { key: 'daily', el: () => dailyChartRef.value, render: renderDailyChart },
+  { key: 'revenue', el: () => revenueChartRef.value, render: renderRevenueChart },
+  { key: 'utilization', el: () => utilizationChartRef.value, render: renderUtilizationChart },
+  { key: 'hourly', el: () => hourlyChartRef.value, render: renderHourlyChart },
+  { key: 'appActive', el: () => appActiveChartRef.value, render: renderAppActiveChart },
+  { key: 'mau', el: () => mauChartRef.value, render: renderMauChart }
+]
+
+const chartVisible = {}
+let chartObserver = null
+
+const setupChartObserver = () => {
+  if (chartObserver || typeof IntersectionObserver === 'undefined') return
+  chartObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const key = entry.target.__chartKey
+        if (!key) continue
+        if (entry.isIntersecting) {
+          chartVisible[key] = true
+          chartDefs.find((d) => d.key === key)?.render()
+          chartObserver.unobserve(entry.target)
+        }
+      }
+    },
+    { rootMargin: '120px' }
+  )
+}
+
+const scheduleChartRenders = () => {
+  setupChartObserver()
+  for (const def of chartDefs) {
+    const el = def.el()
+    if (!el) continue
+    if (chartVisible[def.key] || !chartObserver) {
+      def.render()
+    } else {
+      el.__chartKey = def.key
+      chartObserver.observe(el)
+    }
+  }
+}
+
 const loadOverview = async () => {
   overviewLoading.value = true
   overviewFailed.value = false
@@ -574,16 +623,7 @@ const loadCharts = async () => {
   }
 
   await nextTick()
-  renderMonthlyChart()
-  renderYearlyChart()
-  renderDailyChart()
-  renderAppActiveChart()
-  renderMauChart()
-  renderRevenueChart()
-  renderUtilizationChart()
-  renderHourlyChart()
-  renderHourlyCompChart()
-  renderHourlyChargingCompChart()
+  scheduleChartRenders()
 }
 
 const fetchAll = async () => {
@@ -605,6 +645,7 @@ const handleResize = () => {
   utilizationChart?.resize()
   hourlyChart?.resize()
   hourlyCompChart?.resize()
+  hourlyChargingCompChart?.resize()
 }
 
 onMounted(() => {
@@ -614,6 +655,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  chartObserver?.disconnect()
   monthlyChart?.dispose()
   yearlyChart?.dispose()
   dailyChart?.dispose()
@@ -623,6 +665,7 @@ onUnmounted(() => {
   utilizationChart?.dispose()
   hourlyChart?.dispose()
   hourlyCompChart?.dispose()
+  hourlyChargingCompChart?.dispose()
 })
 </script>
 

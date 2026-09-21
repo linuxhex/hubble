@@ -2324,8 +2324,17 @@ public class GatewayService {
                 futures.add(future);
             }
             
-            // 等待所有分页完成
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            // 等待所有分页完成（总超时保护，超时仅统计已完成分页）
+            try {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(60 * 1000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("SLS 分页采样总超时 60s，仅统计已完成分页");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.ExecutionException e) {
+                log.warn("SLS 分页采样异常: {}", e.getMessage());
+            }
             
             long totalFetched = result.values().stream().mapToLong(arr -> arr[0]).sum();
             log.info("SLS 分页采样: {} 页共 {} 条日志（并行）", totalPages, totalFetched);
