@@ -506,28 +506,31 @@ public class GatewayService {
                 vo.setTotalRequests(totalRequests);
                 vo.setQps(Math.round(avgQps * 100.0) / 100.0);
                 vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
+                vo.setDataSource("ARMS");
 
                 long slsErrorCount = 0;
-                long slsAllTotal = 0;
+                long slsApiTotal = 0;
                 try {
                     String slsErrorQuery = "level: ERROR | SELECT COUNT(*) as total";
                     var slsErrorResult = slsQueryClient.queryAnalytics(logstore, slsErrorQuery, from, now, 1);
                     if (!slsErrorResult.isEmpty()) {
                         slsErrorCount = Long.parseLong(slsErrorResult.get(0).getOrDefault("total", "0"));
                     }
-                    String slsTotalQuery = "* | SELECT COUNT(*) as total";
-                    var slsTotalResult = slsQueryClient.queryAnalytics(logstore, slsTotalQuery, from, now, 1);
-                    if (!slsTotalResult.isEmpty()) {
-                        slsAllTotal = Long.parseLong(slsTotalResult.get(0).getOrDefault("total", "0"));
+                    // 分母与分子同源：只统计接口请求日志，避免全库日志（定时任务/框架日志）稀释错误率
+                    String slsApiQuery = "ControllerLog and apiUrl | SELECT COUNT(*) as total";
+                    var slsApiResult = slsQueryClient.queryAnalytics(logstore, slsApiQuery, from, now, 1);
+                    if (!slsApiResult.isEmpty()) {
+                        slsApiTotal = Long.parseLong(slsApiResult.get(0).getOrDefault("total", "0"));
                     }
                 } catch (Exception e) {
                     log.warn("SLS 补充 ERROR 数失败: {}", e.getMessage());
                 }
                 long effectiveErrorCount = Math.max(errorCount, slsErrorCount);
-                vo.setErrorRate(slsAllTotal == 0 ? (qpsRateSum == 0 ? 0 : effectiveErrorCount * 100.0 / qpsRateSum)
-                        : effectiveErrorCount * 100.0 / slsAllTotal);
-                log.info("概览错误率: armsError={}, slsError={}, slsTotal={}, effectiveError={}, errorRate={}", 
-                    errorCount, slsErrorCount, slsAllTotal, effectiveErrorCount, vo.getErrorRate());
+                // SLS 请求量查询失败时退回 ARMS 请求量作分母
+                long apiTotal = slsApiTotal > 0 ? slsApiTotal : totalRequests;
+                vo.setErrorRate(apiTotal == 0 ? 0 : effectiveErrorCount * 100.0 / apiTotal);
+                log.info("概览错误率: armsError={}, slsError={}, slsApiTotal={}, effectiveError={}, errorRate={}",
+                    errorCount, slsErrorCount, slsApiTotal, effectiveErrorCount, vo.getErrorRate());
 
                 // 趋势计算（与上一周期对比）
                 long prevFrom = from - seconds;
@@ -616,20 +619,13 @@ public class GatewayService {
     private GatewayOverviewVO overviewFromSls(String timeRange, long now, long seconds, long from, String logstore) {
         long totalRequests = 0;
         long errorCount = 0;
-        long allLogsTotal = 0;
-        
+
         try {
             String requestFilter = "ControllerLog and apiUrl";
             String countQuery = requestFilter + " | SELECT COUNT(*) as total";
             List<Map<String, String>> countResult = slsQueryClient.queryAnalytics(logstore, countQuery, from, now, 1);
             if (!countResult.isEmpty()) {
                 totalRequests = Long.parseLong(countResult.get(0).getOrDefault("total", "0"));
-            }
-            
-            String allLogsQuery = "* | SELECT COUNT(*) as total";
-            List<Map<String, String>> allLogsResult = slsQueryClient.queryAnalytics(logstore, allLogsQuery, from, now, 1);
-            if (!allLogsResult.isEmpty()) {
-                allLogsTotal = Long.parseLong(allLogsResult.get(0).getOrDefault("total", "0"));
             }
             
             String errorQuery = "level: ERROR | SELECT COUNT(*) as total";
@@ -641,7 +637,6 @@ public class GatewayService {
             log.warn("SLS 分析查询失败，使用 GetHistograms 降级: {}", e.getMessage());
             totalRequests = slsQueryClient.countLogstore(logstore, "ControllerLog and apiUrl", from, now);
             errorCount = slsQueryClient.countLogstore(logstore, "level: ERROR", from, now);
-            allLogsTotal = slsQueryClient.countLogstore(logstore, "*", from, now);
         }
 
         // 全量 ControllerLog 包含微服务链路中每个服务的日志，需除以链路长度折算外部请求数
@@ -664,14 +659,12 @@ public class GatewayService {
         GatewayOverviewVO vo = new GatewayOverviewVO();
         vo.setTotalRequests(externalTotalRequests);
         vo.setQps(currentQps);
-        vo.setErrorRate(allLogsTotal == 0 ? 0 : errorCount * 100.0 / allLogsTotal);
+        vo.setDataSource("SLS");
+        // 错误率：分子=ERROR 日志数，分母=ControllerLog 接口请求数（同源同口径，不再用全库日志稀释）
+        vo.setErrorRate(totalRequests == 0 ? 0 : errorCount * 100.0 / totalRequests);
 
-        // 采样部分日志计算平均响应时间（取最近的日志）
-        List<LogEntry> sampleLogs = queryLogs(logstore, "*", from, now, 0, 100);
-        double avgTime = sampleLogs.stream()
-                .mapToLong(l -> extractResponseTime(l.getMessage()))
-                .average()
-                .orElse(0);
+        // 采样含耗时字段的接口日志计算平均响应时间，解析不到耗时的样本不计入
+        double avgTime = sampleAvgRt(logstore, from, now);
         vo.setAvgResponseTime(Math.round(avgTime * 10.0) / 10.0);
 
         // 趋势计算（与上一周期对比）
@@ -700,15 +693,11 @@ public class GatewayService {
         
         long externalPrevTotal = Math.round(prevTotal / ESTIMATED_CHAIN_LENGTH);
         
-        List<LogEntry> prevSampleLogs = queryLogs(logstore, "*", prevFrom, from, 0, 100);
-        double prevAvg = prevSampleLogs.stream()
-                .mapToLong(l -> extractResponseTime(l.getMessage()))
-                .average()
-                .orElse(0);
-        
+        double prevAvg = sampleAvgRt(logstore, prevFrom, from);
+
         double prevQps = seconds > 0 ? (double) externalPrevTotal / seconds : 0;
         vo.setTotalTrend(externalPrevTotal > 0 ? (externalTotalRequests - externalPrevTotal) * 100.0 / externalPrevTotal : 0);
-        vo.setAvgTrend(prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
+        vo.setAvgTrend(avgTime > 0 && prevAvg > 0 ? (avgTime - prevAvg) * 100.0 / prevAvg : 0);
         vo.setErrorTrend(prevErrors > 0 ? (errorCount - prevErrors) * 100.0 / prevErrors : 0);
         vo.setQpsTrend(prevQps > 0 ? (vo.getQps() - prevQps) * 100.0 / prevQps : 0);
         
@@ -1572,8 +1561,9 @@ public class GatewayService {
             // 计算P60 RT变化率作为劣化幅度
             double rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
 
-            // 过滤：只显示真正劣化的API（RT增加）
-            if (rtChangeRate <= 0) { filterNoDegradation++; continue; }
+            // 过滤：只显示达到上榜门槛的劣化（默认 20%，低于门槛视为正常抖动，避免列表刷屏）
+            double minChangeRate = alertThresholdService.getDouble("degradation_min_change_rate", 20.0);
+            if (rtChangeRate < minChangeRate) { filterNoDegradation++; continue; }
 
             ApiDegradationVO vo = new ApiDegradationVO();
             vo.setApiPath(apiPath);
@@ -1881,8 +1871,9 @@ public class GatewayService {
             // 计算流量涨幅
             double surgeRate = (currentCount - previousCount) * 100.0 / previousCount;
 
-            // 只看涨的（surgeRate > 0）
-            if (surgeRate <= 0) continue;
+            // 只看涨幅达到上榜门槛的（默认 50%，低于门槛视为正常波动）
+            double minSurgeRate = alertThresholdService.getDouble("traffic_surge_min_rate", 50.0);
+            if (surgeRate < minSurgeRate) continue;
 
             // RT 变化率（用于辅助展示）
             double rtChangeRate = 0;
@@ -2254,12 +2245,13 @@ public class GatewayService {
                 processedTraces++;
             }
             
-            // 计算每个 API 的平均 RT
+            // 计算每个 API 的 P60 RT（与 SLS 兜底路径同口径：排序取 60 分位）
             for (Map.Entry<String, List<Long>> entry : apiRtValues.entrySet()) {
                 List<Long> rtValues = entry.getValue();
                 if (!rtValues.isEmpty()) {
-                    double avgRt = rtValues.stream().mapToLong(Long::longValue).average().orElse(0);
-                    result.get(entry.getKey())[1] = Math.round(avgRt);
+                    Collections.sort(rtValues);
+                    int p60Index = (int) Math.ceil(0.6 * rtValues.size()) - 1;
+                    result.get(entry.getKey())[1] = rtValues.get(p60Index);
                 }
             }
             
@@ -2268,7 +2260,7 @@ public class GatewayService {
                 int count = 0;
                 for (Map.Entry<String, long[]> entry : result.entrySet()) {
                     if (count++ >= 5) break;
-                    log.info("ARMS 接口: {}, 请求数: {}, 平均RT: {}ms", 
+                    log.info("ARMS 接口: {}, 请求数: {}, P60 RT: {}ms",
                         entry.getKey(), entry.getValue()[0], entry.getValue()[1]);
                 }
             }
@@ -2547,11 +2539,13 @@ public class GatewayService {
         }
     }
 
-    private long extractResponseTime(String message) {
-        if (message == null) return 100;
-        if (message.contains("500")) return 500 + (message.hashCode() % 2000);
-        if (message.contains("400")) return 50 + (Math.abs(message.hashCode()) % 100);
-        if (message.contains("201")) return 150 + (Math.abs(message.hashCode()) % 300);
-        return 20 + (Math.abs(message.hashCode()) % 200);
+    private double sampleAvgRt(String logstore, long from, long to) {
+        String rtQuery = "ControllerLog and (cost or useTime or duration or 耗时 or elapsed)";
+        List<LogEntry> sampleLogs = queryLogs(logstore, rtQuery, from, to, 0, 100);
+        return sampleLogs.stream()
+                .mapToDouble(this::extractDurationFromEntry)
+                .filter(rt -> rt > 0)
+                .average()
+                .orElse(0);
     }
 }

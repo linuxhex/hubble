@@ -522,7 +522,7 @@ public class BizAnalysisService {
             item.put("month", entry.getKey());
             List<Double> daus = entry.getValue();
             double avgDau = daus.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-            item.put("mau", Math.round(avgDau));
+            item.put("avgDau", Math.round(avgDau));
             item.put("days", daus.size());
             result.add(item);
         }

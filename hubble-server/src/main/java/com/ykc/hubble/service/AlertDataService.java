@@ -435,7 +435,8 @@ public class AlertDataService {
 
     /**
      * 将时间线末尾延伸到当前分钟：若缓存中最后一条数据早于当前时间，
-     * 用最后一条的数据填充到当前分钟，保证展示时间与真实时间一致。
+     * 用空数据（0 错误/NORMAL）填充，保证展示时间与真实时间一致。
+     * 不复用最后一条的数据，避免故障恢复后大盘持续显示旧的红盘状态。
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> extendTimelineToCurrentTime(Map<String, Object> data) {
@@ -453,20 +454,15 @@ public class AlertDataService {
             return data;
         }
 
-        Map<String, Object> lastPoint = timeline.get(timeline.size() - 1);
-        List<Map<String, Object>> lastServices = (List<Map<String, Object>>) lastPoint.get("services");
-        String lastStatus = (String) lastPoint.get("status");
-        Object lastTotalErrors = lastPoint.get("totalErrors");
-
         java.time.LocalDateTime lastMinuteDt = java.time.LocalDateTime.parse(lastMinuteStr, minuteFmt);
 
         List<Map<String, Object>> extendedTimeline = new ArrayList<>(timeline);
         for (java.time.LocalDateTime m = lastMinuteDt.plusMinutes(1); !m.isAfter(currentMinute); m = m.plusMinutes(1)) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("minute", m.format(minuteFmt));
-            item.put("status", lastStatus);
-            item.put("totalErrors", lastTotalErrors);
-            item.put("services", lastServices);
+            item.put("status", "NORMAL");
+            item.put("totalErrors", 0L);
+            item.put("services", new ArrayList<>());
             extendedTimeline.add(item);
         }
 
@@ -518,7 +514,8 @@ public class AlertDataService {
             try {
                 String query = "__tag__:_container_name_: " + service + " AND level: ERROR"
                         + " | SELECT date_format(__time__, '%Y-%m-%d %H:%i') as minute, count(*) as cnt GROUP BY minute";
-                var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1000);
+                // 分页拉取：24h 窗口有 1440 分钟，单页 1000 会静默截断丢数据
+                var rows = slsQueryClient.queryAnalyticsPaged(logstore, query, from, now, 1000, 2880);
 
                 long totalErrors = 0;
                 int minuteCount = 0;
@@ -556,16 +553,10 @@ public class AlertDataService {
         java.time.LocalDateTime endMinute = java.time.LocalDateTime.ofInstant(
                 java.time.Instant.ofEpochSecond(now), java.time.ZoneId.systemDefault()).withSecond(0).withNano(0);
 
-        // 找到 SLS 实际返回的最后有数据分钟
-        String lastDataMinute = byMinute.isEmpty() ? null : byMinute.lastKey();
-
         for (java.time.LocalDateTime minute = startMinute; !minute.isAfter(endMinute); minute = minute.plusMinutes(1)) {
             String minuteKey = minute.format(minuteFmt);
-            // SLS 数据缺失的分钟，用最后有数据的分钟填充
-            Map<String, Long> minuteData = byMinute.getOrDefault(minuteKey,
-                    lastDataMinute != null && minuteKey.compareTo(lastDataMinute) > 0
-                            ? byMinute.get(lastDataMinute)
-                            : Collections.emptyMap());
+            // 无数据的分钟按 0 错误展示，不复用历史分钟的旧值，避免故障恢复后大盘持续红
+            Map<String, Long> minuteData = byMinute.getOrDefault(minuteKey, Collections.emptyMap());
             if (minuteData == null) minuteData = Collections.emptyMap();
 
             long totalErrors = 0;

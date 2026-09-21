@@ -12,4 +12,6 @@ public class GatewayOverviewVO {
     private double avgTrend;
     private double errorTrend;
     private double qpsTrend;
+    /** 数据来源：ARMS / SLS（SLS 表示 ARMS 不可用时的降级口径） */
+    private String dataSource;
 }

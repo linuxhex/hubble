@@ -11,11 +11,18 @@
 
     <!-- ===== 网关概览 ===== -->
     <div class="gateway-section">
-      <div class="section-title">网关概览</div>
+      <div class="section-title">
+        网关概览
+        <el-tag v-if="overview.dataSource" size="small" :type="overview.dataSource === 'ARMS' ? 'success' : 'warning'" class="source-tag">数据源: {{ overview.dataSource }}</el-tag>
+      </div>
 
       <div class="overview-cards">
         <div class="overview-card">
-          <div class="card-title">总请求量</div>
+          <div class="card-title">总请求量
+            <el-tooltip v-if="overview.dataSource === 'SLS'" content="SLS 降级口径：按链路长度系数折算的外部请求估算值，仅供趋势参考" placement="top">
+              <span class="estimate-tag">估算</span>
+            </el-tooltip>
+          </div>
           <div class="card-value">{{ formatNumber(overview.totalRequests) }}</div>
           <div class="card-trend" :class="trendClass(overview.totalTrend, 'positive')">
             <span>{{ trendArrow(overview.totalTrend) }} {{ formatPercent(Math.abs(overview.totalTrend)) }}</span>
@@ -39,7 +46,11 @@
           </div>
         </div>
         <div class="overview-card">
-          <div class="card-title">QPS</div>
+          <div class="card-title">QPS
+            <el-tooltip v-if="overview.dataSource === 'SLS'" content="SLS 降级口径：按链路长度系数折算的估算值" placement="top">
+              <span class="estimate-tag">估算</span>
+            </el-tooltip>
+          </div>
           <div class="card-value">{{ formatNumber(overview.qps) }}</div>
           <div class="card-trend" :class="trendClass(overview.qpsTrend, 'positive')">
             <span>{{ trendArrow(overview.qpsTrend) }} {{ formatPercent(Math.abs(overview.qpsTrend)) }}</span>
@@ -84,7 +95,7 @@ import * as echarts from 'echarts'
 import { getGatewayOverview, getGatewayTrend, getGatewayHotApis } from '@/api/gateway.js'
 
 // ===== 网关数据 =====
-const overview = ref({ totalRequests: 0, avgResponseTime: 0, errorRate: 0, qps: 0, totalTrend: 0, avgTrend: 0, errorTrend: 0, qpsTrend: 0 })
+const overview = ref({ totalRequests: 0, avgResponseTime: 0, errorRate: 0, qps: 0, totalTrend: 0, avgTrend: 0, errorTrend: 0, qpsTrend: 0, dataSource: '' })
 const hotApis = ref([])
 const chartRef = ref(null)
 const timeRange = ref('24h')
@@ -182,6 +193,8 @@ onBeforeUnmount(() => { stopPolling(); window.removeEventListener('resize', hand
 .refresh-tip { font-size: 12px; color: #999; }
 
 .section-title { font-size: 15px; font-weight: 600; color: #333; margin-bottom: 12px; }
+.source-tag { margin-left: 8px; font-weight: 400; }
+.estimate-tag { display: inline-block; font-size: 10px; line-height: 1.4; color: #E6A23C; border: 1px solid #E6A23C; border-radius: 3px; padding: 0 4px; margin-left: 4px; font-weight: 400; cursor: help; }
 .sub-title { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 12px; }
 
 /* ===== 网关概览 ===== */

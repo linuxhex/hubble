@@ -131,3 +131,17 @@ CREATE TABLE IF NOT EXISTS service_load_daily (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_service_load_daily ON service_load_daily(app_name, stat_date);
 CREATE INDEX IF NOT EXISTS idx_service_load_daily_date ON service_load_daily(stat_date);
+
+-- 监控项告警评估状态（重启恢复：红盘防抖计数/告警冷却/恢复计数）
+CREATE TABLE IF NOT EXISTS alert_monitor_state (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  config_id BIGINT NOT NULL COMMENT '监控项ID',
+  consecutive_red_count INT DEFAULT 0 COMMENT '红盘连续命中次数',
+  consecutive_normal_count INT DEFAULT 0 COMMENT '恢复检测连续正常次数',
+  last_alert_time BIGINT COMMENT '上次钉钉告警时间(epoch ms)',
+  last_status VARCHAR(20) COMMENT '上次评估状态',
+  last_collect_at BIGINT COMMENT '上次采集时间(epoch 秒)',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_alert_monitor_state ON alert_monitor_state(config_id);
