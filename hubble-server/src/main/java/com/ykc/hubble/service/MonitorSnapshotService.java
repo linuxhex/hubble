@@ -4,6 +4,8 @@ import com.ykc.hubble.client.DingTalkClient;
 import com.ykc.hubble.client.SlsQueryClient;
 import com.ykc.hubble.config.MonitorProperties;
 import com.ykc.hubble.entity.AlertConfig;
+import com.ykc.hubble.entity.AlertMonitorState;
+import com.ykc.hubble.mapper.AlertMonitorStateMapper;
 import com.ykc.hubble.vo.SlsKeywordVO;
 import com.ykc.hubble.vo.SnapshotPoint;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +46,7 @@ public class MonitorSnapshotService {
     private final AlertChartGenerator alertChartGenerator;
     private final AlertThresholdService alertThresholdService;
     private final DingtalkRobotService dingtalkRobotService;
+    private final AlertMonitorStateMapper alertMonitorStateMapper;
 
     private final Map<Long, Long> lastCollectAt = new ConcurrentHashMap<>();
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
@@ -57,7 +60,29 @@ public class MonitorSnapshotService {
 
     @jakarta.annotation.PostConstruct
     public void init() {
-        log.info("MonitorSnapshotService 初始化完成");
+        // 启动时从 H2 恢复告警评估状态：否则事故期间重启会丢失防抖/冷却/恢复计数，
+        // 导致不发恢复通知、冷却失效重新告警
+        int restored = 0;
+        try {
+            for (AlertMonitorState s : alertMonitorStateMapper.selectList(null)) {
+                Long cid = s.getConfigId();
+                if (cid == null) continue;
+                if (s.getConsecutiveRedCount() != null) consecutiveRedCount.put(cid, s.getConsecutiveRedCount());
+                if (s.getConsecutiveNormalCount() != null) consecutiveNormalCount.put(cid, s.getConsecutiveNormalCount());
+                if (s.getLastAlertTime() != null) lastAlertTime.put(cid, s.getLastAlertTime());
+                if (s.getLastStatus() != null) {
+                    try {
+                        lastStatus.put(cid, HealthEvaluator.Status.valueOf(s.getLastStatus()));
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+                if (s.getLastCollectAt() != null) lastCollectAt.put(cid, s.getLastCollectAt());
+                restored++;
+            }
+        } catch (Exception e) {
+            log.warn("恢复告警评估状态失败: {}", e.getMessage());
+        }
+        log.info("MonitorSnapshotService 初始化完成，恢复 {} 个监控项的告警状态", restored);
     }
 
     @Scheduled(fixedDelayString = "${monitor.scan-interval-seconds:5}000", initialDelayString = "30000")
@@ -239,8 +264,38 @@ public class MonitorSnapshotService {
                     consecutiveNormalCount.put(cfg.getId(), 0);
                 }
             }
+
+            persistState(cfg.getId());
         } catch (Exception e) {
             log.error("监控项[{}]采集失败，保留旧快照: {}", cfg.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 将内存中的告警评估状态写入 H2（write-through），重启后由 init() 恢复
+     */
+    private void persistState(Long configId) {
+        try {
+            AlertMonitorState state = alertMonitorStateMapper.selectByConfigId(configId);
+            boolean exists = state != null;
+            if (state == null) {
+                state = new AlertMonitorState();
+                state.setConfigId(configId);
+            }
+            state.setConsecutiveRedCount(consecutiveRedCount.getOrDefault(configId, 0));
+            state.setConsecutiveNormalCount(consecutiveNormalCount.getOrDefault(configId, 0));
+            state.setLastAlertTime(lastAlertTime.get(configId));
+            HealthEvaluator.Status st = lastStatus.get(configId);
+            state.setLastStatus(st == null ? null : st.name());
+            state.setLastCollectAt(lastCollectAt.get(configId));
+            state.setUpdatedAt(java.time.LocalDateTime.now());
+            if (exists) {
+                alertMonitorStateMapper.updateById(state);
+            } else {
+                alertMonitorStateMapper.insert(state);
+            }
+        } catch (Exception e) {
+            log.warn("监控项[{}]告警状态落库失败: {}", configId, e.getMessage());
         }
     }
 

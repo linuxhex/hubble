@@ -283,6 +283,20 @@ public class SlsQueryClient {
             long fromTime,
             long toTime,
             int limit) {
+        return queryAnalytics(project, logstore, query, fromTime, toTime, 0, limit);
+    }
+
+    /**
+     * SQL 分析查询（带 offset 分页）
+     */
+    public List<Map<String, String>> queryAnalytics(
+            String project,
+            String logstore,
+            String query,
+            long fromTime,
+            long toTime,
+            int offset,
+            int limit) {
 
         List<Map<String, String>> results = new ArrayList<>();
         try {
@@ -294,7 +308,7 @@ public class SlsQueryClient {
                     (int) toTime,
                     "",
                     query,
-                    0,
+                    offset,
                     limit,
                     false
             );
@@ -314,6 +328,33 @@ public class SlsQueryClient {
             throw new RuntimeException("SLS分析查询失败: " + e.getMessage(), e);
         }
         return results;
+    }
+
+    /**
+     * 分页执行 SQL 分析查询，避免 GROUP BY 结果超过单页 limit 被静默截断
+     *
+     * @param pageSize 每页行数
+     * @param maxRows 最大拉取行数上限
+     */
+    public List<Map<String, String>> queryAnalyticsPaged(
+            String logstore,
+            String query,
+            long fromTime,
+            long toTime,
+            int pageSize,
+            int maxRows) {
+        List<Map<String, String>> all = new ArrayList<>();
+        int offset = 0;
+        while (offset < maxRows) {
+            int line = Math.min(pageSize, maxRows - offset);
+            List<Map<String, String>> page = queryAnalytics(slsConfig.getProject(), logstore, query, fromTime, toTime, offset, line);
+            all.addAll(page);
+            if (page.size() < line) {
+                break;
+            }
+            offset += line;
+        }
+        return all;
     }
 
     /**

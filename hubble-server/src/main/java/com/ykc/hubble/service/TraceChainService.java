@@ -61,9 +61,9 @@ public class TraceChainService {
             }
         }
         
-        // 缓存未命中，查询并缓存
+        // 缓存未命中，查询并缓存（10 分钟 TTL，链路数据时效性强，不能永久缓存）
         List<Map<String, Object>> result = loadTracesByApi(apiPath, timeRange, limit);
-        pageDataCacheService.save(pageKey, dataKey, result);
+        pageDataCacheService.save(pageKey, dataKey, result, 10);
         return result;
     }
     
@@ -220,10 +220,10 @@ public class TraceChainService {
             return dbCached;
         }
         
-        // 缓存未命中，查询并缓存
+        // 缓存未命中，查询并缓存（10 分钟 TTL，避免长期返回旧链路）
         Map<String, Object> result = loadTraceChain(traceId, timeRange, timestamp);
         if (result != null && !result.isEmpty()) {
-            pageDataCacheService.save(pageKey, dataKey, result);
+            pageDataCacheService.save(pageKey, dataKey, result, 10);
         }
         return result;
     }

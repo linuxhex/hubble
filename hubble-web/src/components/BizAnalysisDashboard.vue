@@ -104,7 +104,7 @@
         <div ref="appActiveChartRef" class="chart-container"></div>
       </div>
       <div class="chart-section" v-if="mauData.length > 0">
-        <div class="section-title">MAU 月活趋势（近 6 月）</div>
+        <div class="section-title">月均 DAU 趋势（近 6 月）</div>
         <div ref="mauChartRef" class="chart-container"></div>
       </div>
     </div>
@@ -371,16 +371,16 @@ const renderMauChart = () => {
   if (mauChart) mauChart.dispose()
   mauChart = echarts.init(mauChartRef.value)
   const months = mauData.value.map(d => d.month)
-  const mau = mauData.value.map(d => Number(d.mau || 0))
+  const mau = mauData.value.map(d => Number(d.avgDau || 0))
   mauChart.setOption({
     tooltip: { trigger: 'axis', formatter: (params) => {
       const p = params[0]
-      return `${p.name}<br/>MAU: ${Number(p.value).toLocaleString()}`
+      return `${p.name}<br/>月均 DAU: ${Number(p.value).toLocaleString()}`
     }},
     xAxis: { type: 'category', data: months },
-    yAxis: { type: 'value', name: '月活用户数', axisLabel: { formatter: (v) => (v / 10000).toFixed(0) + '万' } },
+    yAxis: { type: 'value', name: '月均日活跃用户', axisLabel: { formatter: (v) => (v / 10000).toFixed(0) + '万' } },
     series: [
-      { name: 'MAU', type: 'bar', data: mau, itemStyle: { color: '#67C23A', borderRadius: [4, 4, 0, 0] }, barWidth: '40%' }
+      { name: '月均 DAU', type: 'bar', data: mau, itemStyle: { color: '#67C23A', borderRadius: [4, 4, 0, 0] }, barWidth: '40%' }
     ]
   })
 }

@@ -73,17 +73,17 @@
 
       <div class="sub-section">
         <el-tabs v-model="redisSubTab" type="card" size="small">
-          <el-tab-pane label="Big Keys Top10" name="bigKeys">
+          <el-tab-pane label="实例内存 Top10" name="bigKeys">
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+              <template #title>数据来自 CloudMonitor 实例内存指标（UsedMemory）</template>
+              非 Key 级 BigKeys 分析，展示的是各 Redis 实例的内存占用排名
+            </el-alert>
             <el-table :data="redisBigKeysData" stripe border size="small" style="width: 100%">
               <el-table-column label="#" width="50" prop="rank" align="center" />
-              <el-table-column label="Key" min-width="250" show-overflow-tooltip prop="key" />
-              <el-table-column label="类型" width="80" prop="type" />
-              <el-table-column label="说明" width="150" show-overflow-tooltip prop="description" />
-              <el-table-column label="内存" width="110" align="right">
+              <el-table-column label="实例名" min-width="250" show-overflow-tooltip prop="key" />
+              <el-table-column label="说明" width="180" show-overflow-tooltip prop="description" />
+              <el-table-column label="内存占用" width="120" align="right">
                 <template #default="{ row }">{{ formatBytes(row.memoryBytes) }}</template>
-              </el-table-column>
-              <el-table-column label="TTL" width="90" align="right">
-                <template #default="{ row }">{{ row.ttl > 0 ? row.ttl + 's' : '-' }}</template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
