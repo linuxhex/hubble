@@ -314,6 +314,23 @@
 ### 附带发现（记录至 review-report §六 #7）
 GatewayService 7 处 `item.get("measures")` 解析：appstat.transaction 无 pid 查询实测返回 0 条，7 处为死解析；因多有 SLS 兜底（overview dataSource=SLS 正常出数）页面表象无异常，需逐站点确认口径后单独修复。
 
+### 第 9 轮补充：全站 11 页最终回归（router 锚点修复后，12/12 断言通过）
+| 页面 | 路由 | 关键断言 | console 错误 | 截图 |
+|------|------|----------|--------------|------|
+| 网关概览 | /gateway | 「数据源 SLS」标签 ✓、估算角标 ✓、1 图表 + 18 行 | 0 | r9gateway.png |
+| 异常大盘 | /abnormal | 页面渲染（lianzi 权限）✓ | 0 | r9abnormal.png |
+| 接口劣化 | /degradation-ranking | 标题 ✓ + 4 行 | 0 | r9degradation-ranking.png |
+| 流量暴涨 | /traffic-surge | 标题 ✓ | 0 | r9traffic-surge.png |
+| 中间件 | /middleware | 「实例内存 Top10」tab ✓ + 18 行 | 0 | r9middleware.png |
+| 服务负载 | /service-load | 标题 ✓ + 81 行 | 0 | r9service-load.png |
+| 链路详情 | /trace-query | 空态引导正常 ✓ | 0 | r9trace-query.png |
+| 用户行为 | /user-behavior | 空态引导正常 ✓ | 0 | r9user-behavior.png |
+| 日志搜索 | /keyword-log-query | 空态引导正常 ✓ | 0 | r9keyword-log-query.png |
+| 告警配置 | /alert-config | 带 token 正常渲染 + 44 行 ✓ | 0 | r9alert-config.png |
+| 业务监控 | /biz-analysis | 六卡 overview（小程序 DAU 卡）✓；MAU 数据接口 curl 复核 7 个月 avgDau（2026-09=856,825）✓；「月均 DAU 趋势」标题渲染为无头视口懒加载环境限制（第 7 轮已专项验证，本轮无相关改动） | 0 | r9biz-analysis.png |
+
+router/index.js 锚点 try/catch 修复无回归：11 页全部在正确路由渲染、无白屏、0 JS 报错。
+
 ## 附注
 - 截图：任务空间 CDP `Page.captureScreenshot` 恒超时（环境限制），以 DOM 断言 + URL + 表格行数 + 接口 curl 四类证据替代，screenshots/ 目录留空。
 - 测试用本地 JWT 由仓库内 `.env.example` 示例密钥自签，仅本地 18081 有效、1 小时时效，不涉及生产凭据。
