@@ -92,8 +92,12 @@ public class GatewayService {
     /**
      * 估算的平均服务链路长度：每个外部请求在微服务链路中经过的服务数。
      * 用于将全量 ControllerLog 数折算为外部请求数。
+     * 可通过告警阈值配置 gateway_chain_length 调整，默认 20。
      */
-    private static final double ESTIMATED_CHAIN_LENGTH = 20.0;
+    private double estimatedChainLength() {
+        double v = alertThresholdService.getDouble("gateway_chain_length", 20.0);
+        return v > 0 ? v : 20.0;
+    }
     
     private static class OverviewCacheEntry {
         final GatewayOverviewVO data;
@@ -640,7 +644,7 @@ public class GatewayService {
         }
 
         // 全量 ControllerLog 包含微服务链路中每个服务的日志，需除以链路长度折算外部请求数
-        long externalTotalRequests = Math.round(totalRequests / ESTIMATED_CHAIN_LENGTH);
+        long externalTotalRequests = Math.round(totalRequests / estimatedChainLength());
 
         // 查询最近1分钟的请求数来计算当前QPS
         double currentQps = 0;
@@ -649,7 +653,7 @@ public class GatewayService {
             List<Map<String, String>> qpsResult = slsQueryClient.queryAnalytics(logstore, qpsQuery, now - 60, now, 1);
             if (!qpsResult.isEmpty()) {
                 long lastMinuteCount = Long.parseLong(qpsResult.get(0).getOrDefault("total", "0"));
-                currentQps = lastMinuteCount / 60.0 / ESTIMATED_CHAIN_LENGTH;
+                currentQps = lastMinuteCount / 60.0 / estimatedChainLength();
             }
         } catch (Exception e) {
             log.warn("SLS 查询当前QPS失败: {}", e.getMessage());
@@ -691,7 +695,7 @@ public class GatewayService {
             prevErrors = slsQueryClient.countLogstore(logstore, "(ControllerLog and apiUrl) and ERROR", prevFrom, from);
         }
         
-        long externalPrevTotal = Math.round(prevTotal / ESTIMATED_CHAIN_LENGTH);
+        long externalPrevTotal = Math.round(prevTotal / estimatedChainLength());
         
         double prevAvg = sampleAvgRt(logstore, prevFrom, from);
 

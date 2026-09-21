@@ -1,5 +1,6 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import router from '@/router'
 
 // 创建axios实例
 const service = axios.create({
@@ -9,6 +10,9 @@ const service = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
+// 防止并发401重复弹窗
+let loginPromptShowing = false
 
 // 请求拦截器
 service.interceptors.request.use(
@@ -58,12 +62,26 @@ service.interceptors.response.use(
       const message = error.response.data?.message || error.message
       
       switch (status) {
-        case 401:
+        case 401: {
           localStorage.removeItem('auth_token')
           localStorage.removeItem('auth_user')
-          ElMessage.error('登录已过期，请重新登录')
-          window.location.href = '/login'
+          if (!loginPromptShowing) {
+            loginPromptShowing = true
+            ElMessageBox.confirm('登录状态已失效，是否重新登录？当前页面将保留。', '登录提示', {
+              confirmButtonText: '重新登录',
+              cancelButtonText: '留在本页',
+              type: 'warning'
+            }).then(() => {
+              const current = router.currentRoute.value
+              router.push({ path: '/login', query: current.path !== '/login' ? { redirect: current.fullPath } : {} })
+            }).catch(() => {
+              ElMessage.info('已取消登录，可继续浏览当前页面')
+            }).finally(() => {
+              loginPromptShowing = false
+            })
+          }
           break
+        }
         case 403:
           ElMessage.error('没有权限访问该资源')
           break

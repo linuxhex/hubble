@@ -98,10 +98,10 @@ hubble/
 | 异常大盘 | `/abnormal` | 按分钟展示各服务异常事件，支持多时间粒度 |
 | 接口劣化 | `/degradation-ranking` | P60 耗时劣化检测，支持对比模式 + 链路下钻 |
 | 流量暴涨 | `/traffic-surge` | 接口流量异常检测 + 下钻分析 |
-| 中间件 | `/middleware` | Redis Big Keys + 慢查询 Top10 |
+| 中间件 | `/middleware` | Redis 实例内存 Top10（CloudMonitor 口径）+ 慢查询 Top10 |
 | 服务负载 | `/service-load` | CPU/内存使用率 + 扩容阈值预警 |
 | 链路详情 | `/trace-query` | 按业务/TraceID 查询调用链 |
-| 用户行为 | `/user-behavior` | 手机号查询行为轨迹 + 链路下钻 + 日志详情 |
+| 用户行为 | `/user-behavior` | 手机号查询行为轨迹 + 链路下钻 + 日志详情（手机号展示脱敏） |
 | 日志搜索 | `/keyword-log-query` | 关键字搜索 SLS 日志 |
 | 告警配置 | `/alert-config` | 日志监控规则 + 机器人配置 |
 | 业务监控 | `/biz-analysis` | 订单/电量/枪/DAU 全维度分析 |

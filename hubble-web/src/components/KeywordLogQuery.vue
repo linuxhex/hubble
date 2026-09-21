@@ -98,6 +98,18 @@
       </div>
     </div>
 
+    <!-- 初始引导 -->
+    <div v-if="!querying && !hasQueried && !hasResults" class="empty-area">
+      <el-empty description="输入关键字开始日志检索">
+        <div class="empty-guide">
+          <p>使用技巧：</p>
+          <p>1. 关键字支持接口路径、异常类名、订单号、TraceId 等任意日志片段</p>
+          <p>2. Logstore 留空默认检索全部应用，也可指定单个日志库</p>
+          <p>3. 时间范围默认今天，可用快捷区间一键切换</p>
+        </div>
+      </el-empty>
+    </div>
+
     <!-- 空结果提示 -->
     <div v-if="!querying && hasQueried && !hasResults" class="empty-area">
       <el-empty description="未查询到符合条件的日志" />
@@ -404,6 +416,18 @@ onMounted(() => {
   background: white;
   border-radius: 4px;
   min-height: 300px;
+}
+
+.empty-guide {
+  text-align: left;
+  color: #606266;
+  font-size: 13px;
+  line-height: 2;
+}
+
+.empty-guide p:first-child {
+  font-weight: 600;
+  color: #303133;
 }
 
 :deep(.el-form-item__label) {

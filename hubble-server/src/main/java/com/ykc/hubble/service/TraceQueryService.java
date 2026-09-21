@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 业务链路查询服务
@@ -34,6 +36,35 @@ public class TraceQueryService {
     private final TraceMgmtService traceService;
     private final SlsQueryClient slsService;
     private final UserBehaviorTraceParser traceParser;
+
+    /** 中国大陆手机号（前后不再紧跟数字），用于展示脱敏 */
+    private static final Pattern PHONE_PATTERN = Pattern.compile("(?<![0-9])1[3-9][0-9]{9}(?![0-9])");
+
+    /**
+     * 用户行为展示脱敏：接口返回前将明文手机号替换为 138****1234 形式（合规要求）。
+     * 检索仍按原文在 SLS 侧执行，脱敏只影响展示内容。
+     */
+    private void maskPhone(UserBehaviorTraceItemVO item) {
+        item.setUserAccount(maskPhoneIn(item.getUserAccount()));
+        item.setUserId(maskPhoneIn(item.getUserId()));
+        item.setUrl(maskPhoneIn(item.getUrl()));
+        item.setResponseData(maskPhoneIn(item.getResponseData()));
+        item.setLogMessage(maskPhoneIn(item.getLogMessage()));
+    }
+
+    private String maskPhoneIn(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        Matcher m = PHONE_PATTERN.matcher(text);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            String phone = m.group();
+            m.appendReplacement(sb, Matcher.quoteReplacement(phone.substring(0, 3) + "****" + phone.substring(7)));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
 
     /**
      * 执行业务链路查询（只查询顶级节点）
@@ -216,6 +247,7 @@ public class TraceQueryService {
                             logEntry.getContainerIp()
                     );
                     if (item != null) {
+                        maskPhone(item);
                         items.add(item);
                         parsedCount++;
                     } else {

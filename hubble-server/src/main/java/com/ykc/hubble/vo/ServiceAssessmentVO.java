@@ -20,6 +20,10 @@ public class ServiceAssessmentVO {
     private int completeness;
     /** 最新一天是否半天数据 1=是 */
     private Integer partialToday;
+    /** 最新样本日期（含半天样本），null=无数据 */
+    private String latestStatDate;
+    /** 最新样本距今天数，0=当天；≥2 说明采集滞后 */
+    private Integer latestDataAgeDays;
 
     private BigDecimal cpuPeak;
     private BigDecimal memPeak;
