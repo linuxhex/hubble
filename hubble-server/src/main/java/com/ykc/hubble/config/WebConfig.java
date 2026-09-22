@@ -24,6 +24,16 @@ import java.io.IOException;
 public class WebConfig implements WebMvcConfigurer {
 
     private final AuthFilter authFilter;
+    private final BizAccessInterceptor bizAccessInterceptor;
+
+    /**
+     * 业务监控数据访问拦截（接口层身份校验，兜底前端 UI 限制）
+     */
+    @Override
+    public void addInterceptors(org.springframework.web.servlet.config.annotation.InterceptorRegistry registry) {
+        registry.addInterceptor(bizAccessInterceptor)
+                .addPathPatterns("/api/biz-analysis/**");
+    }
 
     /**
      * 注册身份验证过滤器

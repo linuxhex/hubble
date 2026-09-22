@@ -91,6 +91,13 @@ ON DUPLICATE KEY UPDATE config_value = config_value;
 -- 历史默认值自愈迁移：仅当配置仍是旧默认值时升级为新默认值，不覆盖页面自定义值
 UPDATE alert_threshold_config SET config_value = '1000' WHERE config_key = 'degradation_min_rt' AND config_value = '300';
 
+-- 依赖服务RT巡检口径对齐ARMS：涨幅500%→100%（识别低RT高流量变慢），流量门槛10次/5分钟→3000次/最近1分钟
+UPDATE alert_threshold_config SET config_value = '100' WHERE config_key = 'dependency_rt_surge_ratio' AND config_value = '500';
+UPDATE alert_threshold_config SET config_value = '3000' WHERE config_key = 'dependency_rt_min_count' AND config_value = '10';
+UPDATE alert_threshold_config SET description = '依赖服务RT环比涨幅阈值(%)，最近5分钟均值对比前5分钟均值（对齐ARMS口径）' WHERE config_key = 'dependency_rt_surge_ratio' AND description = '依赖服务 RT 环比涨幅阈值(%)，达到即告警';
+UPDATE alert_threshold_config SET description = '依赖服务高流量门槛(次/最近1分钟)，达到后免RT绝对下限，涨幅达标即告警' WHERE config_key = 'dependency_rt_min_count' AND description = '依赖服务调用次数下限(次/窗口)，低于不告警';
+UPDATE alert_threshold_config SET description = '依赖服务RT绝对下限(ms)，仅对未达高流量门槛的组合生效，防微秒级抖动误报' WHERE config_key = 'dependency_rt_floor_ms' AND description = '依赖服务 RT 绝对下限(ms)，低于不告警';
+
 -- 预置钉钉机器人演示数据
 INSERT INTO dingtalk_robot (name, webhook, secret, remark, enabled, created_at, updated_at)
 SELECT t.a, t.b, t.c, t.d, t.e, NOW(), NOW() FROM (
@@ -100,4 +107,46 @@ SELECT t.a, t.b, t.c, t.d, t.e, NOW(), NOW() FROM (
 ) t
 WHERE NOT EXISTS (
   SELECT 1 FROM dingtalk_robot d WHERE d.name = t.a
+);
+
+-- 预置业务链路示例数据（充电业务场景，变量占位符 {var} 由链路查询页填充）
+INSERT INTO business_trace (name, description, category)
+SELECT t.a, t.b, t.c FROM (
+  SELECT '充电订单链路' AS a, '用户扫码启动充电到订单结算完成的端到端链路（示例数据，可在链路配置中编辑）' AS b, '充电业务' AS c UNION ALL
+  SELECT '用户登录链路', '用户登录鉴权到结果通知的调用链路（示例数据，可在链路配置中编辑）', '用户业务'
+) t
+WHERE NOT EXISTS (
+  SELECT 1 FROM business_trace d WHERE d.name = t.a
+);
+
+-- 顶级节点（parent_id 为空，链路查询只查顶级节点，子节点用于展开下钻）
+INSERT INTO trace_node (trace_id, parent_id, name, description, sls_logstore, query_template, node_order)
+SELECT bt.id, NULL, t.a, t.b, t.c, t.d, t.e
+FROM (
+  SELECT '充电订单链路' AS trace_name, '扫码启动充电' AS a, 'charge-server 收到扫码启动充电请求，输出订单号与桩号' AS b, 'all' AS c, 'message: "{order_no}" and __tag__:_container_name_: charge-server' AS d, 1 AS e UNION ALL
+  SELECT '充电订单链路', '订单创建落库', 'order-service 创建充电订单并落库', 'all', 'message: "{order_no}" and __tag__:_container_name_: order-service', 2 UNION ALL
+  SELECT '充电订单链路', '充电指令下发', 'device-post 向充电桩下发开始充电指令', 'device-post', 'message: "{order_no}" and "startCharging"', 3 UNION ALL
+  SELECT '充电订单链路', '桩端响应确认', '充电桩确认开始充电的回报日志', 'all', 'message: "{order_no}" and "chargeConfirm"', 4 UNION ALL
+  SELECT '充电订单链路', '订单结算完成', '充电完成后订单结算与计费', 'all', 'message: "{order_no}" and "settle"', 5 UNION ALL
+  SELECT '用户登录链路', '登录请求受理', 'gateway-api 收到用户登录请求', 'all', 'message: "{user_id}" and __tag__:_container_name_: gateway-api', 1 UNION ALL
+  SELECT '用户登录链路', '用户鉴权校验', 'user-service 校验用户凭证并签发令牌', 'all', 'message: "{user_id}" and "token" and __tag__:_container_name_: user-service', 2 UNION ALL
+  SELECT '用户登录链路', '登录结果通知', 'notification-service 推送登录成功通知', 'all', 'message: "{user_id}" and "login success" and __tag__:_container_name_: notification-service', 3
+) t
+JOIN business_trace bt ON bt.name = t.trace_name AND bt.deleted = 0
+WHERE NOT EXISTS (
+  SELECT 1 FROM trace_node d
+  WHERE d.trace_id = bt.id AND d.name = t.a AND d.parent_id IS NULL AND d.deleted = 0
+);
+
+-- 子节点示例（挂在"充电指令下发"下，演示链路下钻）
+INSERT INTO trace_node (trace_id, parent_id, name, description, sls_logstore, query_template, node_order)
+SELECT bt.id, pn.id, t.a, t.b, t.c, t.d, t.e
+FROM (
+  SELECT '充电订单链路' AS trace_name, '充电指令下发' AS parent_name, '指令下发重试' AS a, '指令下发失败后的重试记录' AS b, 'device-post' AS c, 'message: "{order_no}" and "retry" and "startCharging"' AS d, 1 AS e
+) t
+JOIN business_trace bt ON bt.name = t.trace_name AND bt.deleted = 0
+JOIN trace_node pn ON pn.trace_id = bt.id AND pn.name = t.parent_name AND pn.deleted = 0
+WHERE NOT EXISTS (
+  SELECT 1 FROM trace_node d
+  WHERE d.trace_id = bt.id AND d.parent_id = pn.id AND d.name = t.a AND d.deleted = 0
 );
