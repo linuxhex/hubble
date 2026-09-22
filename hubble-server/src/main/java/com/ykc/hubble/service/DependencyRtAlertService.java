@@ -18,6 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Hubble 原有告警均为日志条数计数型，应用内部对下游依赖"变慢不变错"的劣化无日志洪峰，
  * 计数型规则天然抓不到；本巡检直接查 ARMS appstat.incall 指标（应用依赖调用统计，官方
  * 无 appstat.dependency）补齐该维度。返回为平铺结构：rt/count/rpc/rpcType 直接在 item 顶层。
+ * 触发口径：涨幅≥surge_ratio（默认100%）且满足其一——高流量（最近1分钟调用次数≥min_count，
+ * 对齐 ARMS 流量条件）且 RT 净增≥min_delta_ms（低RT劣化如 2ms→5ms 也能识别，同时过滤
+ * Kafka 亚毫秒噪声）；或 RT 绝对值≥floor_ms（低流量防抖）。
  */
 @Slf4j
 @Service
@@ -48,7 +51,8 @@ public class DependencyRtAlertService {
             }
             double surgeRatio = alertThresholdService.getDouble("dependency_rt_surge_ratio", 500.0);
             double floorMs = alertThresholdService.getDouble("dependency_rt_floor_ms", 1000.0);
-            double minCount = alertThresholdService.getDouble("dependency_rt_min_count", 10.0);
+            double minCount = alertThresholdService.getDouble("dependency_rt_min_count", 3000.0);
+            double deltaMs = alertThresholdService.getDouble("dependency_rt_min_delta_ms", 1.0);
             long cooldownMs = (long) (alertThresholdService.getDouble("dependency_rt_alert_cooldown_minutes", 180.0)
                     * 60 * 1000);
 
@@ -103,7 +107,8 @@ public class DependencyRtAlertService {
                             for (var e : cur.entrySet()) {
                                 double[] p = prev.get(e.getKey());
                                 if (p == null) continue;
-                                merged.put(e.getKey(), new double[]{e.getValue()[0], e.getValue()[1], p[0], p[1]});
+                                // {curRt加权和, curCount和, cur最近1分钟count, prevRt加权和, prevCount和}
+                                merged.put(e.getKey(), new double[]{e.getValue()[0], e.getValue()[1], e.getValue()[2], p[0], p[1]});
                             }
                         } catch (Exception ex) {
                             queryFail.incrementAndGet();
@@ -133,18 +138,28 @@ public class DependencyRtAlertService {
             int alertCount = 0;
             for (var e : merged.entrySet()) {
                 double[] v = e.getValue();
-                if (v[1] == 0 || v[3] == 0) continue;
+                if (v[1] == 0 || v[4] == 0) continue;
                 double curRt = v[0] / v[1];
-                double prevRt = v[2] / v[3];
-                if (prevRt <= 0 || v[1] < minCount) continue; // 低流量组合 RT 抖动大，不评估
+                double prevRt = v[3] / v[4];
+                if (prevRt <= 0) continue;
                 double surge = (curRt - prevRt) / prevRt * 100;
-                if (surge < surgeRatio || curRt < floorMs) continue;
+                if (surge < surgeRatio) continue;
+                // 对齐 ARMS 口径：高流量组合（最近1分钟调用次数达门槛）涨幅达标即告警，
+                // 覆盖"低RT高流量变慢"场景（如 2ms→5ms、数千次/分钟），但要求 RT 净增
+                // 达到 delta 下限，过滤亚毫秒级指标（Kafka 等）的相对涨幅噪声；低流量
+                // 组合保留 RT 绝对值下限，防止微秒级基线抖动误报
+                boolean highTraffic = v[2] >= minCount;
+                if (highTraffic) {
+                    if (curRt - prevRt < deltaMs) continue;
+                } else if (curRt < floorMs) {
+                    continue;
+                }
 
                 Long last = lastAlertSent.get(e.getKey());
                 if (last != null && nowMs - last < cooldownMs) continue;
                 lastAlertSent.put(e.getKey(), nowMs);
                 alertCount++;
-                pushSurgeAlert(e.getKey(), prevRt, curRt, surge, pidToName);
+                pushSurgeAlert(e.getKey(), prevRt, curRt, surge, v[2], pidToName);
             }
             if (alertCount > 0) {
                 log.info("依赖服务 RT 巡检：{} 个组合触发环比告警", alertCount);
@@ -173,10 +188,16 @@ public class DependencyRtAlertService {
             double rt = toDouble(item.get("rt"));
             double cnt = toDouble(item.get("count"));
             if (cnt <= 0) continue;
+            // 数组含义：{rt加权和, count总和, 最近1分钟count, 最近1分钟date}，date 取最大以对齐 ARMS "最近1分钟求和"口径
             double[] agg = result.computeIfAbsent(fallbackPid + "|" + (rpcType == null ? "" : rpcType) + "|" + rpc,
-                    k -> new double[2]);
+                    k -> new double[4]);
             agg[0] += rt * cnt;
             agg[1] += cnt;
+            long date = (long) toDouble(item.get("date"));
+            if (date >= agg[3]) {
+                agg[2] = date == agg[3] ? agg[2] + cnt : cnt;
+                agg[3] = date;
+            }
         }
         return result;
     }
@@ -194,7 +215,7 @@ public class DependencyRtAlertService {
         return 0.0;
     }
 
-    private void pushSurgeAlert(String comboKey, double prevRt, double curRt, double surge,
+    private void pushSurgeAlert(String comboKey, double prevRt, double curRt, double surge, double lastMinCount,
             Map<String, String> pidToName) {
         String[] parts = comboKey.split("\\|", 3);
         String pid = parts[0];
@@ -206,8 +227,9 @@ public class DependencyRtAlertService {
                 .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                 .format(FMT);
 
-        log.warn("依赖服务 RT 环比告警: app={} type={} rpc={} {}ms -> {}ms (+{}%)",
-                appName, rpcType, rpc, String.format("%.2f", prevRt), String.format("%.2f", curRt), String.format("%.1f", surge));
+        log.warn("依赖服务 RT 环比告警: app={} type={} rpc={} {}ms -> {}ms (+{}%) 最近1分钟{}次",
+                appName, rpcType, rpc, String.format("%.2f", prevRt), String.format("%.2f", curRt),
+                String.format("%.1f", surge), (long) lastMinCount);
 
         StringBuilder md = new StringBuilder();
         md.append("### 🔴 依赖服务响应时间环比告警\n\n");
@@ -218,6 +240,7 @@ public class DependencyRtAlertService {
         md.append(String.format("> 依赖服务：**%s**\n\n", rpc));
         md.append(String.format("> 平均RT：前5分钟 **%.2f ms** → 最近5分钟 **%.2f ms**，环比 **+%.1f%%**\n\n",
                 prevRt, curRt, surge));
+        md.append(String.format("> 流量：最近1分钟 **%d** 次\n\n", (long) lastMinCount));
         md.append(String.format("> 时间：%s\n\n", timeStr));
 
         try {
@@ -229,6 +252,7 @@ public class DependencyRtAlertService {
             payload.put("prevRt", Math.round(prevRt));
             payload.put("currentRt", Math.round(curRt));
             payload.put("surgePercent", Math.round(surge));
+            payload.put("lastMinuteCount", (long) lastMinCount);
             payload.put("time", now);
             alertPushService.pushAlert(payload);
         } catch (Exception e) {

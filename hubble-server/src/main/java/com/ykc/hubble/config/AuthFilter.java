@@ -54,8 +54,6 @@ public class AuthFilter extends OncePerRequestFilter {
             "/alert-data/trace-logs",
             "/alert-data/sse",
             "/error-analysis/query",
-            "/alert-threshold/",
-            "/dingtalk-robot/",
 
             // 网关大盘和日志搜索接口
             "/gateway/",

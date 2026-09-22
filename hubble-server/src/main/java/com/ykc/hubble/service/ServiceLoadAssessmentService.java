@@ -31,7 +31,9 @@ import java.util.function.Function;
 public class ServiceLoadAssessmentService {
 
     private final ServiceLoadDailyMapper serviceLoadDailyMapper;
+    private final AlertThresholdService alertThresholdService;
 
+    /** 代码默认值：alert_threshold_config 表中同名 key 优先（告警配置页可改） */
     @Value("${service-load.assessment.cpu-yellow:80}")
     double cpuYellow = 80;
     @Value("${service-load.assessment.cpu-red:90}")
@@ -123,8 +125,12 @@ public class ServiceLoadAssessmentService {
         vo.setCpuPeak(maxOf(full, ServiceLoadDaily::getMaxCpu));
         vo.setMemPeak(maxOf(full, ServiceLoadDaily::getMaxMemory));
         vo.setQpsPeak(maxOf(full, ServiceLoadDaily::getMaxQps));
-        vo.setCpuWaterLevel(waterLevel(vo.getCpuPeak(), cpuYellow, cpuRed));
-        vo.setMemWaterLevel(waterLevel(vo.getMemPeak(), memYellow, memRed));
+        vo.setCpuWaterLevel(waterLevel(vo.getCpuPeak(),
+                alertThresholdService.getDouble("service_load_cpu_yellow", cpuYellow),
+                alertThresholdService.getDouble("service_load_cpu_red", cpuRed)));
+        vo.setMemWaterLevel(waterLevel(vo.getMemPeak(),
+                alertThresholdService.getDouble("service_load_mem_yellow", memYellow),
+                alertThresholdService.getDouble("service_load_mem_red", memRed)));
 
         // 4. 环比（末7个完整样本 vs 前7个）
         vo.setCpuGrowthPct(growthPct(full, ServiceLoadDaily::getAvgCpu));
@@ -137,8 +143,8 @@ public class ServiceLoadAssessmentService {
         vo.setCpuSlopePerDay(slopeOf(cpuReg));
         vo.setMemSlopePerDay(slopeOf(memReg));
 
-        Integer cpuDays = predictDays(cpuReg, cpuRed);
-        Integer memDays = predictDays(memReg, memRed);
+        Integer cpuDays = predictDays(cpuReg, alertThresholdService.getDouble("service_load_cpu_red", cpuRed));
+        Integer memDays = predictDays(memReg, alertThresholdService.getDouble("service_load_mem_red", memRed));
         vo.setCpuDaysToThreshold(cpuDays);
         vo.setMemDaysToThreshold(memDays);
         resolvePrediction(vo, cpuReg, memReg, cpuDays, memDays);
