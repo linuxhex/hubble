@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 
 /**
  * 页面数据缓存服务：提供缓存的读取、写入、清理功能
@@ -26,6 +27,9 @@ public class PageDataCacheService {
 
     private final PageDataCacheMapper pageDataCacheMapper;
     private final ObjectMapper objectMapper;
+
+    /** 写信号量：限制并发写 H2 的连接数，避免并行查询耗尽连接池 */
+    private static final Semaphore WRITE_SEM = new Semaphore(5);
 
     /**
      * 缓存保留时间：1天
@@ -170,34 +174,20 @@ public class PageDataCacheService {
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime expiresAt = now.plusMinutes(ttlMinutes);
 
-            // 检查是否已存在
-            LambdaQueryWrapper<PageDataCache> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(PageDataCache::getPageKey, pageKey)
-                   .eq(PageDataCache::getDataKey, dataKey);
-
-            PageDataCache existing = pageDataCacheMapper.selectOne(wrapper);
-            if (existing != null) {
-                // 更新已有缓存
-                existing.setDataContent(jsonContent);
-                existing.setCreatedAt(now);
-                existing.setExpiresAt(expiresAt);
-                pageDataCacheMapper.updateById(existing);
-                log.debug("缓存更新: pageKey={}, dataKey={}", pageKey, dataKey);
-            } else {
-                // 插入新缓存
-                PageDataCache cache = new PageDataCache();
-                cache.setPageKey(pageKey);
-                cache.setDataKey(dataKey);
-                cache.setDataContent(jsonContent);
-                cache.setCreatedAt(now);
-                cache.setExpiresAt(expiresAt);
-                pageDataCacheMapper.insert(cache);
+            if (!WRITE_SEM.tryAcquire(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                log.warn("缓存写入跳过（信号量满）: pageKey={}, dataKey={}", pageKey, dataKey);
+                return;
+            }
+            try {
+                pageDataCacheMapper.mergeInto(pageKey, dataKey, jsonContent, now, expiresAt);
                 log.debug("缓存保存: pageKey={}, dataKey={}", pageKey, dataKey);
+            } finally {
+                WRITE_SEM.release();
             }
         } catch (JsonProcessingException e) {
             log.error("序列化缓存数据失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
         } catch (Exception e) {
-            log.error("保存缓存失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
+            log.warn("保存缓存失败: pageKey={}, dataKey={}, error={}", pageKey, dataKey, e.getMessage());
         }
     }
 
