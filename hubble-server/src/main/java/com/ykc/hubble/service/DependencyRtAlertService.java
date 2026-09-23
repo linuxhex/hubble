@@ -18,9 +18,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Hubble 原有告警均为日志条数计数型，应用内部对下游依赖"变慢不变错"的劣化无日志洪峰，
  * 计数型规则天然抓不到；本巡检直接查 ARMS appstat.incall 指标（应用依赖调用统计，官方
  * 无 appstat.dependency）补齐该维度。返回为平铺结构：rt/count/rpc/rpcType 直接在 item 顶层。
- * 触发口径：涨幅≥surge_ratio（默认100%）且满足其一——高流量（最近1分钟调用次数≥min_count，
- * 对齐 ARMS 流量条件）且 RT 净增≥min_delta_ms（低RT劣化如 2ms→5ms 也能识别，同时过滤
- * Kafka 亚毫秒噪声）；或 RT 绝对值≥floor_ms（低流量防抖）。
+ *
+ * 对比口径：今天当前 5 分钟窗口 vs 昨天同一 5 分钟窗口（而非前 5 分钟），
+ * 消除业务高峰/低峰带来的无意义波动。触发条件：涨幅≥surge_ratio 且满足其一——
+ * 高流量（最近 1 分钟调用次数≥min_count）且 RT 净增≥min_delta_ms；
+ * 或 RT 绝对值≥floor_ms（低流量防抖）。
  */
 @Slf4j
 @Service
@@ -39,10 +41,11 @@ public class DependencyRtAlertService {
     private final Map<String, Long> lastAlertSent = new ConcurrentHashMap<>();
 
     private static final long WINDOW_MS = 5 * 60 * 1000L;
+    private static final long ONE_DAY_MS = 24 * 60 * 60 * 1000L;
     private static final java.time.format.DateTimeFormatter FMT =
             java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm");
 
-    /** 每 5 分钟巡检一次：最近一个完整 5 分钟段平均 RT vs 前一段，环比超阈值且绝对值超下限时告警 */
+    /** 每 5 分钟巡检一次：今天当前 5 分钟窗口 vs 昨天同一 5 分钟窗口，环比超阈值且绝对值超下限时告警 */
     @Scheduled(fixedDelay = 5 * 60 * 1000, initialDelay = 90 * 1000)
     public void checkDependencyRtSurge() {
         try {
@@ -50,6 +53,7 @@ public class DependencyRtAlertService {
                 return;
             }
             double surgeRatio = alertThresholdService.getDouble("dependency_rt_surge_ratio", 500.0);
+            double absFloorMs = alertThresholdService.getDouble("dependency_rt_abs_floor_ms", 1500.0);
             double floorMs = alertThresholdService.getDouble("dependency_rt_floor_ms", 1000.0);
             double minCount = alertThresholdService.getDouble("dependency_rt_min_count", 3000.0);
             double deltaMs = alertThresholdService.getDouble("dependency_rt_min_delta_ms", 1.0);
@@ -83,11 +87,13 @@ public class DependencyRtAlertService {
                     .map(app -> java.util.concurrent.CompletableFuture.runAsync(() -> {
                         String pid = String.valueOf(app.getPid());
                         try {
+                            // 今天当前 5 分钟窗口
                             var curResp = armsClient.queryMetricsWithDimension("appstat.incall",
                                     List.of("rt", "count"), nowMs - WINDOW_MS, nowMs, pid, 60000,
                                     List.of("rpcType", "rpc"));
+                            // 昨天同一 5 分钟窗口（消除高峰/低峰影响）
                             var prevResp = armsClient.queryMetricsWithDimension("appstat.incall",
-                                    List.of("rt", "count"), nowMs - 2 * WINDOW_MS, nowMs - WINDOW_MS, pid, 60000,
+                                    List.of("rt", "count"), nowMs - ONE_DAY_MS - WINDOW_MS, nowMs - ONE_DAY_MS, pid, 60000,
                                     List.of("rpcType", "rpc"));
                             Map<String, double[]> cur = aggregate(curResp, pid);
                             Map<String, double[]> prev = aggregate(prevResp, pid);
@@ -136,6 +142,7 @@ public class DependencyRtAlertService {
             }
 
             int alertCount = 0;
+            int filteredBySurge = 0, filteredByAbsFloor = 0, filteredByTrafficFloor = 0, filteredByCooldown = 0;
             for (var e : merged.entrySet()) {
                 double[] v = e.getValue();
                 if (v[1] == 0 || v[4] == 0) continue;
@@ -143,29 +150,28 @@ public class DependencyRtAlertService {
                 double prevRt = v[3] / v[4];
                 if (prevRt <= 0) continue;
                 double surge = (curRt - prevRt) / prevRt * 100;
-                if (surge < surgeRatio) continue;
-                // 对齐 ARMS 口径：高流量组合（最近1分钟调用次数达门槛）涨幅达标即告警，
-                // 覆盖"低RT高流量变慢"场景（如 2ms→5ms、数千次/分钟），但要求 RT 净增
-                // 达到 delta 下限，过滤亚毫秒级指标（Kafka 等）的相对涨幅噪声；低流量
-                // 组合保留 RT 绝对值下限，防止微秒级基线抖动误报
+                if (surge < surgeRatio) { filteredBySurge++; continue; }
+                // 全局绝对 RT 下限：当前 RT 低于阈值（默认 1500ms）的组合一律不告警，
+                // 过滤 ms 级噪声（如 Redis 2ms→5ms、Kafka 亚毫秒级抖动）
+                if (curRt < absFloorMs) { filteredByAbsFloor++; continue; }
+                // 高流量组合涨幅达标且 RT 净增达 delta 下限即告警；
+                // 低流量组合额外要求当前 RT 达低流量下限（默认 1000ms）
                 boolean highTraffic = v[2] >= minCount;
-                if (highTraffic) {
-                    if (curRt - prevRt < deltaMs) continue;
-                } else if (curRt < floorMs) {
-                    continue;
-                }
+                if (!highTraffic && curRt < floorMs) { filteredByTrafficFloor++; continue; }
+                if (highTraffic && curRt - prevRt < deltaMs) { filteredByTrafficFloor++; continue; }
 
                 Long last = lastAlertSent.get(e.getKey());
-                if (last != null && nowMs - last < cooldownMs) continue;
+                if (last != null && nowMs - last < cooldownMs) { filteredByCooldown++; continue; }
                 lastAlertSent.put(e.getKey(), nowMs);
                 alertCount++;
                 pushSurgeAlert(e.getKey(), prevRt, curRt, surge, v[2], pidToName);
             }
             if (alertCount > 0) {
-                log.info("依赖服务 RT 巡检：{} 个组合触发环比告警", alertCount);
+                log.info("依赖服务 RT 巡检：{} 个组合触发同比告警", alertCount);
             }
-            log.info("依赖服务 RT 巡检完成: 应用数={}, 组合数={}, 告警={}",
-                    futures.length, merged.size(), alertCount);
+            log.info("依赖服务 RT 巡检完成: 应用数={}, 组合数={}, 告警={}, 过滤(涨幅不足={}, 全局RT下限={}, 流量/净增={}, 冷却={})",
+                    futures.length, merged.size(), alertCount,
+                    filteredBySurge, filteredByAbsFloor, filteredByTrafficFloor, filteredByCooldown);
         } catch (Exception e) {
             log.warn("依赖服务 RT 巡检异常: {}", e.getMessage());
         }
@@ -227,18 +233,18 @@ public class DependencyRtAlertService {
                 .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                 .format(FMT);
 
-        log.warn("依赖服务 RT 环比告警: app={} type={} rpc={} {}ms -> {}ms (+{}%) 最近1分钟{}次",
+        log.warn("依赖服务 RT 同比告警: app={} type={} rpc={} {}ms -> {}ms (+{}%) 最近1分钟{}次",
                 appName, rpcType, rpc, String.format("%.2f", prevRt), String.format("%.2f", curRt),
                 String.format("%.1f", surge), (long) lastMinCount);
 
         StringBuilder md = new StringBuilder();
-        md.append("### 🔴 依赖服务响应时间环比告警\n\n");
+        md.append("### 🔴 依赖服务响应时间同比告警\n\n");
         md.append(String.format("> 应用：**%s**\n\n", appName));
         if (!rpcType.isBlank()) {
             md.append(String.format("> 调用类型：**%s**\n\n", rpcType));
         }
         md.append(String.format("> 依赖服务：**%s**\n\n", rpc));
-        md.append(String.format("> 平均RT：前5分钟 **%.2f ms** → 最近5分钟 **%.2f ms**，环比 **+%.1f%%**\n\n",
+        md.append(String.format("> 平均RT：昨天同一时段 **%.2f ms** → 今天当前 **%.2f ms**，同比 **+%.1f%%**\n\n",
                 prevRt, curRt, surge));
         md.append(String.format("> 流量：最近1分钟 **%d** 次\n\n", (long) lastMinCount));
         md.append(String.format("> 时间：%s\n\n", timeStr));
