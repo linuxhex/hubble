@@ -67,7 +67,12 @@ public class AlertThresholdService {
             new ThresholdDef("dependency_rt_floor_ms", "1000", "依赖服务RT低流量绝对下限(ms)，仅对未达高流量门槛的组合生效"),
             new ThresholdDef("dependency_rt_min_count", "3000", "依赖服务高流量门槛(次/最近1分钟)，达到后免低流量RT下限，但仍受全局绝对下限约束"),
             new ThresholdDef("dependency_rt_min_delta_ms", "1", "依赖服务高流量组合的RT净增下限(ms)，过滤亚毫秒级指标(如Kafka)的相对涨幅噪声"),
-            new ThresholdDef("dependency_rt_alert_cooldown_minutes", "180", "依赖服务告警冷却时长(分钟)"),
+            new ThresholdDef("dependency_rt_alert_cooldown_minutes", "180", "依赖服务RT告警冷却时长(分钟)"),
+            // ===== 依赖服务错误率告警 =====
+            new ThresholdDef("dependency_error_alert_enabled", "1", "依赖服务错误率告警开关(1=开启 0=关闭)"),
+            new ThresholdDef("dependency_error_rate_threshold", "10", "依赖服务错误率告警阈值(%)，超过此值触发告警"),
+            new ThresholdDef("dependency_error_min_count", "100", "依赖服务错误率告警最小调用数(次/5分钟)，低于不告警"),
+            new ThresholdDef("dependency_error_alert_cooldown_minutes", "180", "依赖服务错误率告警冷却时长(分钟)"),
             // ===== 中间件告警：同比黄盘双条件 =====
             new ThresholdDef("mw_yoy_surge_threshold", "300", "中间件黄盘同比涨幅阈值(%)，相对昨天同时段"),
             new ThresholdDef("mw_yoy_abs_floor", "30", "中间件黄盘同比绝对值下限，当前值低于此不告警"),
