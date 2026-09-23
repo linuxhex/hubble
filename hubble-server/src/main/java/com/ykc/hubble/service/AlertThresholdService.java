@@ -58,13 +58,14 @@ public class AlertThresholdService {
             new ThresholdDef("min_request_count", "10", "接口劣化/流量暴涨检测的最小请求数样本"),
             // ===== 流量暴涨 =====
             new ThresholdDef("traffic_surge_threshold", "200", "流量暴涨告警：流量达到基线的百分比(200=2倍)"),
-            new ThresholdDef("traffic_surge_min_rate", "50", "流量暴涨上榜门槛：环比涨幅最低百分比(%)"),
+            new ThresholdDef("traffic_surge_min_rate", "50", "流量暴涨上榜门槛：同比涨幅最低百分比(%)，默认对比昨天同时段"),
             new ThresholdDef("traffic_surge_min_qps", "50", "流量暴涨告警：当前 QPS 最低门槛，低于不告警"),
-            // ===== 依赖服务 RT 环比巡检 =====
-            new ThresholdDef("dependency_rt_alert_enabled", "1", "依赖服务 RT 环比巡检开关(1=开启 0=关闭)"),
-            new ThresholdDef("dependency_rt_surge_ratio", "100", "依赖服务RT环比涨幅阈值(%)，最近5分钟均值对比前5分钟均值（对齐ARMS口径）"),
-            new ThresholdDef("dependency_rt_floor_ms", "1000", "依赖服务RT绝对下限(ms)，仅对未达高流量门槛的组合生效，防微秒级抖动误报"),
-            new ThresholdDef("dependency_rt_min_count", "3000", "依赖服务高流量门槛(次/最近1分钟)，达到后免RT绝对下限，涨幅达标即告警"),
+            // ===== 依赖服务 RT 同比巡检 =====
+            new ThresholdDef("dependency_rt_alert_enabled", "1", "依赖服务 RT 同比巡检开关(1=开启 0=关闭)"),
+            new ThresholdDef("dependency_rt_surge_ratio", "100", "依赖服务RT同比涨幅阈值(%)，今天当前5分钟均值对比昨天同一5分钟均值"),
+            new ThresholdDef("dependency_rt_abs_floor_ms", "1500", "依赖服务RT全局绝对下限(ms)，当前RT低于此值不告警，过滤ms级噪声"),
+            new ThresholdDef("dependency_rt_floor_ms", "1000", "依赖服务RT低流量绝对下限(ms)，仅对未达高流量门槛的组合生效"),
+            new ThresholdDef("dependency_rt_min_count", "3000", "依赖服务高流量门槛(次/最近1分钟)，达到后免低流量RT下限，但仍受全局绝对下限约束"),
             new ThresholdDef("dependency_rt_min_delta_ms", "1", "依赖服务高流量组合的RT净增下限(ms)，过滤亚毫秒级指标(如Kafka)的相对涨幅噪声"),
             new ThresholdDef("dependency_rt_alert_cooldown_minutes", "180", "依赖服务告警冷却时长(分钟)"),
             // ===== 中间件告警：同比黄盘双条件 =====
@@ -93,7 +94,6 @@ public class AlertThresholdService {
             }
 
             List<AlertThresholdConfig> toInsert = new ArrayList<>();
-            int descFixed = 0;
             for (ThresholdDef def : DEFAULT_THRESHOLDS) {
                 String value = existingMap.get(def.key());
                 if (value == null) {
@@ -107,27 +107,26 @@ public class AlertThresholdService {
                     cache.put(def.key(), value);
                 }
             }
-            // 补齐历史遗留记录的空说明（值不覆盖，仅填充说明文案）
+            // 同步说明文案（始终与代码保持一致，确保描述准确）
+            int descUpdated = 0;
             for (AlertThresholdConfig config : existing) {
-                if (config.getDescription() == null || config.getDescription().isBlank()) {
-                    boolean fixed = DEFAULT_THRESHOLDS.stream()
-                            .filter(d -> d.key().equals(config.getConfigKey()))
-                            .findFirst()
-                            .map(d -> {
-                                config.setDescription(d.description());
-                                mapper.updateById(config);
-                                return true;
-                            })
-                            .orElse(false);
-                    if (fixed) descFixed++;
+                String expectedDesc = DEFAULT_THRESHOLDS.stream()
+                        .filter(d -> d.key().equals(config.getConfigKey()))
+                        .map(ThresholdDef::description)
+                        .findFirst()
+                        .orElse(null);
+                if (expectedDesc != null && !expectedDesc.equals(config.getDescription())) {
+                    config.setDescription(expectedDesc);
+                    mapper.updateById(config);
+                    descUpdated++;
                 }
             }
-            if (!toInsert.isEmpty() || descFixed > 0) {
+            if (!toInsert.isEmpty() || descUpdated > 0) {
                 for (AlertThresholdConfig config : toInsert) {
                     mapper.insert(config);
                 }
-                log.info("告警阈值初始化完成: 新增 {} 项默认阈值, 补齐 {} 项空说明, 已存在 {} 项保留原值",
-                        toInsert.size(), descFixed, DEFAULT_THRESHOLDS.size() - toInsert.size());
+                log.info("告警阈值初始化完成: 新增 {} 项默认阈值, 同步 {} 项说明文案, 已存在 {} 项保留原值",
+                        toInsert.size(), descUpdated, DEFAULT_THRESHOLDS.size() - toInsert.size());
             } else {
                 log.info("告警阈值初始化检查完成: {} 项阈值全部已存在，缓存已预热", DEFAULT_THRESHOLDS.size());
             }
