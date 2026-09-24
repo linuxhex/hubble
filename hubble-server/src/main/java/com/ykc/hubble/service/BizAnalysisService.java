@@ -55,98 +55,150 @@ public class BizAnalysisService {
 
     @Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 60000)
     public void refreshAll() {
-        try {
-            var overviewData = doDailyOverview();
-            memoryCache.put("overview", new CacheEntry(overviewData));
-            pageDataCacheService.save(PAGE_KEY, "overview", overviewData);
-        } catch (Exception e) {
-            log.error("刷新 overview 缓存失败", e);
-        }
-        try {
-            var data = doMonthlyTrend();
-            memoryCache.put("monthlyTrend", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "monthlyTrend", data);
-        } catch (Exception e) {
-            log.error("刷新 monthlyTrend 缓存失败", e);
-        }
-        try {
-            var data = doDailyOrderEnergy(30);
-            memoryCache.put("daily30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "daily30", data);
-        } catch (Exception e) {
-            log.error("刷新 daily30 缓存失败", e);
-        }
-        try {
-            var data = doScenarioBreakdown();
-            memoryCache.put("scenario", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "scenario", data);
-        } catch (Exception e) {
-            log.error("刷新 scenario 缓存失败", e);
-        }
-        try {
-            var data = doActiveUsersTop(20);
-            memoryCache.put("activeUsers", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "activeUsers", data);
-        } catch (Exception e) {
-            log.error("刷新 activeUsers 缓存失败", e);
-        }
-        try {
-            var data = doAppActive(30);
-            memoryCache.put("appActive30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "appActive30", data);
-        } catch (Exception e) {
-            log.error("刷新 appActive30 缓存失败", e);
-        }
-        try {
-            var data = doMauTrend();
-            memoryCache.put("mauTrend", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "mauTrend", data);
-        } catch (Exception e) {
-            log.error("刷新 mauTrend 缓存失败", e);
-        }
-        try {
-            var data = doYearlyComparison();
-            memoryCache.put("yearlyComparison", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "yearlyComparison", data);
-        } catch (Exception e) {
-            log.error("刷新 yearlyComparison 缓存失败", e);
-        }
-        try {
-            var data = doRevenueTrend(30);
-            memoryCache.put("revenueTrend30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "revenueTrend30", data);
-        } catch (Exception e) {
-            log.error("刷新 revenueTrend30 缓存失败", e);
-        }
-        try {
-            var data = doUtilizationTrend(30);
-            memoryCache.put("utilizationTrend30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "utilizationTrend30", data);
-        } catch (Exception e) {
-            log.error("刷新 utilizationTrend30 缓存失败", e);
-        }
-        try {
-            var data = doRegionDistribution(30);
-            memoryCache.put("regionDist30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "regionDist30", data);
-        } catch (Exception e) {
-            log.error("刷新 regionDist30 缓存失败", e);
-        }
-        try {
-            var data = doStationRanking(30, 20);
-            memoryCache.put("stationRank30", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "stationRank30", data);
-        } catch (Exception e) {
-            log.error("刷新 stationRank30 缓存失败", e);
-        }
-        try {
-            var data = doHourlyDistribution(7);
-            memoryCache.put("hourly7", new CacheEntry(data));
-            pageDataCacheService.save(PAGE_KEY, "hourly7", data);
-        } catch (Exception e) {
-            log.error("刷新 hourly7 缓存失败", e);
-        }
-        log.info("业务监控：全部缓存刷新完成");
+        log.info("业务监控：开始并行刷新所有缓存...");
+        long startTime = System.currentTimeMillis();
+
+        // 并行执行所有查询任务
+        CompletableFuture<Void> overviewFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var overviewData = doDailyOverview();
+                memoryCache.put("overview", new CacheEntry(overviewData));
+                pageDataCacheService.save(PAGE_KEY, "overview", overviewData);
+            } catch (Exception e) {
+                log.error("刷新 overview 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> monthlyTrendFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doMonthlyTrend();
+                memoryCache.put("monthlyTrend", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "monthlyTrend", data);
+            } catch (Exception e) {
+                log.error("刷新 monthlyTrend 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> daily30Future = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doDailyOrderEnergy(30);
+                memoryCache.put("daily30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "daily30", data);
+            } catch (Exception e) {
+                log.error("刷新 daily30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> scenarioFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doScenarioBreakdown();
+                memoryCache.put("scenario", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "scenario", data);
+            } catch (Exception e) {
+                log.error("刷新 scenario 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> activeUsersFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doActiveUsersTop(20);
+                memoryCache.put("activeUsers", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "activeUsers", data);
+            } catch (Exception e) {
+                log.error("刷新 activeUsers 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> appActiveFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doAppActive(30);
+                memoryCache.put("appActive30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "appActive30", data);
+            } catch (Exception e) {
+                log.error("刷新 appActive30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> mauTrendFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doMauTrend();
+                memoryCache.put("mauTrend", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "mauTrend", data);
+            } catch (Exception e) {
+                log.error("刷新 mauTrend 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> yearlyComparisonFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doYearlyComparison();
+                memoryCache.put("yearlyComparison", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "yearlyComparison", data);
+            } catch (Exception e) {
+                log.error("刷新 yearlyComparison 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> revenueTrendFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doRevenueTrend(30);
+                memoryCache.put("revenueTrend30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "revenueTrend30", data);
+            } catch (Exception e) {
+                log.error("刷新 revenueTrend30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> utilizationTrendFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doUtilizationTrend(30);
+                memoryCache.put("utilizationTrend30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "utilizationTrend30", data);
+            } catch (Exception e) {
+                log.error("刷新 utilizationTrend30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> regionDistFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doRegionDistribution(30);
+                memoryCache.put("regionDist30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "regionDist30", data);
+            } catch (Exception e) {
+                log.error("刷新 regionDist30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> stationRankFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doStationRanking(30, 20);
+                memoryCache.put("stationRank30", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "stationRank30", data);
+            } catch (Exception e) {
+                log.error("刷新 stationRank30 缓存失败", e);
+            }
+        });
+
+        CompletableFuture<Void> hourlyFuture = CompletableFuture.runAsync(() -> {
+            try {
+                var data = doHourlyDistribution(7);
+                memoryCache.put("hourly7", new CacheEntry(data));
+                pageDataCacheService.save(PAGE_KEY, "hourly7", data);
+            } catch (Exception e) {
+                log.error("刷新 hourly7 缓存失败", e);
+            }
+        });
+
+        // 等待所有任务完成
+        CompletableFuture.allOf(
+            overviewFuture, monthlyTrendFuture, daily30Future, scenarioFuture,
+            activeUsersFuture, appActiveFuture, mauTrendFuture, yearlyComparisonFuture,
+            revenueTrendFuture, utilizationTrendFuture, regionDistFuture,
+            stationRankFuture, hourlyFuture
+        ).join();
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        log.info("业务监控：全部缓存并行刷新完成，耗时 {}ms", elapsed);
     }
 
     private String latestDate() {
@@ -260,7 +312,7 @@ public class BizAnalysisService {
     }
 
     public Map<String, Object> scenarioBreakdown() {
-        return getCachedOrRefresh("scenario", "scenario",
+        return getCachedOrRefresh("scenarioV2", "scenarioV2",
             new TypeReference<Map<String, Object>>() {},
             this::doScenarioBreakdown);
     }
@@ -343,7 +395,7 @@ public class BizAnalysisService {
     }
 
     public Map<String, Object> hourlyOrderComparison() {
-        return getCachedOrRefresh("hourlyOrderComp", "hourlyOrderComp",
+        return getCachedOrRefresh("hourlyOrderCompV2", "hourlyOrderCompV2",
             new TypeReference<Map<String, Object>>() {},
             this::doHourlyOrderComparison);
     }
@@ -473,6 +525,7 @@ public class BizAnalysisService {
             "FROM internal.ads.ads_station_daily_operation_dt " +
             "WHERE dt = '" + ld + "'");
         result.put("byChannel", channelRows);
+        result.put("dataDate", ld);
 
         return result;
     }
@@ -682,21 +735,26 @@ public class BizAnalysisService {
     }
 
     private Map<String, Object> doHourlyOrderComparison() {
-        String today = latestDate();
-        String yesterday = LocalDate.parse(today, DT).minusDays(1).format(DT);
+        // 目标口径：真实"昨日 vs 前日"完整天对比；数仓滞后（昨日分区未产出）时回退到数仓最新两天，
+        // labelNew/labelOld 按与真实今天的差值取名，保证标题与数据永远一致
+        String today = LocalDate.now().minusDays(1).format(DT);
+        String yesterday = LocalDate.now().minusDays(2).format(DT);
+        List<Map<String, Object>> todayRows = queryOrderHistoryHourly(today);
+        List<Map<String, Object>> yesterdayRows = queryOrderHistoryHourly(yesterday);
+        if (todayRows.isEmpty()) {
+            today = latestDate();
+            yesterday = LocalDate.parse(today, DT).minusDays(1).format(DT);
+            todayRows = queryOrderHistoryHourly(today);
+            yesterdayRows = queryOrderHistoryHourly(yesterday);
+        }
+        long lagDays = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.parse(today, DT), LocalDate.now());
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("todayDate", today);
         result.put("yesterdayDate", yesterday);
-
-        List<Map<String, Object>> todayRows = dorisQueryClient.query(
-            "SELECT dt_hour as `hour`, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
-            "FROM internal.ads.ads_order_history_agg_dt_da " +
-            "WHERE dt = '" + today + "' GROUP BY dt_hour ORDER BY dt_hour");
-
-        List<Map<String, Object>> yesterdayRows = dorisQueryClient.query(
-            "SELECT dt_hour as `hour`, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
-            "FROM internal.ads.ads_order_history_agg_dt_da " +
-            "WHERE dt = '" + yesterday + "' GROUP BY dt_hour ORDER BY dt_hour");
+        result.put("labelNew", relativeDayLabel(today));
+        result.put("labelOld", relativeDayLabel(yesterday));
+        result.put("lagDays", lagDays);
 
         Map<Integer, double[]> todayMap = new LinkedHashMap<>();
         for (var row : todayRows) {
@@ -730,6 +788,21 @@ public class BizAnalysisService {
         result.put("hours", hours);
         result.put("alertCount", alertCount);
         return result;
+    }
+
+    private List<Map<String, Object>> queryOrderHistoryHourly(String dt) {
+        return dorisQueryClient.query(
+            "SELECT dt_hour as `hour`, SUM(record_num) as orderCnt, SUM(charged_power) as chargedPower " +
+            "FROM internal.ads.ads_order_history_agg_dt_da " +
+            "WHERE dt = '" + dt + "' GROUP BY dt_hour ORDER BY dt_hour");
+    }
+
+    /** 与真实今天相差1天→"昨日"，2天→"前日"，其余（数仓滞后）返回 MM-dd 实际日期 */
+    private static String relativeDayLabel(String dt) {
+        long diff = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.parse(dt, DT), LocalDate.now());
+        if (diff == 1) return "昨日";
+        if (diff == 2) return "前日";
+        return dt.length() >= 10 ? dt.substring(5) : dt;
     }
 
     public Map<String, Object> realtimeOrderOverview() {
