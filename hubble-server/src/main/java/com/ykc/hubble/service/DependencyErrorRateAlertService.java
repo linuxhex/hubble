@@ -62,18 +62,23 @@ public class DependencyErrorRateAlertService {
             }
 
             Map<String, String> pidToName = new HashMap<>();
+            List<com.aliyuncs.arms.model.v20190808.ListTraceAppsResponse.TraceApp> prodApps = new java.util.ArrayList<>();
             for (var app : appsResp.getTraceApps()) {
-                if (app.getPid() != null) {
+                if (app.getPid() != null && app.getAppName() != null && app.getAppName().endsWith("-prod")) {
                     pidToName.put(String.valueOf(app.getPid()), app.getAppName());
+                    prodApps.add(app);
                 }
+            }
+            log.info("依赖服务错误率巡检：过滤生产应用 {}/{} 个", prodApps.size(), appsResp.getTraceApps().size());
+            if (prodApps.isEmpty()) {
+                return;
             }
 
             // key: pid|rpcType|rpc, value: {errorRate, count}
             Map<String, double[]> merged = new ConcurrentHashMap<>();
             java.util.concurrent.atomic.AtomicInteger queryFail = new java.util.concurrent.atomic.AtomicInteger();
 
-            var futures = appsResp.getTraceApps().stream()
-                    .filter(app -> app.getPid() != null)
+            var futures = prodApps.stream()
                     .map(app -> java.util.concurrent.CompletableFuture.runAsync(() -> {
                         String pid = String.valueOf(app.getPid());
                         try {

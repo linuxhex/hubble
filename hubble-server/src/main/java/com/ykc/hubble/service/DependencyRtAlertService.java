@@ -72,18 +72,23 @@ public class DependencyRtAlertService {
             }
 
             Map<String, String> pidToName = new HashMap<>();
+            List<com.aliyuncs.arms.model.v20190808.ListTraceAppsResponse.TraceApp> prodApps = new java.util.ArrayList<>();
             for (var app : appsResp.getTraceApps()) {
-                if (app.getPid() != null) {
+                if (app.getPid() != null && app.getAppName() != null && app.getAppName().endsWith("-prod")) {
                     pidToName.put(String.valueOf(app.getPid()), app.getAppName());
+                    prodApps.add(app);
                 }
+            }
+            log.info("依赖服务 RT 巡检：过滤生产应用 {}/{} 个", prodApps.size(), appsResp.getTraceApps().size());
+            if (prodApps.isEmpty()) {
+                return;
             }
 
             Map<String, double[]> merged = new ConcurrentHashMap<>();
             java.util.concurrent.atomic.AtomicInteger queryOk = new java.util.concurrent.atomic.AtomicInteger();
             java.util.concurrent.atomic.AtomicInteger queryEmpty = new java.util.concurrent.atomic.AtomicInteger();
             java.util.concurrent.atomic.AtomicInteger queryFail = new java.util.concurrent.atomic.AtomicInteger();
-            var futures = appsResp.getTraceApps().stream()
-                    .filter(app -> app.getPid() != null)
+            var futures = prodApps.stream()
                     .map(app -> java.util.concurrent.CompletableFuture.runAsync(() -> {
                         String pid = String.valueOf(app.getPid());
                         try {
@@ -182,28 +187,45 @@ public class DependencyRtAlertService {
         if (resp == null || resp.getData() == null || resp.getData().getItems() == null) {
             return Map.of();
         }
-        Map<String, double[]> result = new HashMap<>();
+        // 第一遍：按 comboKey 收集每个分钟桶的 (rt, count, date)
+        Map<String, List<double[]>> buckets = new HashMap<>();
         for (var itemObj : resp.getData().getItems()) {
             if (!(itemObj instanceof Map)) continue;
             @SuppressWarnings("unchecked")
             Map<Object, Object> item = (Map<Object, Object>) itemObj;
-            // appstat.incall 实测返回平铺结构（{date, rt, rpc, count, rule, rpcType}），无 dimensions/measures 嵌套
             Object rpc = item.get("rpc");
             if (rpc == null) continue;
             Object rpcType = item.get("rpcType");
             double rt = toDouble(item.get("rt"));
             double cnt = toDouble(item.get("count"));
             if (cnt <= 0) continue;
-            // 数组含义：{rt加权和, count总和, 最近1分钟count, 最近1分钟date}，date 取最大以对齐 ARMS "最近1分钟求和"口径
-            double[] agg = result.computeIfAbsent(fallbackPid + "|" + (rpcType == null ? "" : rpcType) + "|" + rpc,
-                    k -> new double[4]);
-            agg[0] += rt * cnt;
-            agg[1] += cnt;
-            long date = (long) toDouble(item.get("date"));
-            if (date >= agg[3]) {
-                agg[2] = date == agg[3] ? agg[2] + cnt : cnt;
-                agg[3] = date;
+            String key = fallbackPid + "|" + (rpcType == null ? "" : rpcType) + "|" + rpc;
+            buckets.computeIfAbsent(key, k -> new java.util.ArrayList<>())
+                    .add(new double[]{rt, cnt, (long) toDouble(item.get("date"))});
+        }
+        // 第二遍：去最高和最低 RT 桶后计算加权平均，保留最近 1 分钟 count
+        Map<String, double[]> result = new HashMap<>();
+        for (var entry : buckets.entrySet()) {
+            List<double[]> list = entry.getValue();
+            list.sort(java.util.Comparator.comparingDouble(a -> a[0]));
+            int from = 0, to = list.size();
+            if (list.size() >= 3) { from = 1; to = list.size() - 1; }
+            double rtSum = 0, cntSum = 0;
+            for (int i = from; i < to; i++) {
+                rtSum += list.get(i)[0] * list.get(i)[1];
+                cntSum += list.get(i)[1];
             }
+            double[] agg = new double[4];
+            agg[0] = rtSum;
+            agg[1] = cntSum;
+            for (double[] b : list) {
+                long date = (long) b[2];
+                if (date >= agg[3]) {
+                    agg[2] = date == agg[3] ? agg[2] + b[1] : b[1];
+                    agg[3] = date;
+                }
+            }
+            result.put(entry.getKey(), agg);
         }
         return result;
     }
