@@ -32,6 +32,7 @@
         <div class="card-value">{{ formatNum(overview.adClick) }}</div>
       </div>
     </div>
+    <div v-if="overview.date" class="data-date-note">数据截至 {{ overview.date }}</div>
     <el-alert v-if="overviewFailed" type="error" :closable="false" style="margin-bottom: 12px">
       <template #title>
         概览数据加载失败
@@ -39,11 +40,12 @@
       </template>
     </el-alert>
 
-    <!-- 1.5 今日 vs 昨日 小时订单对比 -->
+    <!-- 1.5 昨日/前日 小时订单对比（日期动态，数仓滞后时如实标注） -->
     <div class="chart-section" v-if="hourlyCompData.hours && hourlyCompData.hours.length > 0">
       <div class="section-title">
-        今日 vs 昨日 小时订单实时对比（{{ hourlyCompData.todayDate || '-' }} vs {{ hourlyCompData.yesterdayDate || '-' }}）
-        <span v-if="hourlyCompData.alertCount > 0" class="yoy-badge down" style="margin-left:12px">
+        {{ hourlyCompData.labelNew || '昨日' }} vs {{ hourlyCompData.labelOld || '前日' }} 小时订单对比（{{ hourlyCompData.todayDate || '-' }} vs {{ hourlyCompData.yesterdayDate || '-' }}）
+        <span v-if="hourlyCompData.lagDays > 1" class="yoy-badge down" style="margin-left:12px">数据滞后 {{ hourlyCompData.lagDays }} 天</span>
+        <span v-if="hourlyCompData.alertCount > 0" class="yoy-badge down" style="margin-left:8px">
           {{ hourlyCompData.alertCount }} 个时段落后 50%+
         </span>
       </div>
@@ -134,7 +136,7 @@
           </el-table>
         </div>
         <div class="scenario-card">
-          <div class="sub-title">按渠道（昨日）</div>
+          <div class="sub-title">按渠道（{{ scenario.dataDate || '昨日' }}）</div>
           <el-table :data="channelTableData" stripe border size="small">
             <el-table-column label="渠道" prop="channel" width="120" />
             <el-table-column label="订单量" prop="order" width="120" align="right" />
@@ -460,6 +462,8 @@ const renderHourlyCompChart = () => {
   hourlyCompChart = echarts.init(hourlyCompChartRef.value)
   const hours = hourlyCompData.value.hours
   const labels = hours.map(h => h.hour + ':00')
+  const labelNew = (hourlyCompData.value.labelNew || '昨日') + '订单'
+  const labelOld = (hourlyCompData.value.labelOld || '前日') + '订单'
   const todayOrders = hours.map(h => Number(h.todayOrder || 0))
   const yesterdayOrders = hours.map(h => Number(h.yesterdayOrder || 0))
   const alertBgColors = hours.map(h => h.alert ? 'rgba(245,108,108,0.15)' : 'transparent')
@@ -472,19 +476,19 @@ const renderHourlyCompChart = () => {
       if (h.alert) s += '<span style="color:#F56C6C;font-weight:bold">⚠ 落后 50%+</span>'
       return s
     }},
-    legend: { data: ['今日订单', '昨日订单'], top: 0 },
+    legend: { data: [labelNew, labelOld], top: 0 },
     grid: { top: 40, bottom: 30, left: 50, right: 20 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', name: '订单量' },
     series: [
       {
-        name: '今日订单', type: 'bar', data: todayOrders,
+        name: labelNew, type: 'bar', data: todayOrders,
         itemStyle: {
           color: (params) => hours[params.dataIndex].alert ? '#F56C6C' : '#409EFF',
           borderRadius: [4, 4, 0, 0]
         }
       },
-      { name: '昨日订单', type: 'bar', data: yesterdayOrders, itemStyle: { color: '#C0C4CC', borderRadius: [4, 4, 0, 0] } }
+      { name: labelOld, type: 'bar', data: yesterdayOrders, itemStyle: { color: '#C0C4CC', borderRadius: [4, 4, 0, 0] } }
     ],
     markArea: { silent: true, data: hours.map((h, i) => h.alert ? [{ xAxis: i, itemStyle: { color: 'rgba(245,108,108,0.08)' } }, { xAxis: i }] : null).filter(Boolean) }
   })
@@ -685,6 +689,7 @@ onUnmounted(() => {
 .card-date { font-size: 11px; color: #c0c4cc; margin-top: 4px; }
 .chart-section { margin-bottom: 20px; }
 .section-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; color: #303133; }
+.data-date-note { font-size: 12px; color: #909399; margin: -4px 0 10px; text-align: right; }
 .chart-container { height: 320px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; }
 .chart-row { display: flex; gap: 16px; margin-bottom: 20px; }
 .chart-row.two-col .chart-section { flex: 1; min-width: 0; }
