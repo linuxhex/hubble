@@ -222,7 +222,7 @@ public class GatewayService {
         }, queryExecutor);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 5 * 60 * 1000) // 每 5 分钟刷新
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 90 * 1000) // 每 5 分钟刷新，initialDelay 错开启动时的 initCache 首轮
     public void refreshCache() {
         log.debug("后台刷新接口劣化缓存...");
         for (String mode : Arrays.asList("day", "week", "month")) {
@@ -264,6 +264,87 @@ public class GatewayService {
                 log.warn("刷新流量涨幅缓存 {} 失败: {}", mode, e.getMessage());
             }
         }
+        // 刷新 P60 排名缓存
+        for (String mode : Arrays.asList("day", "week", "month")) {
+            try {
+                List<ApiDegradationVO> data = loadP60Ranking(mode);
+                if (data.isEmpty()) {
+                    CacheEntry existing = p60RankingCache.get(mode);
+                    if (existing != null && !existing.data.isEmpty()) {
+                        log.info("刷新 P60 {} 返回空数据，保留已有缓存 {} 条", mode, existing.data.size());
+                        continue;
+                    }
+                }
+                p60RankingCache.put(mode, new CacheEntry(data, System.currentTimeMillis()));
+                if (!data.isEmpty()) {
+                    pageDataCacheService.save("gateway_p60_ranking", mode, data, 30);
+                }
+                log.debug("刷新 P60 {} 缓存完成，{} 条", mode, data.size());
+            } catch (Exception e) {
+                log.warn("刷新 P60 缓存 {} 失败: {}", mode, e.getMessage());
+            }
+        }
+        // 刷新趋势缓存
+        for (String range : Arrays.asList("1h", "24h", "7d")) {
+            try {
+                GatewayTrendVO data = loadTrend(range);
+                if (data.getTimestamps() == null || data.getTimestamps().isEmpty()) {
+                    TrendCacheEntry existing = trendCache.get(range);
+                    if (existing != null && existing.data.getTimestamps() != null && !existing.data.getTimestamps().isEmpty()) {
+                        log.info("刷新趋势 {} 返回空数据，保留已有缓存", range);
+                        continue;
+                    }
+                }
+                trendCache.put(range, new TrendCacheEntry(data, System.currentTimeMillis()));
+                if (data.getTimestamps() != null && !data.getTimestamps().isEmpty()) {
+                    pageDataCacheService.save("gateway_trend", range, data, 5);
+                }
+                log.debug("刷新趋势 {} 缓存完成", range);
+            } catch (Exception e) {
+                log.warn("刷新趋势缓存 {} 失败: {}", range, e.getMessage());
+            }
+        }
+        // 刷新热门接口缓存
+        for (String range : Arrays.asList("1h", "24h")) {
+            try {
+                List<GatewayHotApiVO> data = loadHotApis(range);
+                if (data.isEmpty()) {
+                    HotApisCacheEntry existing = hotApisCache.get(range);
+                    if (existing != null && !existing.data.isEmpty()) {
+                        log.info("刷新热门接口 {} 返回空数据，保留已有缓存 {} 条", range, existing.data.size());
+                        continue;
+                    }
+                }
+                hotApisCache.put(range, new HotApisCacheEntry(data, System.currentTimeMillis()));
+                if (!data.isEmpty()) {
+                    pageDataCacheService.save("gateway_hot_apis", range, data, 30);
+                }
+                log.debug("刷新热门接口 {} 缓存完成，{} 条", range, data.size());
+            } catch (Exception e) {
+                log.warn("刷新热门接口缓存 {} 失败: {}", range, e.getMessage());
+            }
+        }
+        // 刷新概览缓存（OverviewSnapshotService 只覆盖 15m/30m/1h/6h/1d，这里的 key 与前端 24h/7d/30d 对齐）
+        for (String range : Arrays.asList("24h", "7d", "30d")) {
+            try {
+                GatewayOverviewVO data = queryOverviewData(range);
+                if (data.getTotalRequests() == 0) {
+                    OverviewCacheEntry existing = overviewCache.get(range);
+                    if (existing != null && existing.data.getTotalRequests() > 0) {
+                        log.info("刷新概览 {} 返回空数据，保留已有缓存", range);
+                        continue;
+                    }
+                }
+                overviewCache.put(range, new OverviewCacheEntry(data, System.currentTimeMillis()));
+                if (data.getTotalRequests() > 0) {
+                    pageDataCacheService.save("gateway_overview", range, data, 30);
+                }
+                log.debug("刷新概览 {} 缓存完成", range);
+            } catch (Exception e) {
+                log.warn("刷新概览缓存 {} 失败: {}", range, e.getMessage());
+            }
+        }
+        log.info("网关页面缓存定时刷新完成（劣化/流量涨幅/P60/趋势/热门接口/概览）");
     }
 
     private static class CacheEntry {
