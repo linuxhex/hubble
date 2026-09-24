@@ -168,7 +168,7 @@ dashscope:
 # 2026-09-24 实测可用；原内网网关 10.20.0.239:3020 需有效令牌，可通过 LLM_* 环境变量切回）
 llm:
   base-url: ${LLM_BASE_URL:https://api.modelarts-maas.com/openai/v1}
-  api-key: ${LLM_API_KEY:REMOVED}
+  api-key: ${LLM_API_KEY:}
   model: ${LLM_MODEL:glm-5.2}
 
 # AI 助手 Agent 配置（排查工具）
