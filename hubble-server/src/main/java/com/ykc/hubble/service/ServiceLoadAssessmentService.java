@@ -130,7 +130,13 @@ public class ServiceLoadAssessmentService {
         vo.setCpuWaterLevel(waterLevel(vo.getCpuPeak(),
                 alertThresholdService.getDouble("service_load_cpu_yellow", cpuYellow),
                 alertThresholdService.getDouble("service_load_cpu_red", cpuRed)));
+        vo.setCpuAvgWaterLevel(waterLevel(vo.getCpuAvg(),
+                alertThresholdService.getDouble("service_load_cpu_yellow", cpuYellow),
+                alertThresholdService.getDouble("service_load_cpu_red", cpuRed)));
         vo.setMemWaterLevel(waterLevel(vo.getMemPeak(),
+                alertThresholdService.getDouble("service_load_mem_yellow", memYellow),
+                alertThresholdService.getDouble("service_load_mem_red", memRed)));
+        vo.setMemAvgWaterLevel(waterLevel(vo.getMemAvg(),
                 alertThresholdService.getDouble("service_load_mem_yellow", memYellow),
                 alertThresholdService.getDouble("service_load_mem_red", memRed)));
 

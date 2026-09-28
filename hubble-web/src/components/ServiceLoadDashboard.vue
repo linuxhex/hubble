@@ -108,9 +108,12 @@
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="CPU 平均" width="90" align="right">
+        <el-table-column label="CPU 平均" width="150">
           <template #default="{ row }">
-            <span v-if="row.cpuAvg != null" class="avg-metric">{{ row.cpuAvg }}%</span>
+            <div class="metric-cell" v-if="row.cpuAvg != null">
+              <span :class="waterTextClass(row.cpuAvgWaterLevel)">{{ row.cpuAvg }}%</span>
+              <el-progress :percentage="barPct(row.cpuAvg)" :color="waterColor(row.cpuAvgWaterLevel)" :stroke-width="6" :show-text="false" />
+            </div>
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
@@ -123,9 +126,12 @@
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="内存平均" width="90" align="right">
+        <el-table-column label="内存平均" width="150">
           <template #default="{ row }">
-            <span v-if="row.memAvg != null" class="avg-metric">{{ row.memAvg }}%</span>
+            <div class="metric-cell" v-if="row.memAvg != null">
+              <span :class="waterTextClass(row.memAvgWaterLevel)">{{ row.memAvg }}%</span>
+              <el-progress :percentage="barPct(row.memAvg)" :color="waterColor(row.memAvgWaterLevel)" :stroke-width="6" :show-text="false" />
+            </div>
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>

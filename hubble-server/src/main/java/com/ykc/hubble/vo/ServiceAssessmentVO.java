@@ -32,9 +32,14 @@ public class ServiceAssessmentVO {
     /** 评估窗口内日均内存的平均值 */
     private BigDecimal memAvg;
     private BigDecimal qpsPeak;
-    /** green/yellow/red，null=无数据 */
+    /** green/yellow/red，null=无数据；cpuPeak 的水位 */
     private String cpuWaterLevel;
+    /** green/yellow/red，null=无数据；cpuAvg 的水位（独立计算） */
+    private String cpuAvgWaterLevel;
+    /** green/yellow/red，null=无数据；memPeak 的水位 */
     private String memWaterLevel;
+    /** green/yellow/red，null=无数据；memAvg 的水位（独立计算） */
+    private String memAvgWaterLevel;
 
     /** 末7天 vs 前7天 环比(%)，null=样本不足 */
     private BigDecimal cpuGrowthPct;
