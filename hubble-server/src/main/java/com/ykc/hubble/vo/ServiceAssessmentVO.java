@@ -26,7 +26,11 @@ public class ServiceAssessmentVO {
     private Integer latestDataAgeDays;
 
     private BigDecimal cpuPeak;
+    /** 评估窗口内日均CPU的平均值 */
+    private BigDecimal cpuAvg;
     private BigDecimal memPeak;
+    /** 评估窗口内日均内存的平均值 */
+    private BigDecimal memAvg;
     private BigDecimal qpsPeak;
     /** green/yellow/red，null=无数据 */
     private String cpuWaterLevel;

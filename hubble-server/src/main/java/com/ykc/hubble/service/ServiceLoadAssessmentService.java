@@ -125,6 +125,8 @@ public class ServiceLoadAssessmentService {
         vo.setCpuPeak(maxOf(full, ServiceLoadDaily::getMaxCpu));
         vo.setMemPeak(maxOf(full, ServiceLoadDaily::getMaxMemory));
         vo.setQpsPeak(maxOf(full, ServiceLoadDaily::getMaxQps));
+        vo.setCpuAvg(avgOf(full, ServiceLoadDaily::getAvgCpu));
+        vo.setMemAvg(avgOf(full, ServiceLoadDaily::getAvgMemory));
         vo.setCpuWaterLevel(waterLevel(vo.getCpuPeak(),
                 alertThresholdService.getDouble("service_load_cpu_yellow", cpuYellow),
                 alertThresholdService.getDouble("service_load_cpu_red", cpuRed)));
@@ -382,6 +384,19 @@ public class ServiceLoadAssessmentService {
             if (v != null && (max == null || v.compareTo(max) > 0)) max = v;
         }
         return max;
+    }
+
+    private BigDecimal avgOf(List<ServiceLoadDaily> samples, Function<ServiceLoadDaily, BigDecimal> extractor) {
+        double sum = 0;
+        int n = 0;
+        for (ServiceLoadDaily r : samples) {
+            BigDecimal v = extractor.apply(r);
+            if (v != null) {
+                sum += v.doubleValue();
+                n++;
+            }
+        }
+        return n == 0 ? null : BigDecimal.valueOf(sum / n).setScale(1, RoundingMode.HALF_UP);
     }
 
     private String waterLevel(BigDecimal peak, double yellow, double red) {

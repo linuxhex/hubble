@@ -108,12 +108,24 @@
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
+        <el-table-column label="CPU 平均" width="90" align="right">
+          <template #default="{ row }">
+            <span v-if="row.cpuAvg != null" class="avg-metric">{{ row.cpuAvg }}%</span>
+            <span v-else class="no-data">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="内存峰值" width="150">
           <template #default="{ row }">
             <div class="metric-cell" v-if="row.memPeak != null">
               <span :class="waterTextClass(row.memWaterLevel)">{{ row.memPeak }}%</span>
               <el-progress :percentage="barPct(row.memPeak)" :color="waterColor(row.memWaterLevel)" :stroke-width="6" :show-text="false" />
             </div>
+            <span v-else class="no-data">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="内存平均" width="90" align="right">
+          <template #default="{ row }">
+            <span v-if="row.memAvg != null" class="avg-metric">{{ row.memAvg }}%</span>
             <span v-else class="no-data">—</span>
           </template>
         </el-table-column>
@@ -533,6 +545,11 @@ onMounted(fetchAssessment)
 
 .no-data {
   color: #c0c4cc;
+}
+
+.avg-metric {
+  color: #909399;
+  font-size: 13px;
 }
 
 .empty-state {
