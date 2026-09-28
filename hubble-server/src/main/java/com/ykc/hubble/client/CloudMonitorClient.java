@@ -17,6 +17,8 @@ import com.aliyuncs.elasticsearch.model.v20170613.ListInstanceRequest;
 import com.aliyuncs.elasticsearch.model.v20170613.ListInstanceResponse;
 import com.aliyuncs.hitsdb.model.v20200615.GetLindormInstanceListRequest;
 import com.aliyuncs.hitsdb.model.v20200615.GetLindormInstanceListResponse;
+import com.aliyuncs.hitsdb.model.v20200615.GetLindormV2InstanceRequest;
+import com.aliyuncs.hitsdb.model.v20200615.GetLindormV2InstanceResponse;
 import com.aliyuncs.ons.model.v20190214.OnsInstanceInServiceListRequest;
 import com.aliyuncs.ons.model.v20190214.OnsInstanceInServiceListResponse;
 import com.aliyuncs.ons.model.v20190214.OnsTopicListRequest;
@@ -236,6 +238,7 @@ public class CloudMonitorClient {
                     map.put("instanceId", inst.getInstanceId());
                     map.put("description", inst.getDescription());
                     map.put("status", inst.getStatus());
+                    map.put("esVersion", inst.getEsVersion());
                     result.add(map);
                 }
             }
@@ -268,6 +271,33 @@ public class CloudMonitorClient {
         } catch (Exception e) {
             log.warn("查询 Lindorm 实例列表失败: {}", e.getMessage());
             return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 查询 Lindorm 实例详情（含引擎版本，使用 V2 API）
+     */
+    public Map<String, Object> getLindormInstanceDetail(String instanceId) {
+        try {
+            GetLindormV2InstanceRequest req = new GetLindormV2InstanceRequest();
+            req.setInstanceId(instanceId);
+            GetLindormV2InstanceResponse resp = acsClient.getAcsResponse(req);
+            Map<String, Object> result = new HashMap<>();
+            result.put("instanceId", resp.getInstanceId());
+            result.put("instanceAlias", resp.getInstanceAlias());
+            result.put("status", resp.getInstanceStatus());
+
+            // 从 engineList 中提取第一个引擎的版本
+            if (resp.getEngineList() != null && !resp.getEngineList().isEmpty()) {
+                var engine = resp.getEngineList().get(0);
+                result.put("engineVersion", engine.getVersion());
+                result.put("engine", engine.getEngine());
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.warn("查询 Lindorm 实例详情失败 [{}]: {}", instanceId, e.getMessage());
+            return null;
         }
     }
 

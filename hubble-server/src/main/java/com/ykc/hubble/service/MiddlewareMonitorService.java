@@ -144,6 +144,7 @@ public class MiddlewareMonitorService {
                     item.put("instanceId", inst.getInstanceId());
                     item.put("instanceName", inst.getInstanceName());
                     item.put("instanceType", inst.getInstanceClass());
+                    item.put("engineVersion", inst.getEngineVersion());
                     item.put("status", inst.getInstanceStatus());
 
                     String dim = "[{\"instanceId\":\"" + inst.getInstanceId() + "\"}]";
@@ -705,6 +706,14 @@ public class MiddlewareMonitorService {
                         Map<String, Object> item = new LinkedHashMap<>();
                         item.put("instanceId", instanceId);
                         item.put("instanceName", "lindorm-" + instanceId);
+
+                        // 获取 Lindorm 实例详情（含引擎版本）
+                        var detail = cloudMonitorClient.getLindormInstanceDetail(instanceId);
+                        if (detail != null) {
+                            item.put("engineVersion", detail.get("engineVersion"));
+                            item.put("engine", detail.get("engine"));
+                        }
+
                         item.put("cpuUsage", vals[0]);
                         item.put("cpuWio", vals[3]);
                         item.put("qps", vals[1]);
@@ -764,6 +773,13 @@ public class MiddlewareMonitorService {
                         String alias = (String) inst.get("instanceAlias");
                         item.put("instanceId", instanceId);
                         item.put("instanceName", alias);
+
+                        // 获取 Lindorm 实例详情（含引擎版本）
+                        var detail = cloudMonitorClient.getLindormInstanceDetail(instanceId);
+                        if (detail != null) {
+                            item.put("engineVersion", detail.get("engineVersion"));
+                            item.put("engine", detail.get("engine"));
+                        }
 
                         String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
                         item.put("cpuUsage", queryLatestMetricThrottled("acs_lindorm", "CpuUsage", dim, startTime, endTime, true));
@@ -846,8 +862,10 @@ public class MiddlewareMonitorService {
                     Map<String, Object> item = new LinkedHashMap<>();
                     String instanceId = (String) inst.get("instanceId");
                     String desc = (String) inst.get("description");
+                    String esVersion = (String) inst.get("esVersion");
                     item.put("instanceId", instanceId);
                     item.put("instanceName", desc);
+                    item.put("esVersion", esVersion);
 
                     String dim = "[{\"instanceId\":\"" + instanceId + "\"}]";
                     item.put("cpuUsage", queryLatestMetricThrottled("acs_elasticsearch", "NodeCPUUtilization", dim, startTime, endTime, true));
@@ -1384,7 +1402,7 @@ public class MiddlewareMonitorService {
             var qpsRows = grafanaClient.queryInstant(
                     "sum by (application) (rate(http_server_requests_seconds_count[1m]))", ds);
             var cpuRows = grafanaClient.queryInstant(
-                    "avg by (application) (system_cpu_usage)*100", ds);
+                    "avg by (application) (process_cpu_usage)*100", ds);
 
             Map<String, double[]> metrics = new LinkedHashMap<>();
             collectJvmMetric(heapRows, metrics, 0);

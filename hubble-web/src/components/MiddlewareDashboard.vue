@@ -48,6 +48,7 @@
         <el-table-column label="实例ID" width="200" show-overflow-tooltip prop="instanceId" />
         <el-table-column label="实例名称" width="160" show-overflow-tooltip prop="instanceName" />
         <el-table-column label="规格" width="120" prop="instanceType" />
+        <el-table-column label="版本" width="100" prop="engineVersion" />
         <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'Normal' ? 'success' : 'warning'" size="small">{{ row.status }}</el-tag>
@@ -326,6 +327,7 @@
         </el-table-column>
         <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
         <el-table-column label="实例名称" min-width="160" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="版本" width="100" prop="engineVersion" />
         <el-table-column label="CPU%" width="100" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
@@ -412,6 +414,7 @@
         </el-table-column>
         <el-table-column label="实例ID" width="220" show-overflow-tooltip prop="instanceId" />
         <el-table-column label="实例名称" min-width="180" show-overflow-tooltip prop="instanceName" />
+        <el-table-column label="版本" width="100" prop="esVersion" />
         <el-table-column label="CPU%" width="120" align="right">
           <template #default="{ row }">
             <span :class="alertMetricClass(row, 'cpuUsage')">{{ num(row.cpuUsage).toFixed(1) }}%</span>
@@ -793,8 +796,12 @@ onUnmounted(() => {
 .card-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .metric-critical { color: #f56c6c; font-weight: 700; }
 .metric-warning { color: #e6a23c; font-weight: 600; }
-.metric-normal { color: #67c23a; }
+.metric-normal { color: #303133; }
 
+.el-table .el-table__cell {
+  padding: 8px 0;
+  color: #303133;
+}
 .alert-dot-red {
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
   background: #f56c6c; box-shadow: 0 0 4px #f56c6c;
