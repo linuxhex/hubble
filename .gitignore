@@ -35,3 +35,6 @@ target/
 
 # H2 file database
 data/
+
+# 本地部署脚本（内含服务器密码，禁止提交）
+deploy-95.sh
