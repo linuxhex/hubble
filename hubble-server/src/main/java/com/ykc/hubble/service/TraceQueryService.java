@@ -178,15 +178,19 @@ public class TraceQueryService {
             toTime = endDateTime.atZone(ZoneId.of("Asia/Shanghai")).toEpochSecond();
         }
 
-        // 2. 构建查询条件（不限定容器，在所有日志中搜索关键字；同时匹配 message 和容器名）
+        // 2. 构建查询条件：只采集网关(gateway-api)和 hangu 服务的接口日志（入口层服务）
         String escapedKeyword = keyword.replace("\"", "\\\"");
         String query;
         if (escapedKeyword.matches("\\S+")) {
-            // 单个词：同时匹配 message 和容器名（SLS tag 字段名不能加引号）
-            query = String.format("message: \"%s\" or __tag__:_container_name_: %s",
+            // 单个词：同时匹配 message 和容器名，限定只查网关和 hangu 服务
+            query = String.format("(message: \"%s\" or __tag__:_container_name_: %s) " +
+                    "and (__tag__:_container_name_: gateway-api or __tag__:_container_name_: hangu)",
                     escapedKeyword, escapedKeyword);
         } else {
-            query = String.format("message: \"%s\"", escapedKeyword);
+            // 多个词：只匹配 message，限定只查网关和 hangu 服务
+            query = String.format("message: \"%s\" " +
+                    "and (__tag__:_container_name_: gateway-api or __tag__:_container_name_: hangu)",
+                    escapedKeyword);
         }
 
         // 3. 验证时间戳
