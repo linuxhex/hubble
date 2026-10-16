@@ -20,7 +20,7 @@ class ServiceLoadAssessmentTest {
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
-    private final ServiceLoadAssessmentService service = new ServiceLoadAssessmentService(null);
+    private final ServiceLoadAssessmentService service = new ServiceLoadAssessmentService(null, null);
 
     private LocalDate day(int minusDays) {
         return LocalDate.now(ZONE).minusDays(minusDays);

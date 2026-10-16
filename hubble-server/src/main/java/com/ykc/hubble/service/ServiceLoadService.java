@@ -491,9 +491,14 @@ public class ServiceLoadService {
         String from = date.atStartOfDay(ZONE).toInstant().toString();
         String to = date.plusDays(1).atStartOfDay(ZONE).toInstant().toString();
 
-        // CPU：process_cpu_usage 为进程口径（0~1）；日峰值取最热副本（扩容视角），日均取副本平均
-        String cpuMaxPromql = "max by (application) (max_over_time(process_cpu_usage{application!=\"\"}[24h:5m])) * 100";
-        String cpuAvgPromql = "avg by (application) (avg_over_time(process_cpu_usage{application!=\"\"}[24h:5m])) * 100";
+        // CPU：容器口径 rate(container_cpu_usage_seconds_total) / cpu limit（和内存对齐，反映占配置的百分比）；
+        // cAdvisor 指标无 application 标签，PromQL 从 pod 名提取 deployment，Java 侧再映射回应用名
+        String cpuRatio = "rate(container_cpu_usage_seconds_total{namespace=\"default\",container!=\"\",container!=\"POD\"}[5m])"
+                + " / on(pod,container) group_left() kube_pod_container_resource_limits{namespace=\"default\",resource=\"cpu\"}";
+        String cpuMaxPromql = "max by (deployment) (label_replace(max_over_time((" + cpuRatio + ")[24h:5m]),"
+                + " \"deployment\", \"$1\", \"pod\", \"(.+)-[a-z0-9]+-[a-z0-9]+$\")) * 100";
+        String cpuAvgPromql = "avg by (deployment) (label_replace(avg_over_time((" + cpuRatio + ")[24h:5m]),"
+                + " \"deployment\", \"$1\", \"pod\", \"(.+)-[a-z0-9]+-[a-z0-9]+$\")) * 100";
         // 内存：容器口径 working_set / 容器 limit（含堆外，能反映 OOM 风险）；
         // cAdvisor 指标无 application 标签，PromQL 从 pod 名提取 deployment，Java 侧再映射回应用名
         String memRatio = "container_memory_working_set_bytes{namespace=\"default\",container!=\"\",container!=\"POD\"}"
@@ -505,8 +510,8 @@ public class ServiceLoadService {
 
         try {
             Map<String, String> deployToApp = buildDeployToAppMap(ds);
-            Map<String, BigDecimal> cpuMaxByApp = collectByMetric(grafanaClient.queryInstant(cpuMaxPromql, ds, from, to), "application", Map.of());
-            Map<String, BigDecimal> cpuAvgByApp = collectByMetric(grafanaClient.queryInstant(cpuAvgPromql, ds, from, to), "application", Map.of());
+            Map<String, BigDecimal> cpuMaxByApp = collectByMetric(grafanaClient.queryInstant(cpuMaxPromql, ds, from, to), "deployment", deployToApp);
+            Map<String, BigDecimal> cpuAvgByApp = collectByMetric(grafanaClient.queryInstant(cpuAvgPromql, ds, from, to), "deployment", deployToApp);
             Map<String, BigDecimal> memMaxByApp = collectByMetric(grafanaClient.queryInstant(memMaxPromql, ds, from, to), "deployment", deployToApp);
             Map<String, BigDecimal> memAvgByApp = collectByMetric(grafanaClient.queryInstant(memAvgPromql, ds, from, to), "deployment", deployToApp);
 
