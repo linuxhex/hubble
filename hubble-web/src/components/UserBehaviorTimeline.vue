@@ -639,7 +639,7 @@ watch(() => props.items, () => {
 }
 
 .trace-chain-tree-table .tree-row.row-leaf {
-  opacity: 0.85;
+  /* 叶子节点不再降低透明度，保证文字可读 */
 }
 
 .trace-chain-tree-table .expand-btn {
@@ -717,7 +717,7 @@ watch(() => props.items, () => {
 }
 
 .trace-chain-tree-table .info-ip {
-  color: #c0c4cc;
+  color: #606266;
   font-size: 10px;
   font-family: 'SF Mono', 'Monaco', monospace;
   flex-shrink: 0;
