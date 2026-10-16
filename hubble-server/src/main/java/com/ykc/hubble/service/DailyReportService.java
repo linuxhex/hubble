@@ -30,6 +30,7 @@ public class DailyReportService {
     public void sendDailyReport() {
         log.info("开始发送每日业务监控报告");
         try {
+            bizAnalysisService.refreshAll();
             String content = buildReportContent();
             String title = "每日业务监控报告";
             int sentCount = 0;

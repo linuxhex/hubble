@@ -5,7 +5,6 @@ import com.ykc.hubble.client.DorisQueryClient;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -53,7 +52,6 @@ public class BizAnalysisService {
         });
     }
 
-    @Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 60000)
     public void refreshAll() {
         log.info("业务监控：开始并行刷新所有缓存...");
         long startTime = System.currentTimeMillis();
