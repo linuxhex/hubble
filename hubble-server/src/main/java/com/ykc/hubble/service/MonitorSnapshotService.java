@@ -55,6 +55,8 @@ public class MonitorSnapshotService {
     private final Map<Long, Integer> consecutiveRedCount = new ConcurrentHashMap<>();
     // 上次钉钉告警时间（防抖：同一监控项 3 小时内不重复告警）
     private final Map<Long, Long> lastAlertTime = new ConcurrentHashMap<>();
+    // 告警开始时间：记录首次触发告警的时间，用于准确计算告警持续时长
+    private final Map<Long, Long> alertStartTime = new ConcurrentHashMap<>();
     // 恢复检测：告警后连续 N 次正常采集即推送恢复通知
     private final Map<Long, Integer> consecutiveNormalCount = new ConcurrentHashMap<>();
 
@@ -70,6 +72,7 @@ public class MonitorSnapshotService {
                 if (s.getConsecutiveRedCount() != null) consecutiveRedCount.put(cid, s.getConsecutiveRedCount());
                 if (s.getConsecutiveNormalCount() != null) consecutiveNormalCount.put(cid, s.getConsecutiveNormalCount());
                 if (s.getLastAlertTime() != null) lastAlertTime.put(cid, s.getLastAlertTime());
+                if (s.getAlertStartTime() != null) alertStartTime.put(cid, s.getAlertStartTime());
                 if (s.getLastStatus() != null) {
                     try {
                         lastStatus.put(cid, HealthEvaluator.Status.valueOf(s.getLastStatus()));
@@ -224,18 +227,20 @@ public class MonitorSnapshotService {
             lastStatus.put(cfg.getId(), status);
 
             if (status == HealthEvaluator.Status.RED) {
-                // 红盘防抖：连续 3 次红盘才告警，且 24 小时内不重复（同一监控项一天只告警一次）
+                // 红盘防抖：连续 N 次红盘才告警，且冷却期内不重复（同一监控项默认 48 小时内不重复告警）
                 int consecutive = consecutiveRedCount.merge(cfg.getId(), 1, Integer::sum);
                 long nowMs = System.currentTimeMillis();
                 Long lastSent = lastAlertTime.get(cfg.getId());
-                long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000);
-                int consecutiveThreshold = (int) alertThresholdService.getDouble("consecutive_red_count", 3.0);
+                long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 48.0) * 60 * 60 * 1000);
+                int consecutiveThreshold = (int) alertThresholdService.getDouble("consecutive_red_count", 5.0);
 
                 if (consecutive >= consecutiveThreshold && (lastSent == null || nowMs - lastSent >= cooldownMs)) {
                     // SSE 广播 + 钉钉群告警
                     alertPushService.pushAlert(buildAlert(cfg, count, now, status, effectiveThreshold));
                     sendDingTalkAlert(cfg, count, now, status, effectiveThreshold);
                     lastAlertTime.put(cfg.getId(), nowMs);
+                    // 记录告警开始时间（首次触发告警的时间，用于准确计算告警持续时长）
+                    alertStartTime.putIfAbsent(cfg.getId(), nowMs);
                 }
             } else {
                 // 非红盘重置连续计数
@@ -248,16 +253,36 @@ public class MonitorSnapshotService {
                 }
 
                 // 恢复检测：此前发过钉钉告警，且连续 N 次正常采集 → 推送恢复通知
+                // 增加时间合理性检查：告警必须在合理时间范围内（默认 24 小时），避免历史告警误触发恢复通知
                 if (status == HealthEvaluator.Status.NORMAL && lastAlertTime.containsKey(cfg.getId())) {
-                    int consecutive = consecutiveNormalCount.merge(cfg.getId(), 1, Integer::sum);
-                    int recoverAfter = (int) alertThresholdService.getDouble("consecutive_recover_count", 3.0);
-                    if (consecutive >= recoverAfter) {
-                        long firedAt = lastAlertTime.remove(cfg.getId());
-                        long durationMinutes = Math.max(1, (System.currentTimeMillis() - firedAt) / 60000);
+                    Long alertTime = lastAlertTime.get(cfg.getId());
+                    Long startTime = alertStartTime.get(cfg.getId());
+                    long nowMs = System.currentTimeMillis();
+                    long alertAgeHours = (nowMs - alertTime) / (1000 * 60 * 60);
+                    int maxAlertAgeHours = (int) alertThresholdService.getDouble("recovery_max_alert_age_hours", 24.0);
+                    
+                    // 告警超过合理时间范围，清除标记但不发恢复通知
+                    if (alertAgeHours > maxAlertAgeHours) {
+                        log.info("监控项[{}] {} 告警已超过 {} 小时（实际 {} 小时），清除告警标记但不发恢复通知",
+                                cfg.getId(), cfg.getTitle(), maxAlertAgeHours, alertAgeHours);
+                        lastAlertTime.remove(cfg.getId());
+                        alertStartTime.remove(cfg.getId());
                         consecutiveNormalCount.put(cfg.getId(), 0);
-                        log.info("监控项[{}] {} 已恢复正常，告警持续约 {} 分钟", cfg.getId(), cfg.getTitle(), durationMinutes);
-                        alertPushService.pushAlert(buildRecoveryAlert(cfg, count, now, durationMinutes));
-                        sendDingTalkRecovery(cfg, count, now, durationMinutes, effectiveThreshold);
+                    } else {
+                        int consecutive = consecutiveNormalCount.merge(cfg.getId(), 1, Integer::sum);
+                        int recoverAfter = (int) alertThresholdService.getDouble("consecutive_recover_count", 3.0);
+                        if (consecutive >= recoverAfter) {
+                            lastAlertTime.remove(cfg.getId());
+                            // 使用告警开始时间到当前时间的实际时长，准确计算告警持续时长
+                            long durationMinutes = startTime != null 
+                                    ? Math.max(1, (nowMs - startTime) / (1000 * 60))
+                                    : Math.max(1, (nowMs - alertTime) / (1000 * 60));
+                            alertStartTime.remove(cfg.getId());
+                            consecutiveNormalCount.put(cfg.getId(), 0);
+                            log.info("监控项[{}] {} 已恢复正常，告警持续约 {} 分钟", cfg.getId(), cfg.getTitle(), durationMinutes);
+                            alertPushService.pushAlert(buildRecoveryAlert(cfg, count, now, durationMinutes));
+                            sendDingTalkRecovery(cfg, count, now, durationMinutes, effectiveThreshold);
+                        }
                     }
                 } else if (status != HealthEvaluator.Status.NORMAL) {
                     // 粉盘说明尚未完全恢复，重置恢复计数
@@ -285,6 +310,7 @@ public class MonitorSnapshotService {
             state.setConsecutiveRedCount(consecutiveRedCount.getOrDefault(configId, 0));
             state.setConsecutiveNormalCount(consecutiveNormalCount.getOrDefault(configId, 0));
             state.setLastAlertTime(lastAlertTime.get(configId));
+            state.setAlertStartTime(alertStartTime.get(configId));
             HealthEvaluator.Status st = lastStatus.get(configId);
             state.setLastStatus(st == null ? null : st.name());
             state.setLastCollectAt(lastCollectAt.get(configId));
@@ -327,7 +353,7 @@ public class MonitorSnapshotService {
             double usagePercent = effectiveThreshold > 0 ? (count * 100.0 / effectiveThreshold) : 0;
 
             String dashboardUrl = monitorProperties.getDashboardUrl();
-            String detailUrl = String.format("%s/#/alert-dashboard?configId=%d", dashboardUrl, cfg.getId());
+            String detailUrl = String.format("%s/alert-config", dashboardUrl);
 
             // Extract service name from keyword template ID (e.g., "tpl-user-error" -> "user-service")
             String serviceName = extractServiceName(cfg.getKeywordTemplateId());
@@ -415,7 +441,7 @@ public class MonitorSnapshotService {
 
             String serviceName = extractServiceName(cfg.getKeywordTemplateId());
             String dashboardUrl = monitorProperties.getDashboardUrl();
-            String detailUrl = String.format("%s/#/alert-dashboard?configId=%d", dashboardUrl, cfg.getId());
+            String detailUrl = String.format("%s/alert-config", dashboardUrl);
 
             StringBuilder text = new StringBuilder();
             text.append("## 🟢 **已恢复**\n\n");
@@ -425,7 +451,7 @@ public class MonitorSnapshotService {
             }
             text.append("---\n\n");
             text.append("### 恢复情况\n\n");
-            text.append(String.format("> 告警持续：<font color=\"#52C41A\">**约 %d 分钟**</font>\n\n", durationMinutes));
+            text.append(String.format("> 告警持续：<font color=\"#52C41A\">**%s**</font>\n\n", formatDuration(durationMinutes)));
             text.append(String.format("> 当前错误量：**%d** 次（红盘阈值 %d）\n\n", count, effectiveThreshold));
             text.append(String.format("> 恢复检测时间：%s\n\n", timeStr));
             text.append("---\n\n");
@@ -436,6 +462,18 @@ public class MonitorSnapshotService {
         } catch (Exception e) {
             log.error("监控项[{}]恢复通知发送失败: {}", cfg.getId(), e.getMessage());
         }
+    }
+
+    private String formatDuration(long minutes) {
+        if (minutes < 60) return "约 " + minutes + " 分钟";
+        if (minutes < 1440) {
+            long hours = minutes / 60;
+            long remainMin = minutes % 60;
+            return remainMin == 0 ? "约 " + hours + " 小时" : "约 " + hours + " 小时 " + remainMin + " 分钟";
+        }
+        long days = minutes / 1440;
+        long remainHours = (minutes % 1440) / 60;
+        return remainHours == 0 ? "约 " + days + " 天" : "约 " + days + " 天 " + remainHours + " 小时";
     }
 
     private String extractServiceName(String keywordTemplateId) {
@@ -549,10 +587,10 @@ public class MonitorSnapshotService {
                     .sum() / n;
             double stddev = Math.sqrt(variance);
 
-            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 3.0);
-            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 2.0);
-            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 5.0);
-            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 3.0);
+            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 4.0);
+            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 3.0);
+            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 8.0);
+            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 5.0);
             int redFloor = (int) alertThresholdService.getDouble("dynamic_red_floor", 10.0);
             int yellowFloor = (int) alertThresholdService.getDouble("dynamic_yellow_floor", 5.0);
 

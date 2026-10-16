@@ -223,7 +223,7 @@ public class DependencyErrorRateAlertService {
         }
 
         try {
-            String dashboardUrl = monitorProperties.getDashboardUrl() + "/#/service-load";
+            String dashboardUrl = monitorProperties.getDashboardUrl() + "/service-load";
             dingTalkClient.sendRobotActionCard("依赖服务错误率告警", md.toString(), "查看服务负载", dashboardUrl, true);
         } catch (Exception e) {
             log.warn("依赖服务错误率告警钉钉推送失败: {}", e.getMessage());

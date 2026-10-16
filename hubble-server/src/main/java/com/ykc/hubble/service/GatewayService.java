@@ -1600,23 +1600,40 @@ public class GatewayService {
         Map<String, long[]> currentApiStats;
         Map<String, long[]> previousApiStats;
         long t1 = System.currentTimeMillis();
+        
+        // 优化：并行查询当前和上期时段，减少总耗时
+        CompletableFuture<Map<String, long[]>> currentFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, currentRange[0], currentRange[1]);
+            } catch (Exception e) {
+                log.error("查询当前时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
+        CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, previousRange[0], previousRange[1]);
+            } catch (Exception e) {
+                log.error("查询上期时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
         try {
-            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
+            currentApiStats = currentFuture.get();
+            long t2 = System.currentTimeMillis();
+            log.info("劣化对比: 当前时段查询完成, 耗时={}ms, apis={}", t2 - t1, currentApiStats.size());
+            
+            previousApiStats = previousFuture.get();
+            long t3 = System.currentTimeMillis();
+            log.info("劣化对比: 上期时段查询完成, 耗时={}ms, apis={}", t3 - t1, previousApiStats.size());
+            log.info("劣化对比: 并行查询总耗时={}ms", t3 - t1);
         } catch (Exception e) {
-            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            log.error("并行查询失败: {}", e.getMessage(), e);
             currentApiStats = new HashMap<>();
-        }
-        long t2 = System.currentTimeMillis();
-        log.info("劣化对比: 当前时段查询完成, 耗时={}ms, apis={}", t2 - t1, currentApiStats.size());
-
-        try {
-            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
-        } catch (Exception e) {
-            log.error("查询上期时段API失败: {}", e.getMessage(), e);
             previousApiStats = new HashMap<>();
         }
-        long t3 = System.currentTimeMillis();
-        log.info("劣化对比: 上期时段查询完成, 耗时={}ms, apis={}", t3 - t2, previousApiStats.size());
 
         log.info("劣化对比: compareMode={}, currentRange=[{},{}], previousRange=[{},{}], currentApis={}, previousApis={}",
             compareMode, currentRange[0], currentRange[1], previousRange[0], previousRange[1],
@@ -1635,20 +1652,15 @@ public class GatewayService {
             double currentP60 = cur != null ? cur[1] : 0;
             double previousP60 = prev != null ? prev[1] : 0;
 
-            // 过滤：必须有足够的请求数且有RT数据，否则P60无统计意义
-            int minReq = (int) alertThresholdService.getDouble("min_request_count", 10.0);
-            if (currentCount < minReq && previousCount < minReq) { filterNoData++; continue; }
+            // 过滤：当前和上期都无数据则跳过
+            if (currentCount == 0 && previousCount == 0) { filterNoData++; continue; }
             if (currentP60 == 0 && previousP60 == 0) { filterNoData++; continue; }
-            // 过滤：必须有上期数据（排除新增API，新增API不算劣化）
-            if (previousCount < minReq) { filterNoPrevCount++; continue; }
-            if (previousP60 == 0) { filterNoPrevP60++; continue; }
 
-            // 计算P60 RT变化率作为劣化幅度
-            double rtChangeRate = (currentP60 - previousP60) * 100.0 / previousP60;
+            // 计算 P60 RT 变化率作为劣化幅度
+            double rtChangeRate = previousP60 > 0 ? (currentP60 - previousP60) * 100.0 / previousP60 : 0;
 
-            // 过滤：只显示达到上榜门槛的劣化（默认 20%，低于门槛视为正常抖动，避免列表刷屏）
-            double minChangeRate = alertThresholdService.getDouble("degradation_min_change_rate", 20.0);
-            if (rtChangeRate < minChangeRate) { filterNoDegradation++; continue; }
+            // 过滤：劣化幅度为负且无当前数据时跳过（RT 改善且无当前请求，无统计意义）
+            if (rtChangeRate < 0 && currentCount == 0) { filterNoDegradation++; continue; }
 
             ApiDegradationVO vo = new ApiDegradationVO();
             vo.setApiPath(apiPath);
@@ -1678,15 +1690,13 @@ public class GatewayService {
     }
 
     /**
-     * 接口劣化告警：RT 劣化幅度 >220% 且当前 P60 RT 超过秒级阈值（>1000ms）才触发钉钉 + SSE，同一接口 24 小时内不重复告警。
-     * 劣化幅度小（<220%）不告警；幅度达标但当前 RT 仍是毫秒级（≤1000ms，接口本身很快）也不告警，避免对低 RT 接口的误报。
+     * 接口劣化告警：RT 劣化幅度 >300% 且当前 P60 RT 超过 2000ms 才触发钉钉 + SSE，同一接口 48 小时内不重复告警。
      */
     private void checkDegradationAlert(List<ApiDegradationVO> degradationList) {
         long now = System.currentTimeMillis();
-        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000); // 防抖，同一接口冷却期内只告警一次
-        // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
-        double degradationThreshold = alertThresholdService.getDouble("degradation_threshold", 220.0);
-        double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 1000.0);
+        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 48.0) * 60 * 60 * 1000);
+        double degradationThreshold = alertThresholdService.getDouble("degradation_threshold", 300.0);
+        double minRtMs = alertThresholdService.getDouble("degradation_min_rt", 2000.0);
 
         for (ApiDegradationVO vo : degradationList) {
             // 劣化幅度小不告警
@@ -1722,7 +1732,7 @@ public class GatewayService {
                         .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                         .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
                 String dashboardUrl = monitorProperties.getDashboardUrl();
-                String detailUrl = dashboardUrl + "/#/degradation-ranking?api=" + java.net.URLEncoder.encode(apiPath, java.nio.charset.StandardCharsets.UTF_8);
+                String detailUrl = dashboardUrl + "/degradation-ranking?api=" + java.net.URLEncoder.encode(apiPath, java.nio.charset.StandardCharsets.UTF_8);
                 String title = "接口劣化告警";
                 StringBuilder md = new StringBuilder();
                 md.append("### 🔴 接口劣化告警\n\n");
@@ -1922,16 +1932,32 @@ public class GatewayService {
 
         Map<String, long[]> currentApiStats;
         Map<String, long[]> previousApiStats;
+        
+        // 优化：并行查询当前和上期时段，减少总耗时
+        CompletableFuture<Map<String, long[]>> currentFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, currentRange[0], currentRange[1]);
+            } catch (Exception e) {
+                log.error("查询当前时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
+        CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, previousRange[0], previousRange[1]);
+            } catch (Exception e) {
+                log.error("查询上期时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
         try {
-            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
+            currentApiStats = currentFuture.get();
+            previousApiStats = previousFuture.get();
         } catch (Exception e) {
-            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            log.error("并行查询失败: {}", e.getMessage(), e);
             currentApiStats = new HashMap<>();
-        }
-        try {
-            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
-        } catch (Exception e) {
-            log.error("查询上期时段API失败: {}", e.getMessage(), e);
             previousApiStats = new HashMap<>();
         }
 
@@ -1998,10 +2024,9 @@ public class GatewayService {
      */
     private void checkTrafficSurgeAlert(List<ApiDegradationVO> surgeList, long periodSeconds) {
         long now = System.currentTimeMillis();
-        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 24.0) * 60 * 60 * 1000); // 防抖，同一接口冷却期内只告警一次
-        // 阈值从配置读取（替代硬编码），支持运维在告警配置页动态调整
-        double surgeThreshold = alertThresholdService.getDouble("traffic_surge_threshold", 200.0);
-        double minQps = alertThresholdService.getDouble("traffic_surge_min_qps", 50.0);
+        long cooldownMs = (long) (alertThresholdService.getDouble("alert_cooldown_hours", 48.0) * 60 * 60 * 1000);
+        double surgeThreshold = alertThresholdService.getDouble("traffic_surge_threshold", 300.0);
+        double minQps = alertThresholdService.getDouble("traffic_surge_min_qps", 100.0);
 
         for (ApiDegradationVO vo : surgeList) {
             // 涨幅未达 200% 不告警
@@ -2039,7 +2064,7 @@ public class GatewayService {
                         .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                         .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
                 String dashboardUrl = monitorProperties.getDashboardUrl();
-                String detailUrl = dashboardUrl + "/#/traffic-surge";
+                String detailUrl = dashboardUrl + "/traffic-surge";
                 String title = "流量暴涨告警";
                 StringBuilder md = new StringBuilder();
                 md.append("### 🔴 流量暴涨告警\n\n");
@@ -2090,16 +2115,32 @@ public class GatewayService {
 
         Map<String, long[]> currentApiStats;
         Map<String, long[]> previousApiStats;
+        
+        // 优化：并行查询当前和上期时段，减少总耗时
+        CompletableFuture<Map<String, long[]>> currentFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, currentRange[0], currentRange[1]);
+            } catch (Exception e) {
+                log.error("查询当前时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
+        CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                return queryApiStats(logstore, previousRange[0], previousRange[1]);
+            } catch (Exception e) {
+                log.error("查询上期时段API失败: {}", e.getMessage(), e);
+                return new HashMap<String, long[]>();
+            }
+        });
+        
         try {
-            currentApiStats = queryApiStats(logstore, currentRange[0], currentRange[1]);
+            currentApiStats = currentFuture.get();
+            previousApiStats = previousFuture.get();
         } catch (Exception e) {
-            log.error("查询当前时段API失败: {}", e.getMessage(), e);
+            log.error("并行查询失败: {}", e.getMessage(), e);
             currentApiStats = new HashMap<>();
-        }
-        try {
-            previousApiStats = queryApiStats(logstore, previousRange[0], previousRange[1]);
-        } catch (Exception e) {
-            log.error("查询上期时段API失败: {}", e.getMessage(), e);
             previousApiStats = new HashMap<>();
         }
 

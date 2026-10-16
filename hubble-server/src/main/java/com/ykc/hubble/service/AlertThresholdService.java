@@ -36,10 +36,10 @@ public class AlertThresholdService {
      */
     private static final List<ThresholdDef> DEFAULT_THRESHOLDS = List.of(
             // ===== 异常大盘：动态基线（均值+标准差） =====
-            new ThresholdDef("dynamic_red_sigma", "3", "异常大盘动态基线红盘：偏离均值倍数(标准差σ)"),
-            new ThresholdDef("dynamic_yellow_sigma", "2", "异常大盘动态基线黄盘：偏离均值倍数(标准差σ)"),
-            new ThresholdDef("dynamic_red_mean_mult", "5", "异常大盘动态基线红盘：达到均值的倍数"),
-            new ThresholdDef("dynamic_yellow_mean_mult", "3", "异常大盘动态基线黄盘：达到均值的倍数"),
+            new ThresholdDef("dynamic_red_sigma", "4", "异常大盘动态基线红盘：偏离均值倍数(标准差σ)"),
+            new ThresholdDef("dynamic_yellow_sigma", "3", "异常大盘动态基线黄盘：偏离均值倍数(标准差σ)"),
+            new ThresholdDef("dynamic_red_mean_mult", "8", "异常大盘动态基线红盘：达到均值的倍数"),
+            new ThresholdDef("dynamic_yellow_mean_mult", "5", "异常大盘动态基线黄盘：达到均值的倍数"),
             new ThresholdDef("dynamic_red_floor", "10", "异常大盘动态基线红盘绝对下限(条/分钟)"),
             new ThresholdDef("dynamic_yellow_floor", "5", "异常大盘动态基线黄盘绝对下限(条/分钟)"),
             // ===== 异常大盘：分钟环比 =====
@@ -48,26 +48,27 @@ public class AlertThresholdService {
             new ThresholdDef("minute_red_floor", "5", "异常大盘分钟环比红盘绝对下限(条/分钟)"),
             new ThresholdDef("minute_yellow_floor", "2", "异常大盘分钟环比黄盘绝对下限(条/分钟)"),
             // ===== 红盘防抖/恢复/冷却 =====
-            new ThresholdDef("consecutive_red_count", "3", "连续命中红盘次数达到该值才发钉钉告警(防抖)"),
+            new ThresholdDef("consecutive_red_count", "5", "连续命中红盘次数达到该值才发钉钉告警(防抖)"),
             new ThresholdDef("consecutive_recover_count", "3", "连续正常次数达到该值才解除告警状态"),
-            new ThresholdDef("alert_cooldown_hours", "24", "同一对象告警冷却时长(小时)，冷却期内不重复告警"),
+            new ThresholdDef("alert_cooldown_hours", "48", "同一对象告警冷却时长(小时)，冷却期内不重复告警"),
             // ===== 接口劣化 =====
-            new ThresholdDef("degradation_threshold", "220", "接口劣化告警：P60 RT 达到基线的百分比(220=2.2倍)"),
-            new ThresholdDef("degradation_min_rt", "1000", "接口劣化告警：当前 P60 RT 最低门槛(ms)，低于不告警"),
+            new ThresholdDef("degradation_threshold", "300", "接口劣化告警：P60 RT 达到基线的百分比(300=3倍)"),
+            new ThresholdDef("degradation_min_rt", "2000", "接口劣化告警：当前 P60 RT 最低门槛(ms)，低于不告警"),
             new ThresholdDef("degradation_min_change_rate", "20", "接口劣化上榜门槛：RT 变化率最低百分比(%)"),
             new ThresholdDef("min_request_count", "10", "接口劣化/流量暴涨检测的最小请求数样本"),
             // ===== 流量暴涨 =====
-            new ThresholdDef("traffic_surge_threshold", "200", "流量暴涨告警：流量达到基线的百分比(200=2倍)"),
+            new ThresholdDef("traffic_surge_threshold", "300", "流量暴涨告警：流量达到基线的百分比(300=4倍)"),
             new ThresholdDef("traffic_surge_min_rate", "50", "流量暴涨上榜门槛：同比涨幅最低百分比(%)，默认对比昨天同时段"),
-            new ThresholdDef("traffic_surge_min_qps", "50", "流量暴涨告警：当前 QPS 最低门槛，低于不告警"),
+            new ThresholdDef("traffic_surge_min_qps", "100", "流量暴涨告警：当前 QPS 最低门槛，低于不告警"),
             // ===== 依赖服务 RT 同比巡检 =====
             new ThresholdDef("dependency_rt_alert_enabled", "1", "依赖服务 RT 同比巡检开关(1=开启 0=关闭)"),
-            new ThresholdDef("dependency_rt_surge_ratio", "100", "依赖服务RT同比涨幅阈值(%)，今天当前5分钟均值对比昨天同一5分钟均值"),
-            new ThresholdDef("dependency_rt_abs_floor_ms", "1500", "依赖服务RT全局绝对下限(ms)，当前RT低于此值不告警，过滤ms级噪声"),
-            new ThresholdDef("dependency_rt_floor_ms", "1000", "依赖服务RT低流量绝对下限(ms)，仅对未达高流量门槛的组合生效"),
-            new ThresholdDef("dependency_rt_min_count", "3000", "依赖服务高流量门槛(次/最近1分钟)，达到后免低流量RT下限，但仍受全局绝对下限约束"),
-            new ThresholdDef("dependency_rt_min_delta_ms", "1", "依赖服务高流量组合的RT净增下限(ms)，过滤亚毫秒级指标(如Kafka)的相对涨幅噪声"),
-            new ThresholdDef("dependency_rt_alert_cooldown_minutes", "180", "依赖服务RT告警冷却时长(分钟)"),
+            new ThresholdDef("dependency_rt_high_ms", "3000", "依赖服务RT高阈值(ms)，RT>3s且涨幅>500%时告警"),
+            new ThresholdDef("dependency_rt_critical_ms", "15000", "依赖服务RT严重阈值(ms)，RT>15s直接告警"),
+            new ThresholdDef("dependency_rt_low_ms", "2000", "依赖服务RT低阈值(ms)，RT>2s且涨幅>2000%时告警"),
+            new ThresholdDef("dependency_rt_surge_high_ratio", "500", "依赖服务RT高涨幅阈值(%)，配合RT>3s使用"),
+            new ThresholdDef("dependency_rt_surge_critical_ratio", "2000", "依赖服务RT严重涨幅阈值(%)，配合RT>2s使用"),
+            new ThresholdDef("dependency_rt_alert_cooldown_minutes", "360", "依赖服务RT告警冷却时长(分钟)"),
+            new ThresholdDef("dependency_rt_min_traffic", "30", "依赖服务RT告警最小流量门槛(次/分钟)，低于不告警，过滤低流量噪声"),
             // ===== 依赖服务错误率告警 =====
             new ThresholdDef("dependency_error_alert_enabled", "1", "依赖服务错误率告警开关(1=开启 0=关闭)"),
             new ThresholdDef("dependency_error_rate_threshold", "10", "依赖服务错误率告警阈值(%)，超过此值触发告警"),

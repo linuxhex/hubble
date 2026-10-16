@@ -24,13 +24,18 @@ public class AlertMonitorState {
     @TableField("consecutive_normal_count")
     private Integer consecutiveNormalCount;
 
-    @TableField("last_alert_time")
+    // 可空字段需强制写 null（updateById 默认忽略 null，会导致恢复后旧告警状态残留 H2，
+    // 重启 init() 恢复出过期状态误发"持续数小时"的恢复通知）
+    @TableField(value = "last_alert_time", updateStrategy = FieldStrategy.ALWAYS)
     private Long lastAlertTime;
 
-    @TableField("last_status")
+    @TableField(value = "alert_start_time", updateStrategy = FieldStrategy.ALWAYS)
+    private Long alertStartTime;
+
+    @TableField(value = "last_status", updateStrategy = FieldStrategy.ALWAYS)
     private String lastStatus;
 
-    @TableField("last_collect_at")
+    @TableField(value = "last_collect_at", updateStrategy = FieldStrategy.ALWAYS)
     private Long lastCollectAt;
 
     @TableField("updated_at")

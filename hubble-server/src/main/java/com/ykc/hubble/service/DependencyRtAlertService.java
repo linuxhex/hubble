@@ -52,13 +52,15 @@ public class DependencyRtAlertService {
             if (alertThresholdService.getDouble("dependency_rt_alert_enabled", 1.0) <= 0) {
                 return;
             }
-            double surgeRatio = alertThresholdService.getDouble("dependency_rt_surge_ratio", 500.0);
-            double absFloorMs = alertThresholdService.getDouble("dependency_rt_abs_floor_ms", 1500.0);
-            double floorMs = alertThresholdService.getDouble("dependency_rt_floor_ms", 1000.0);
-            double minCount = alertThresholdService.getDouble("dependency_rt_min_count", 3000.0);
-            double deltaMs = alertThresholdService.getDouble("dependency_rt_min_delta_ms", 1.0);
-            long cooldownMs = (long) (alertThresholdService.getDouble("dependency_rt_alert_cooldown_minutes", 180.0)
+            // 告警阈值配置（从 AlertThresholdService 读取，默认值在 AlertThresholdService.DEFAULT_THRESHOLDS 中定义）
+            double rtHighMs = alertThresholdService.getDouble("dependency_rt_high_ms", 3000.0);
+            double rtCriticalMs = alertThresholdService.getDouble("dependency_rt_critical_ms", 15000.0);
+            double rtLowMs = alertThresholdService.getDouble("dependency_rt_low_ms", 2000.0);
+            double surgeHighRatio = alertThresholdService.getDouble("dependency_rt_surge_high_ratio", 500.0);
+            double surgeCriticalRatio = alertThresholdService.getDouble("dependency_rt_surge_critical_ratio", 2000.0);
+            long cooldownMs = (long) (alertThresholdService.getDouble("dependency_rt_alert_cooldown_minutes", 360.0)
                     * 60 * 1000);
+            double minTraffic = alertThresholdService.getDouble("dependency_rt_min_traffic", 30.0);
 
             long nowMs = System.currentTimeMillis();
             // ARMS 官方无 appstat.dependency（InternalError）；应用依赖调用统计指标是 appstat.incall，
@@ -147,23 +149,19 @@ public class DependencyRtAlertService {
             }
 
             int alertCount = 0;
-            int filteredBySurge = 0, filteredByAbsFloor = 0, filteredByTrafficFloor = 0, filteredByCooldown = 0;
+            int filteredByThreshold = 0, filteredByCooldown = 0, filteredByTraffic = 0;
             for (var e : merged.entrySet()) {
                 double[] v = e.getValue();
                 if (v[1] == 0 || v[4] == 0) continue;
+                if (v[2] < minTraffic) { filteredByTraffic++; continue; }
                 double curRt = v[0] / v[1];
                 double prevRt = v[3] / v[4];
                 if (prevRt <= 0) continue;
                 double surge = (curRt - prevRt) / prevRt * 100;
-                if (surge < surgeRatio) { filteredBySurge++; continue; }
-                // 全局绝对 RT 下限：当前 RT 低于阈值（默认 1500ms）的组合一律不告警，
-                // 过滤 ms 级噪声（如 Redis 2ms→5ms、Kafka 亚毫秒级抖动）
-                if (curRt < absFloorMs) { filteredByAbsFloor++; continue; }
-                // 高流量组合涨幅达标且 RT 净增达 delta 下限即告警；
-                // 低流量组合额外要求当前 RT 达低流量下限（默认 1000ms）
-                boolean highTraffic = v[2] >= minCount;
-                if (!highTraffic && curRt < floorMs) { filteredByTrafficFloor++; continue; }
-                if (highTraffic && curRt - prevRt < deltaMs) { filteredByTrafficFloor++; continue; }
+                boolean condition1 = curRt > rtHighMs && surge > surgeHighRatio;
+                boolean condition2 = curRt > rtCriticalMs;
+                boolean condition3 = curRt > rtLowMs && surge > surgeCriticalRatio;
+                if (!condition1 && !condition2 && !condition3) { filteredByThreshold++; continue; }
 
                 Long last = lastAlertSent.get(e.getKey());
                 if (last != null && nowMs - last < cooldownMs) { filteredByCooldown++; continue; }
@@ -174,9 +172,9 @@ public class DependencyRtAlertService {
             if (alertCount > 0) {
                 log.info("依赖服务 RT 巡检：{} 个组合触发同比告警", alertCount);
             }
-            log.info("依赖服务 RT 巡检完成: 应用数={}, 组合数={}, 告警={}, 过滤(涨幅不足={}, 全局RT下限={}, 流量/净增={}, 冷却={})",
+            log.info("依赖服务 RT 巡检完成: 应用数={}, 组合数={}, 告警={}, 过滤(流量不足={}, 阈值未达={}, 冷却={})",
                     futures.length, merged.size(), alertCount,
-                    filteredBySurge, filteredByAbsFloor, filteredByTrafficFloor, filteredByCooldown);
+                    filteredByTraffic, filteredByThreshold, filteredByCooldown);
         } catch (Exception e) {
             log.warn("依赖服务 RT 巡检异常: {}", e.getMessage());
         }
@@ -288,7 +286,7 @@ public class DependencyRtAlertService {
         }
 
         try {
-            String dashboardUrl = monitorProperties.getDashboardUrl() + "/#/service-load";
+            String dashboardUrl = monitorProperties.getDashboardUrl() + "/service-load";
             dingTalkClient.sendRobotActionCard("依赖服务RT告警", md.toString(), "查看服务负载", dashboardUrl, true);
         } catch (Exception e) {
             log.warn("依赖服务告警钉钉推送失败: {}", e.getMessage());

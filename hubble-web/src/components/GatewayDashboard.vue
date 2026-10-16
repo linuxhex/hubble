@@ -26,7 +26,7 @@
           <div class="card-value">{{ formatNumber(overview.totalRequests) }}</div>
           <div class="card-trend" :class="trendClass(overview.totalTrend, 'positive')">
             <span>{{ trendArrow(overview.totalTrend) }} {{ formatPercent(Math.abs(overview.totalTrend)) }}</span>
-            <span class="trend-label">较上周期</span>
+            <span class="trend-label">同比昨日</span>
           </div>
         </div>
         <div class="overview-card">
@@ -34,7 +34,7 @@
           <div class="card-value">{{ overview.avgResponseTime }}ms</div>
           <div class="card-trend" :class="trendClass(overview.avgTrend, 'negative')">
             <span>{{ trendArrow(overview.avgTrend) }} {{ formatPercent(Math.abs(overview.avgTrend)) }}</span>
-            <span class="trend-label">较上周期</span>
+            <span class="trend-label">同比昨日</span>
           </div>
         </div>
         <div class="overview-card">
@@ -42,7 +42,7 @@
           <div class="card-value">{{ formatPercent(overview.errorRate) }}</div>
           <div class="card-trend" :class="trendClass(overview.errorTrend, 'negative')">
             <span>{{ trendArrow(overview.errorTrend) }} {{ formatPercent(Math.abs(overview.errorTrend)) }}</span>
-            <span class="trend-label">较上周期</span>
+            <span class="trend-label">同比昨日</span>
           </div>
         </div>
         <div class="overview-card">
@@ -54,7 +54,7 @@
           <div class="card-value">{{ formatNumber(overview.qps) }}</div>
           <div class="card-trend" :class="trendClass(overview.qpsTrend, 'positive')">
             <span>{{ trendArrow(overview.qpsTrend) }} {{ formatPercent(Math.abs(overview.qpsTrend)) }}</span>
-            <span class="trend-label">较上周期</span>
+            <span class="trend-label">同比昨日</span>
           </div>
         </div>
       </div>

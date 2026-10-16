@@ -38,9 +38,31 @@
       <div v-if="downstreamServices.length > 0" class="section">
         <h4>下游依赖</h4>
         <div class="downstream-tags">
-          <el-tag v-for="ds in downstreamServices" :key="ds" type="info" size="small" class="ds-tag">
-            {{ ds }}
-          </el-tag>
+          <el-tooltip
+            v-for="ds in downstreamServices"
+            :key="ds.name"
+            placement="top"
+            :show-after="200"
+          >
+            <template #content>
+              <div v-if="ds.status !== 'UNKNOWN'">
+                <div>错误数: {{ ds.errorCount }}</div>
+                <div>红盘阈值: {{ ds.redThreshold }}</div>
+                <div>粉盘阈值: {{ ds.yellowThreshold }}</div>
+                <div :style="{ color: statusColor(ds.status) }">状态: {{ statusLabel(ds.status) }}</div>
+              </div>
+              <div v-else style="color:#999">未配置监控</div>
+            </template>
+            <span
+              class="ds-tag"
+              :class="dsStatusClass(ds.status)"
+            >
+              <span class="ds-dot" :class="dsDotClass(ds.status)"></span>
+              {{ ds.name }}
+              <span v-if="ds.status === 'RED'" class="ds-badge">红盘</span>
+              <span v-else-if="ds.status === 'YELLOW'" class="ds-badge yellow">粉盘</span>
+            </span>
+          </el-tooltip>
         </div>
       </div>
 
@@ -90,6 +112,34 @@ const loading = ref(false)
 const errorLogs = ref([])
 const breakdown = ref({})
 const downstreamServices = ref([])
+
+const dsStatusClass = (status) => {
+  if (status === 'RED') return 'ds-tag-red'
+  if (status === 'YELLOW') return 'ds-tag-yellow'
+  if (status === 'GREEN') return 'ds-tag-green'
+  return 'ds-tag-unknown'
+}
+
+const dsDotClass = (status) => {
+  if (status === 'RED') return 'dot-red'
+  if (status === 'YELLOW') return 'dot-yellow'
+  if (status === 'GREEN') return 'dot-green'
+  return 'dot-unknown'
+}
+
+const statusColor = (status) => {
+  if (status === 'RED') return '#ff4d4f'
+  if (status === 'YELLOW') return '#faad14'
+  if (status === 'GREEN') return '#52c41a'
+  return '#999'
+}
+
+const statusLabel = (status) => {
+  if (status === 'RED') return '告警'
+  if (status === 'YELLOW') return '预警'
+  if (status === 'GREEN') return '正常'
+  return '未知'
+}
 
 const fetchData = async () => {
   if (!props.serviceName) return
@@ -174,11 +224,68 @@ watch(() => props.visible, (val) => {
 .downstream-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .ds-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 3px;
   font-size: 12px;
+  line-height: 1.4;
+  cursor: default;
+}
+
+.ds-tag-red {
+  background: #fff1f0;
+  border: 1px solid #ffa39e;
+  color: #cf1322;
+}
+
+.ds-tag-yellow {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  color: #ad6800;
+}
+
+.ds-tag-green {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #389e0d;
+}
+
+.ds-tag-unknown {
+  background: #fafafa;
+  border: 1px solid #d9d9d9;
+  color: #999;
+}
+
+.ds-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-red { background: #ff4d4f; }
+.dot-yellow { background: #faad14; }
+.dot-green { background: #52c41a; }
+.dot-unknown { background: #d9d9d9; }
+
+.ds-badge {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: #ff4d4f;
+  color: white;
+  margin-left: 2px;
+}
+
+.ds-badge.yellow {
+  background: #faad14;
+  color: white;
 }
 
 .trace-id {

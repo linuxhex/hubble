@@ -2,6 +2,7 @@ package com.ykc.hubble.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ykc.hubble.client.DingTalkClient;
+import com.ykc.hubble.config.MonitorProperties;
 import com.ykc.hubble.entity.AlertConfigRobot;
 import com.ykc.hubble.entity.DingtalkRobot;
 import com.ykc.hubble.mapper.AlertConfigRobotMapper;
@@ -26,6 +27,7 @@ public class DingtalkRobotService {
     private final DingtalkRobotMapper robotMapper;
     private final AlertConfigRobotMapper configRobotMapper;
     private final DingTalkClient dingTalkClient;
+    private final MonitorProperties monitorProperties;
 
     /** 列出所有机器人 */
     public List<DingtalkRobot> list() {
@@ -82,7 +84,7 @@ public class DingtalkRobotService {
                 "> 测试时间：" + java.time.LocalDateTime.now() + "\n\n";
         try {
             dingTalkClient.sendRobotActionCard(robot.getWebhook(), robot.getSecret(),
-                    title, markdown, "查看大盘", "http://localhost:5173", true);
+                    title, markdown, "查看大盘", monitorProperties.getDashboardUrl() + "/gateway", true);
             return true;
         } catch (Exception e) {
             log.error("测试发送钉钉消息失败: robotId={}, error={}", robotId, e.getMessage());

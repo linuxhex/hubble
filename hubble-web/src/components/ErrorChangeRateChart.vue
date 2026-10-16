@@ -1,5 +1,5 @@
 <template>
-  <el-card header="分类环比" v-loading="loading" class="error-change-rate-chart-card">
+  <el-card header="错误变化率趋势" v-loading="loading" class="error-change-rate-chart-card">
     <div v-if="!hasSeries && !loading" class="no-data">
       <el-empty description="暂无数据" />
     </div>
@@ -49,7 +49,7 @@ const fetchData = async () => {
   }
 }
 
-// 计算环比变化率
+// 计算相邻时段变化率
 const calculateChangeRates = (counts) => {
   const rates = [null]
   for (let i = 1; i < counts.length; i++) {

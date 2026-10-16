@@ -321,9 +321,22 @@ const shortTrace = (t) => (t && t.length > 12 ? t.slice(0, 8) + '…' + t.slice(
 const formatTime = (ms) => { if (!ms) return '-'; const d = new Date(ms); const p = n => String(n).padStart(2, '0'); return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` }
 
 // ===== SSE =====
+const formatDuration = (minutes) => {
+  if (!minutes) return ''
+  if (minutes < 60) return `约 ${minutes} 分钟`
+  if (minutes < 1440) {
+    const h = Math.floor(minutes / 60)
+    const m = minutes % 60
+    return m === 0 ? `约 ${h} 小时` : `约 ${h} 小时 ${m} 分钟`
+  }
+  const d = Math.floor(minutes / 1440)
+  const h = Math.floor((minutes % 1440) / 60)
+  return h === 0 ? `约 ${d} 天` : `约 ${d} 天 ${h} 小时`
+}
+
 const handleAlert = (payload) => {
   if (payload.status === 'RECOVERED') {
-    const dur = payload.durationMinutes ? `，持续约 ${payload.durationMinutes} 分钟` : ''
+    const dur = payload.durationMinutes ? `，持续${formatDuration(payload.durationMinutes)}` : ''
     ElNotification({ type: 'success', title: `已恢复：${payload.title || '监控项'}`, message: `连续多次采集正常${dur}，当前错误数 ${payload.logCount}`, duration: 8000 })
   } else {
     ElNotification({ type: 'error', title: `告警：${payload.title || '监控项'}`, message: `日志数 ${payload.logCount} ≥ 阈值 ${payload.threshold}`, duration: 5000 })

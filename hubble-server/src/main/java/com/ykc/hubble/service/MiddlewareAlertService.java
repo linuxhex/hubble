@@ -209,7 +209,7 @@ public class MiddlewareAlertService {
         }
 
         try {
-            String dashboardUrl = monitorProperties.getDashboardUrl() + "/#/middleware";
+            String dashboardUrl = monitorProperties.getDashboardUrl() + "/middleware";
             dingTalkClient.sendRobotActionCard("中间件告警", md.toString(), "查看详情", dashboardUrl, true);
         } catch (Exception e) {
             log.warn("中间件告警钉钉推送失败: {}", e.getMessage());

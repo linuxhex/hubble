@@ -155,9 +155,11 @@ CREATE TABLE IF NOT EXISTS alert_monitor_state (
   consecutive_red_count INT DEFAULT 0 COMMENT '红盘连续命中次数',
   consecutive_normal_count INT DEFAULT 0 COMMENT '恢复检测连续正常次数',
   last_alert_time BIGINT COMMENT '上次钉钉告警时间(epoch ms)',
+  alert_start_time BIGINT COMMENT '告警开始时间(epoch ms，首次触发告警的时间)',
   last_status VARCHAR(20) COMMENT '上次评估状态',
   last_collect_at BIGINT COMMENT '上次采集时间(epoch 秒)',
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );
+ALTER TABLE alert_monitor_state ADD COLUMN IF NOT EXISTS alert_start_time BIGINT COMMENT '告警开始时间(epoch ms，首次触发告警的时间)';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_alert_monitor_state ON alert_monitor_state(config_id);

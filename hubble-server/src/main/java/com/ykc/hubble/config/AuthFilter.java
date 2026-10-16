@@ -67,6 +67,9 @@ public class AuthFilter extends OncePerRequestFilter {
             // 服务负载接口（无需用户认证）
             "/service-load/",
 
+            // ARMS 告警 Webhook 回调（阿里云外部调用，无需用户认证）
+            "/arms-webhook/",
+
             // AI 对话 WebSocket（握手阶段放行，onOpen 内校验 JWT）
             "/ws/ai/chat"
     };

@@ -43,7 +43,7 @@ monitor:
   error-scan-lines: 200
   minute-red-threshold: 50
   minute-yellow-threshold: 20
-  dashboard-url: ${MONITOR_DASHBOARD_URL:http://localhost:82}
+  dashboard-url: ${MONITOR_DASHBOARD_URL:http://172.16.149.95:18081}
 
 # 阿里云SLS配置
 aliyun:

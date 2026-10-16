@@ -47,5 +47,5 @@ public class MonitorProperties {
     /**
      * 前端大盘地址（告警通知中附带看板链接）
      */
-    private String dashboardUrl = "http://localhost:5173";
+    private String dashboardUrl = "http://172.16.149.95:18081";
 }

@@ -215,6 +215,7 @@ public class AlertDataService {
 
     /**
      * 按服务维度查看健康状态：基于 alert_config 配置项，使用动态阈值（基于历史数据）
+     * 优化：并行查询各服务的当前错误数和历史数据，减少总耗时
      */
     public List<Map<String, Object>> serviceHealth(String timeRange) {
         long now = System.currentTimeMillis() / 1000;
@@ -225,53 +226,80 @@ public class AlertDataService {
             return new ArrayList<>();
         }
 
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (AlertConfig cfg : configs) {
-            String serviceName = templateIdToServiceName(cfg.getKeywordTemplateId());
-            String keywords = templateIdToKeywords(cfg.getKeywordTemplateId());
+        // 并行查询每个服务的健康状态
+        List<CompletableFuture<Map<String, Object>>> futures = configs.stream()
+                .map(cfg -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return buildServiceHealthItem(logstore, cfg, now);
+                    } catch (Exception e) {
+                        log.error("查询服务健康状态失败: configId={}, error={}", cfg.getId(), e.getMessage(), e);
+                        return null;
+                    }
+                }, queryExecutor))
+                .toList();
 
-            int interval = cfg.getCollectionInterval() != null ? cfg.getCollectionInterval() : 60;
-            long from = now - interval;
-
-            // 查询当前错误数
-            long count = 0;
-            try {
-                String query = keywords + " | SELECT count(*) as cnt";
-                var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1);
-                if (!rows.isEmpty()) {
-                    try { count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0")); }
-                    catch (NumberFormatException ignored) {}
-                }
-            } catch (Exception e) {
-                log.warn("查询服务错误数失败: service={}, error={}", serviceName, e.getMessage());
-            }
-
-            // 计算动态阈值：基于过去 7 天同时段数据的平均值
-            int[] thresholds = calculateDynamicThreshold(logstore, keywords, interval, now);
-            int redThreshold = thresholds[0];
-            int yellowThreshold = thresholds[1];
-
-            String status;
-            if (count >= redThreshold) {
-                status = "RED";
-            } else if (count >= yellowThreshold) {
-                status = "YELLOW";
-            } else {
-                status = "GREEN";
-            }
-
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("serviceName", serviceName);
-            item.put("errorCount", count);
-            item.put("redThreshold", redThreshold);
-            item.put("yellowThreshold", yellowThreshold);
-            item.put("status", status);
-            item.put("configId", cfg.getId());
-            result.add(item);
-        }
+        // 等待所有查询完成并收集结果
+        List<Map<String, Object>> result = futures.stream()
+                .map(f -> {
+                    try {
+                        return f.get();
+                    } catch (Exception e) {
+                        log.error("获取服务健康状态失败: {}", e.getMessage(), e);
+                        return null;
+                    }
+                })
+                .filter(item -> item != null)
+                .toList();
 
         result.sort((a, b) -> Long.compare((Long) b.get("errorCount"), (Long) a.get("errorCount")));
         return result;
+    }
+
+    /**
+     * 构建单个服务的健康状态项
+     */
+    private Map<String, Object> buildServiceHealthItem(String logstore, AlertConfig cfg, long now) {
+        String serviceName = templateIdToServiceName(cfg.getKeywordTemplateId());
+        String keywords = templateIdToKeywords(cfg.getKeywordTemplateId());
+
+        int interval = cfg.getCollectionInterval() != null ? cfg.getCollectionInterval() : 60;
+        long from = now - interval;
+
+        // 查询当前错误数
+        long count = 0;
+        try {
+            String query = keywords + " | SELECT count(*) as cnt";
+            var rows = slsQueryClient.queryAnalytics(logstore, query, from, now, 1);
+            if (!rows.isEmpty()) {
+                try { count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0")); }
+                catch (NumberFormatException ignored) {}
+            }
+        } catch (Exception e) {
+            log.warn("查询服务错误数失败: service={}, error={}", serviceName, e.getMessage());
+        }
+
+        // 计算动态阈值：基于过去 7 天同时段数据的平均值
+        int[] thresholds = calculateDynamicThreshold(logstore, keywords, interval, now);
+        int redThreshold = thresholds[0];
+        int yellowThreshold = thresholds[1];
+
+        String status;
+        if (count >= redThreshold) {
+            status = "RED";
+        } else if (count >= yellowThreshold) {
+            status = "YELLOW";
+        } else {
+            status = "GREEN";
+        }
+
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("serviceName", serviceName);
+        item.put("errorCount", count);
+        item.put("redThreshold", redThreshold);
+        item.put("yellowThreshold", yellowThreshold);
+        item.put("status", status);
+        item.put("configId", cfg.getId());
+        return item;
     }
 
     /**
@@ -279,28 +307,44 @@ public class AlertDataService {
      * 红盘 = max(avg + 3σ, avg × 5)，即偏离均值 3 个标准差 或 5 倍均值（取更严者）
      * 粉盘 = max(avg + 2σ, avg × 3)，即偏离均值 2 个标准差 或 3 倍均值（取更严者）
      * σ 随数据波动自适应：波动大的服务阈值自动放宽，波动小的自动收紧，无需写死差值。
+     * 优化：并行查询 7 天历史数据，减少总耗时
      */
     private int[] calculateDynamicThreshold(String logstore, String keywords, int interval, long now) {
-        java.util.List<Long> dailyCounts = new java.util.ArrayList<>();
-
-        // 查询过去 7 天同时段的数据
+        // 并行查询过去 7 天同时段的数据
+        List<CompletableFuture<Long>> futures = new ArrayList<>();
         for (int day = 1; day <= 7; day++) {
-            long historicalNow = now - (day * 86400L);
-            long historicalFrom = historicalNow - interval;
+            final int dayOffset = day;
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                long historicalNow = now - (dayOffset * 86400L);
+                long historicalFrom = historicalNow - interval;
 
-            try {
-                String query = keywords + " | SELECT count(*) as cnt";
-                var rows = slsQueryClient.queryAnalytics(logstore, query, historicalFrom, historicalNow, 1);
-                if (!rows.isEmpty()) {
-                    try {
-                        long count = Long.parseLong(rows.get(0).getOrDefault("cnt", "0"));
-                        dailyCounts.add(count);
-                    } catch (NumberFormatException ignored) {}
+                try {
+                    String query = keywords + " | SELECT count(*) as cnt";
+                    var rows = slsQueryClient.queryAnalytics(logstore, query, historicalFrom, historicalNow, 1);
+                    if (!rows.isEmpty()) {
+                        try {
+                            return Long.parseLong(rows.get(0).getOrDefault("cnt", "0"));
+                        } catch (NumberFormatException ignored) {}
+                    }
+                } catch (Exception e) {
+                    log.debug("查询历史数据失败: day={}, error={}", dayOffset, e.getMessage());
                 }
-            } catch (Exception e) {
-                log.debug("查询历史数据失败: day={}, error={}", day, e.getMessage());
-            }
+                return 0L;
+            }, queryExecutor));
         }
+
+        // 等待所有查询完成并收集结果
+        List<Long> dailyCounts = futures.stream()
+                .map(f -> {
+                    try {
+                        return f.get();
+                    } catch (Exception e) {
+                        log.debug("获取历史数据失败: {}", e.getMessage());
+                        return 0L;
+                    }
+                })
+                .filter(count -> count > 0)
+                .toList();
 
         // 基于均值 + 标准差计算阈值
         if (!dailyCounts.isEmpty()) {
@@ -311,10 +355,10 @@ public class AlertDataService {
                     .sum() / n;
             double stddev = Math.sqrt(variance);
 
-            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 3.0);
-            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 2.0);
-            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 5.0);
-            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 3.0);
+            double redSigma = alertThresholdService.getDouble("dynamic_red_sigma", 4.0);
+            double yellowSigma = alertThresholdService.getDouble("dynamic_yellow_sigma", 3.0);
+            double redMeanMult = alertThresholdService.getDouble("dynamic_red_mean_mult", 8.0);
+            double yellowMeanMult = alertThresholdService.getDouble("dynamic_yellow_mean_mult", 5.0);
             int redFloor = (int) alertThresholdService.getDouble("dynamic_red_floor", 10.0);
             int yellowFloor = (int) alertThresholdService.getDouble("dynamic_yellow_floor", 5.0);
 
@@ -687,7 +731,7 @@ public class AlertDataService {
         result.put("errorBreakdown", breakdown);
 
         // 3. 提取下游依赖（从日志 message 中匹配 Feign/RestTemplate 调用）
-        List<String> downstreamServices = new ArrayList<>();
+        List<String> downstreamNames = new ArrayList<>();
         java.util.regex.Pattern feignPattern = java.util.regex.Pattern.compile(
                 "(?:POST|GET|PUT|DELETE|PATCH)\\s+https?://([a-zA-Z0-9_-]+)/",
                 java.util.regex.Pattern.CASE_INSENSITIVE);
@@ -701,13 +745,63 @@ public class AlertDataService {
             var m1 = feignPattern.matcher(msg);
             if (m1.find()) {
                 String ds = m1.group(1);
-                if (!downstreamServices.contains(ds)) downstreamServices.add(ds);
+                if (!downstreamNames.contains(ds)) downstreamNames.add(ds);
             }
             var m2 = servicePattern.matcher(msg);
             if (m2.find()) {
                 String ds = m2.group(1);
-                if (!downstreamServices.contains(ds)) downstreamServices.add(ds);
+                if (!downstreamNames.contains(ds)) downstreamNames.add(ds);
             }
+        }
+
+        // 4. 查询每个下游服务的健康状态，标记红盘/粉盘
+        Map<String, AlertConfig> serviceNameToConfig = new HashMap<>();
+        for (AlertConfig cfg : alertConfigService.listEnabled()) {
+            String sn = templateIdToServiceName(cfg.getKeywordTemplateId());
+            serviceNameToConfig.put(sn, cfg);
+        }
+
+        List<Map<String, Object>> downstreamServices = new ArrayList<>();
+        for (String dsName : downstreamNames) {
+            Map<String, Object> dsItem = new LinkedHashMap<>();
+            dsItem.put("name", dsName);
+
+            AlertConfig dsConfig = serviceNameToConfig.get(dsName);
+            if (dsConfig != null) {
+                String dsKeywords = templateIdToKeywords(dsConfig.getKeywordTemplateId());
+                int interval = dsConfig.getCollectionInterval() != null ? dsConfig.getCollectionInterval() : 60;
+                long dsFrom = now - interval;
+                long dsCount = 0;
+                try {
+                    String dsQuery = dsKeywords + " | SELECT count(*) as cnt";
+                    var dsRows = slsQueryClient.queryAnalytics(logstore, dsQuery, dsFrom, now, 1);
+                    if (!dsRows.isEmpty()) {
+                        try { dsCount = Long.parseLong(dsRows.get(0).getOrDefault("cnt", "0")); }
+                        catch (NumberFormatException ignored) {}
+                    }
+                } catch (Exception e) {
+                    log.warn("查询下游服务错误数失败: service={}, error={}", dsName, e.getMessage());
+                }
+                int[] dsThresholds = calculateDynamicThreshold(logstore, dsKeywords, interval, now);
+                int dsRedThreshold = dsThresholds[0];
+                int dsYellowThreshold = dsThresholds[1];
+
+                String dsStatus;
+                if (dsCount >= dsRedThreshold) {
+                    dsStatus = "RED";
+                } else if (dsCount >= dsYellowThreshold) {
+                    dsStatus = "YELLOW";
+                } else {
+                    dsStatus = "GREEN";
+                }
+                dsItem.put("status", dsStatus);
+                dsItem.put("errorCount", dsCount);
+                dsItem.put("redThreshold", dsRedThreshold);
+                dsItem.put("yellowThreshold", dsYellowThreshold);
+            } else {
+                dsItem.put("status", "UNKNOWN");
+            }
+            downstreamServices.add(dsItem);
         }
         result.put("downstreamServices", downstreamServices);
 
