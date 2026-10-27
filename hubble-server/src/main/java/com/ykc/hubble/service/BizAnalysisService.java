@@ -1,8 +1,6 @@
 package com.ykc.hubble.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.ykc.hubble.client.DorisQueryClient;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -10,8 +8,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -20,184 +16,11 @@ public class BizAnalysisService {
 
     private final DorisQueryClient dorisQueryClient;
     private final com.ykc.hubble.client.GrafanaClient grafanaClient;
-    private final PageDataCacheService pageDataCacheService;
 
     private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final String PAGE_KEY = "biz_analysis";
-    private static final long MEMORY_TTL_MS = 5 * 60 * 1000;
 
     private volatile String cachedLatestDate;
     private volatile long cachedLatestDateTs;
-
-    private final ConcurrentHashMap<String, CacheEntry> memoryCache = new ConcurrentHashMap<>();
-
-    private static class CacheEntry {
-        final Object data;
-        final long timestamp;
-
-        CacheEntry(Object data) {
-            this.data = data;
-            this.timestamp = System.currentTimeMillis();
-        }
-
-        boolean isExpired() {
-            return System.currentTimeMillis() - timestamp > MEMORY_TTL_MS;
-        }
-    }
-
-    @PostConstruct
-    public void initCache() {
-        CompletableFuture.runAsync(() -> {
-            log.info("业务监控：缓存预热已禁用，改为懒加载");
-        });
-    }
-
-    public void refreshAll() {
-        log.info("业务监控：开始并行刷新所有缓存...");
-        long startTime = System.currentTimeMillis();
-
-        // 并行执行所有查询任务
-        CompletableFuture<Void> overviewFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var overviewData = doDailyOverview();
-                memoryCache.put("overview", new CacheEntry(overviewData));
-                pageDataCacheService.save(PAGE_KEY, "overview", overviewData);
-            } catch (Exception e) {
-                log.error("刷新 overview 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> monthlyTrendFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doMonthlyTrend();
-                memoryCache.put("monthlyTrend", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "monthlyTrend", data);
-            } catch (Exception e) {
-                log.error("刷新 monthlyTrend 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> daily30Future = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doDailyOrderEnergy(30);
-                memoryCache.put("daily30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "daily30", data);
-            } catch (Exception e) {
-                log.error("刷新 daily30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> scenarioFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doScenarioBreakdown();
-                memoryCache.put("scenario", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "scenario", data);
-            } catch (Exception e) {
-                log.error("刷新 scenario 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> activeUsersFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doActiveUsersTop(20);
-                memoryCache.put("activeUsers", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "activeUsers", data);
-            } catch (Exception e) {
-                log.error("刷新 activeUsers 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> appActiveFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doAppActive(30);
-                memoryCache.put("appActive30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "appActive30", data);
-            } catch (Exception e) {
-                log.error("刷新 appActive30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> mauTrendFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doMauTrend();
-                memoryCache.put("mauTrend", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "mauTrend", data);
-            } catch (Exception e) {
-                log.error("刷新 mauTrend 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> yearlyComparisonFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doYearlyComparison();
-                memoryCache.put("yearlyComparison", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "yearlyComparison", data);
-            } catch (Exception e) {
-                log.error("刷新 yearlyComparison 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> revenueTrendFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doRevenueTrend(30);
-                memoryCache.put("revenueTrend30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "revenueTrend30", data);
-            } catch (Exception e) {
-                log.error("刷新 revenueTrend30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> utilizationTrendFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doUtilizationTrend(30);
-                memoryCache.put("utilizationTrend30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "utilizationTrend30", data);
-            } catch (Exception e) {
-                log.error("刷新 utilizationTrend30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> regionDistFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doRegionDistribution(30);
-                memoryCache.put("regionDist30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "regionDist30", data);
-            } catch (Exception e) {
-                log.error("刷新 regionDist30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> stationRankFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doStationRanking(30, 20);
-                memoryCache.put("stationRank30", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "stationRank30", data);
-            } catch (Exception e) {
-                log.error("刷新 stationRank30 缓存失败", e);
-            }
-        });
-
-        CompletableFuture<Void> hourlyFuture = CompletableFuture.runAsync(() -> {
-            try {
-                var data = doHourlyDistribution(7);
-                memoryCache.put("hourly7", new CacheEntry(data));
-                pageDataCacheService.save(PAGE_KEY, "hourly7", data);
-            } catch (Exception e) {
-                log.error("刷新 hourly7 缓存失败", e);
-            }
-        });
-
-        // 等待所有任务完成
-        CompletableFuture.allOf(
-            overviewFuture, monthlyTrendFuture, daily30Future, scenarioFuture,
-            activeUsersFuture, appActiveFuture, mauTrendFuture, yearlyComparisonFuture,
-            revenueTrendFuture, utilizationTrendFuture, regionDistFuture,
-            stationRankFuture, hourlyFuture
-        ).join();
-
-        long elapsed = System.currentTimeMillis() - startTime;
-        log.info("业务监控：全部缓存并行刷新完成，耗时 {}ms", elapsed);
-    }
 
     private String latestDate() {
         long now = System.currentTimeMillis();
@@ -247,155 +70,69 @@ public class BizAnalysisService {
         return LocalDate.parse(latestDate(), DT).plusDays(1).format(DT);
     }
 
-    @SuppressWarnings("unchecked")
-    private <T> T getCachedOrRefresh(String cacheKey, String dbKey, TypeReference<T> typeRef, java.util.function.Supplier<T> loader) {
-        CacheEntry entry = memoryCache.get(cacheKey);
-        if (entry != null && !entry.isExpired()) {
-            return (T) entry.data;
-        }
-
-        T dbData = pageDataCacheService.get(PAGE_KEY, dbKey, typeRef);
-        if (dbData != null) {
-            memoryCache.put(cacheKey, new CacheEntry(dbData));
-            CompletableFuture.runAsync(() -> {
-                try {
-                    T fresh = loader.get();
-                    memoryCache.put(cacheKey, new CacheEntry(fresh));
-                    pageDataCacheService.save(PAGE_KEY, dbKey, fresh);
-                } catch (Exception e) {
-                    log.error("后台刷新缓存失败: {}", cacheKey, e);
-                }
-            });
-            return dbData;
-        }
-
-        if (entry != null) {
-            CompletableFuture.runAsync(() -> {
-                try {
-                    T fresh = loader.get();
-                    memoryCache.put(cacheKey, new CacheEntry(fresh));
-                    pageDataCacheService.save(PAGE_KEY, dbKey, fresh);
-                } catch (Exception e) {
-                    log.error("后台刷新缓存失败: {}", cacheKey, e);
-                }
-            });
-            return (T) entry.data;
-        }
-
-        T data = loader.get();
-        memoryCache.put(cacheKey, new CacheEntry(data));
-        pageDataCacheService.save(PAGE_KEY, dbKey, data);
-        return data;
-    }
-
     public Map<String, Object> dailyOverview() {
-        return getCachedOrRefresh("overview", "overview",
-            new TypeReference<Map<String, Object>>() {},
-            this::doDailyOverview);
+        return doDailyOverview();
     }
 
     public List<Map<String, Object>> monthlyTrend() {
-        return getCachedOrRefresh("monthlyTrend", "monthlyTrend",
-            new TypeReference<List<Map<String, Object>>>() {},
-            this::doMonthlyTrend);
+        return doMonthlyTrend();
     }
 
     public List<Map<String, Object>> dailyOrderEnergy(int days) {
         if (days <= 0 || days > 90) days = 30;
-        final int d = days;
-        String key = "daily" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doDailyOrderEnergy(d));
+        return doDailyOrderEnergy(days);
     }
 
     public Map<String, Object> scenarioBreakdown() {
-        return getCachedOrRefresh("scenarioV2", "scenarioV2",
-            new TypeReference<Map<String, Object>>() {},
-            this::doScenarioBreakdown);
+        return doScenarioBreakdown();
     }
 
     public List<Map<String, Object>> activeUsersTop(int limit) {
         if (limit <= 0 || limit > 100) limit = 20;
-        final int l = limit;
-        String key = "activeUsers" + l;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doActiveUsersTop(l));
+        return doActiveUsersTop(limit);
     }
 
     public List<Map<String, Object>> appActive(int days) {
         if (days <= 0 || days > 90) days = 30;
-        final int d = days;
-        String key = "appActive" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doAppActive(d));
+        return doAppActive(days);
     }
 
     public List<Map<String, Object>> mauTrend() {
-        return getCachedOrRefresh("mauTrend", "mauTrend",
-            new TypeReference<List<Map<String, Object>>>() {},
-            this::doMauTrend);
+        return doMauTrend();
     }
 
     public Map<String, Object> yearlyComparison() {
-        return getCachedOrRefresh("yearlyComparison", "yearlyComparison",
-            new TypeReference<Map<String, Object>>() {},
-            this::doYearlyComparison);
+        return doYearlyComparison();
     }
 
     public List<Map<String, Object>> revenueTrend(int days) {
         if (days <= 0 || days > 90) days = 30;
-        final int d = days;
-        String key = "revenueTrend" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doRevenueTrend(d));
+        return doRevenueTrend(days);
     }
 
     public List<Map<String, Object>> utilizationTrend(int days) {
         if (days <= 0 || days > 90) days = 30;
-        final int d = days;
-        String key = "utilizationTrend" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doUtilizationTrend(d));
+        return doUtilizationTrend(days);
     }
 
     public List<Map<String, Object>> regionDistribution(int days) {
         if (days <= 0 || days > 90) days = 30;
-        final int d = days;
-        String key = "regionDist" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doRegionDistribution(d));
+        return doRegionDistribution(days);
     }
 
     public List<Map<String, Object>> stationRanking(int days, int limit) {
         if (days <= 0 || days > 90) days = 30;
         if (limit <= 0 || limit > 100) limit = 20;
-        final int d = days;
-        final int l = limit;
-        String key = "stationRank" + d + "_" + l;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doStationRanking(d, l));
+        return doStationRanking(days, limit);
     }
 
     public List<Map<String, Object>> hourlyDistribution(int days) {
         if (days <= 0 || days > 30) days = 7;
-        final int d = days;
-        String key = "hourly" + d;
-        return getCachedOrRefresh(key, key,
-            new TypeReference<List<Map<String, Object>>>() {},
-            () -> doHourlyDistribution(d));
+        return doHourlyDistribution(days);
     }
 
     public Map<String, Object> hourlyOrderComparison() {
-        return getCachedOrRefresh("hourlyOrderCompV2", "hourlyOrderCompV2",
-            new TypeReference<Map<String, Object>>() {},
-            this::doHourlyOrderComparison);
+        return doHourlyOrderComparison();
     }
 
     // ─── 实际查询方法（doXxx） ───

@@ -1,0 +1,249 @@
+{
+  "scenarios": [
+    {
+      "name": "网关大盘直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "异常大盘直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "中间件页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "服务负载页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "接口劣化页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "接口劣化页带api参数直连",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "流量暴涨页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    },
+    {
+      "name": "告警配置页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "aiAssert"
+        }
+      ],
+      "ok": true
+    }
+  ],
+  "passed": 8,
+  "failed": 0,
+  "total": 8,
+  "finishedAt": "2026-10-15T12:20:25.885Z"
+}

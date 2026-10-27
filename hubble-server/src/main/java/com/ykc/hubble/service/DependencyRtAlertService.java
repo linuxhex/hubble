@@ -34,6 +34,8 @@ public class DependencyRtAlertService {
     private final DingTalkClient dingTalkClient;
     private final MonitorProperties monitorProperties;
     private final AlertThresholdService alertThresholdService;
+    private final AlertInvestigationService alertInvestigationService;
+    private final ServiceDependencyService serviceDependencyService;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final java.util.concurrent.Executor queryExecutor;
 
@@ -146,6 +148,14 @@ public class DependencyRtAlertService {
                 log.info("依赖服务 RT 巡检：无可对比组合（应用数={}, 查询成功={}, 双窗均空={}, 失败={}）",
                         futures.length, queryOk.get(), queryEmpty.get(), queryFail.get());
                 return;
+            }
+
+            // 依赖图沉淀：扫到的 应用×依赖 组合全部落邻接表（幂等 upsert，失败不影响巡检）
+            for (var e : merged.entrySet()) {
+                String[] p = e.getKey().split("\\|", 3);
+                if (p.length == 3) {
+                    serviceDependencyService.upsert(pidToName.getOrDefault(p[0], p[0]), p[2], p[1]);
+                }
             }
 
             int alertCount = 0;
@@ -291,5 +301,17 @@ public class DependencyRtAlertService {
         } catch (Exception e) {
             log.warn("依赖服务告警钉钉推送失败: {}", e.getMessage());
         }
+
+        // AI 事故调查（阈值触发即视为 ERROR 级）
+        alertInvestigationService.submit(com.ykc.hubble.service.investigation.InvestigationContext.builder()
+                .alertSource("DEP_RT")
+                .alertType("依赖服务RT同比上升")
+                .alertName("依赖服务RT告警")
+                .serviceName(appName)
+                .severity("ERROR")
+                .alertValue(String.format("%.0fms -> %.0fms (+%.0f%%)", prevRt, curRt, surge))
+                .message(String.format("依赖服务 %s 响应时间同比暴涨", rpc))
+                .alertTimeMs(now)
+                .build());
     }
 }

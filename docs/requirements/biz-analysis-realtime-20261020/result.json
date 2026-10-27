@@ -1,0 +1,126 @@
+{
+  "scenarios": [
+    {
+      "name": "业务监控页面加载与认证",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "进入业务监控页（新文档加载前自动注入登录态）"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "等待接口返回"
+        },
+        {
+          "action": "assertUrl",
+          "ok": true,
+          "desc": "未被踢回登录页（路由守卫通过）"
+        },
+        {
+          "action": "assertVisible",
+          "ok": true,
+          "desc": "概览卡片区可见"
+        },
+        {
+          "action": "assertCount",
+          "ok": true,
+          "desc": "至少 5 张数据卡片渲染"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "概览接口 200（实时查询数仓）"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "AI断言",
+          "ctx": "/tmp/cwork-biz-ctx/s0_i6.json",
+          "reason": "URL=/biz-analysis，DOM 24291 字符渲染完整，6 张卡片有真实数字（订单 1,211,115 等），无 NaN、无 error alert、无白屏（截图 ego-browser-shot-40135-1.png）"
+        }
+      ],
+      "ok": true,
+      "aiPending": false
+    },
+    {
+      "name": "核心接口全量实时查询",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "小时订单对比接口 200"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "月度趋势接口 200"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "年度对比接口 200"
+        },
+        {
+          "action": "assertApi",
+          "ok": true,
+          "desc": "收入趋势接口 200"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "AI断言",
+          "ctx": "/tmp/cwork-biz-ctx/s1_i6.json",
+          "reason": "页面拦截到 16 个 biz-analysis 接口全部 200 且 body 非空（overview orderCnt=1211115、date=2026-10-19），DOM 有数据截至标注，无 error alert"
+        }
+      ],
+      "ok": true,
+      "aiPending": false
+    },
+    {
+      "name": "图表区块完整渲染",
+      "priority": "P1",
+      "steps": [
+        {
+          "action": "navigate",
+          "ok": true,
+          "desc": "navigate"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "ok": true,
+          "desc": "waitForNetworkIdle"
+        },
+        {
+          "action": "aiAssert",
+          "ok": true,
+          "desc": "AI断言",
+          "ctx": "/tmp/cwork-biz-ctx/s2_i2.json",
+          "reason": "DOM 中 echarts canvas 计数 2（首屏视口），截图显示柱状图渲染正常，无 JS 错误弹窗"
+        }
+      ],
+      "ok": true,
+      "aiPending": false
+    }
+  ],
+  "passed": 3,
+  "failed": 0,
+  "blocked": 0,
+  "aiPending": [],
+  "hasPendingAI": false,
+  "total": 3,
+  "finishedAt": "2026-10-20T12:04:03.504Z"
+}

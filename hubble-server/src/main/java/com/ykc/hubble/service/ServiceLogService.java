@@ -66,10 +66,16 @@ public class ServiceLogService {
         if (traceId == null || traceId.isBlank()) {
             return List.of();
         }
+        // 验证 traceId 格式，防止 SLS 查询注入
+        String safeTraceId = traceId.trim();
+        if (!safeTraceId.matches("^[a-zA-Z0-9_-]+$")) {
+            log.warn("traceId 格式非法，拒绝查询: {}", safeTraceId);
+            return List.of();
+        }
         long now = System.currentTimeMillis() / 1000;
         long from = now - TimeRanges.toSeconds(timeRange);
         // all 聚合库按 trace 字段精确捞同一 traceId 的日志，跨服务串联
-        String query = "trace: " + traceId.trim();
+        String query = "trace: " + safeTraceId;
         try {
             List<LogEntry> logs = slsQueryClient.queryLogstore(
                     monitorProperties.getDefaultQueryLogstore(), query, from, now, 0, limit);

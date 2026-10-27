@@ -270,11 +270,17 @@ const handleResetLayout = () => {
   ElMessage.success('布局已重置')
 }
 
+const handleResize = () => {
+  Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
+}
+
 onMounted(() => {
   loadDashboardData()
-  window.addEventListener('resize', () => {
-    Object.values(chartInstances.value).forEach(chart => { chart?.resize() })
-  })
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 

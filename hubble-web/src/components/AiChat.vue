@@ -200,6 +200,10 @@ function toggleChat() {
 }
 
 onUnmounted(() => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
   if (ws) {
     ws.close()
     ws = null

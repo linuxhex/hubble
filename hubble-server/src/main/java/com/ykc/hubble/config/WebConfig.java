@@ -53,8 +53,14 @@ public class WebConfig implements WebMvcConfigurer {
      */
     @Override
     public void addCorsMappings(@NonNull CorsRegistry registry) {
+        // 生产环境应限制为实际前端域名，避免 CSRF 攻击
+        String allowedOrigins = System.getenv("CORS_ALLOWED_ORIGINS");
+        String[] origins = (allowedOrigins != null && !allowedOrigins.isBlank())
+            ? allowedOrigins.split(",")
+            : new String[]{"http://localhost:82", "http://localhost:18081"};
+
         registry.addMapping("/api/**")
-                .allowedOriginPatterns("*")
+                .allowedOriginPatterns(origins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true)

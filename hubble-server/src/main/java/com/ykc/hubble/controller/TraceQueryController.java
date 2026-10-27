@@ -50,6 +50,8 @@ public class TraceQueryController {
     private final TraceNodeMapper traceNodeMapper;
     private final TraceMgmtService traceService;
     private final DictService dictService;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final java.util.concurrent.Executor queryExecutor;
 
     @GetMapping("/list")
     @Operation(summary = "获取业务链路列表", description = "分页查询业务链路列表，支持关键字搜索和分类筛选")
@@ -177,43 +179,31 @@ public class TraceQueryController {
     public SseEmitter queryWithSSE(@Validated @RequestBody QueryRequestDTO request) {
         SseEmitter emitter = new SseEmitter(30000L); // 30秒超时
 
-        // 异步执行查询
+        // 异步执行查询，使用专用线程池避免阻塞 ForkJoinPool.commonPool
         CompletableFuture.runAsync(() -> {
             try {
-                // 执行查询
                 Map<String, NodeQueryResult> results = queryService.executeQuery(
                         request.getTraceId(),
                         request.getVariables(),
                         request.getTimeRange().getFrom(),
                         request.getTimeRange().getTo()
                 );
-
-                // 推送每个节点的结果
                 for (NodeQueryResult result : results.values()) {
                     NodeQueryResultVO vo = convertToVO(result);
-                    emitter.send(SseEmitter.event()
-                            .name("data")
-                            .data(vo));
+                    emitter.send(SseEmitter.event().name("data").data(vo));
                 }
-
-                // 发送完成事件
-                emitter.send(SseEmitter.event()
-                        .name("complete")
-                        .data(Map.of("message", "查询完成")));
+                emitter.send(SseEmitter.event().name("complete").data(Map.of("message", "查询完成")));
                 emitter.complete();
-
             } catch (Exception e) {
                 log.error("查询失败", e);
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("error")
-                            .data(Map.of("message", "查询失败: " + e.getMessage())));
+                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", "查询失败: " + e.getMessage())));
                     emitter.completeWithError(e);
                 } catch (IOException ioException) {
                     log.error("发送错误事件失败", ioException);
                 }
             }
-        });
+        }, queryExecutor);
 
         return emitter;
     }
@@ -225,43 +215,31 @@ public class TraceQueryController {
             @Validated @RequestBody QueryRequestDTO request) {
         SseEmitter emitter = new SseEmitter(30000L); // 30秒超时
 
-        // 异步执行查询
+        // 异步执行子节点查询，使用专用线程池避免阻塞 ForkJoinPool.commonPool
         CompletableFuture.runAsync(() -> {
             try {
-                // 执行子节点查询
                 Map<String, NodeQueryResult> results = queryService.executeChildNodesQuery(
                         nodeId,
                         request.getVariables(),
                         request.getTimeRange().getFrom(),
                         request.getTimeRange().getTo()
                 );
-
-                // 推送每个子节点的结果
                 for (NodeQueryResult result : results.values()) {
                     NodeQueryResultVO vo = convertToVO(result);
-                    emitter.send(SseEmitter.event()
-                            .name("data")
-                            .data(vo));
+                    emitter.send(SseEmitter.event().name("data").data(vo));
                 }
-
-                // 发送完成事件
-                emitter.send(SseEmitter.event()
-                        .name("complete")
-                        .data(Map.of("message", "查询完成")));
+                emitter.send(SseEmitter.event().name("complete").data(Map.of("message", "查询完成")));
                 emitter.complete();
-
             } catch (Exception e) {
                 log.error("查询子节点失败", e);
                 try {
-                    emitter.send(SseEmitter.event()
-                            .name("error")
-                            .data(Map.of("message", "查询失败: " + e.getMessage())));
+                    emitter.send(SseEmitter.event().name("error").data(Map.of("message", "查询失败: " + e.getMessage())));
                     emitter.completeWithError(e);
                 } catch (IOException ioException) {
                     log.error("发送错误事件失败", ioException);
                 }
             }
-        });
+        }, queryExecutor);
 
         return emitter;
     }

@@ -222,7 +222,7 @@ public class GatewayService {
         }, queryExecutor);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 5 * 60 * 1000, initialDelay = 90 * 1000) // 每 5 分钟刷新，initialDelay 错开启动时的 initCache 首轮
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 5 * 60 * 1000, initialDelay = 90 * 1000) // 每 5 分钟刷新（fixedDelay 防止任务重叠），initialDelay 错开启动时的 initCache 首轮
     public void refreshCache() {
         log.debug("后台刷新接口劣化缓存...");
         for (String mode : Arrays.asList("day", "week", "month")) {
@@ -853,7 +853,11 @@ public class GatewayService {
                 } finally {
                     loadingKeys.remove(loadingKey);
                 }
-            }, queryExecutor);
+            }, queryExecutor).exceptionally(e -> {
+                loadingKeys.remove(loadingKey);
+                log.error("趋势数据后台加载任务被拒绝或异常: timeRange={}", key, e);
+                return null;
+            });
         } else {
             log.info("趋势数据正在加载中，跳过重复请求: timeRange={}", key);
         }
@@ -1609,8 +1613,8 @@ public class GatewayService {
                 log.error("查询当前时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
-        
+        }, queryExecutor);
+
         CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
             try {
                 return queryApiStats(logstore, previousRange[0], previousRange[1]);
@@ -1618,7 +1622,7 @@ public class GatewayService {
                 log.error("查询上期时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
+        }, queryExecutor);
         
         try {
             currentApiStats = currentFuture.get();
@@ -1941,8 +1945,8 @@ public class GatewayService {
                 log.error("查询当前时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
-        
+        }, queryExecutor);
+
         CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
             try {
                 return queryApiStats(logstore, previousRange[0], previousRange[1]);
@@ -1950,7 +1954,7 @@ public class GatewayService {
                 log.error("查询上期时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
+        }, queryExecutor);
         
         try {
             currentApiStats = currentFuture.get();
@@ -2124,8 +2128,8 @@ public class GatewayService {
                 log.error("查询当前时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
-        
+        }, queryExecutor);
+
         CompletableFuture<Map<String, long[]>> previousFuture = CompletableFuture.supplyAsync(() -> {
             try {
                 return queryApiStats(logstore, previousRange[0], previousRange[1]);
@@ -2133,7 +2137,7 @@ public class GatewayService {
                 log.error("查询上期时段API失败: {}", e.getMessage(), e);
                 return new HashMap<String, long[]>();
             }
-        });
+        }, queryExecutor);
         
         try {
             currentApiStats = currentFuture.get();

@@ -26,6 +26,7 @@ const activeIndex = computed(() => {
   if (route.path === '/traffic-surge') return '/traffic-surge'
   if (route.path === '/middleware') return '/middleware'
   if (route.path === '/service-load') return '/service-load'
+  if (route.path === '/incident-investigation') return '/incident-investigation'
   if (route.path === '/user-behavior') return '/user-behavior'
   if (route.path === '/gateway/logs') return '/gateway/logs'
   if (route.path === '/unauthorized') return '/unauthorized'
@@ -119,6 +120,10 @@ onUnmounted(() => {
           <el-menu-item index="/service-load">
             <el-icon><Monitor /></el-icon>
             <span>服务负载</span>
+          </el-menu-item>
+          <el-menu-item index="/incident-investigation">
+            <el-icon><Aim /></el-icon>
+            <span>事故调查</span>
           </el-menu-item>
           <el-menu-item index="/gateway/trace">
             <el-icon><Connection /></el-icon>

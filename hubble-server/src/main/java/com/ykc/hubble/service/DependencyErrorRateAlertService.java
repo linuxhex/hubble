@@ -30,6 +30,8 @@ public class DependencyErrorRateAlertService {
     private final DingTalkClient dingTalkClient;
     private final MonitorProperties monitorProperties;
     private final AlertThresholdService alertThresholdService;
+    private final AlertInvestigationService alertInvestigationService;
+    private final ServiceDependencyService serviceDependencyService;
     @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
     private final java.util.concurrent.Executor queryExecutor;
 
@@ -110,6 +112,14 @@ public class DependencyErrorRateAlertService {
             if (merged.isEmpty()) {
                 log.info("依赖服务错误率巡检：无数据（应用数={}, 失败={}）", futures.length, queryFail.get());
                 return;
+            }
+
+            // 依赖图沉淀：扫到的 应用×依赖 组合全部落邻接表（幂等 upsert，失败不影响巡检）
+            for (var e : merged.entrySet()) {
+                String[] p = e.getKey().split("\\|", 3);
+                if (p.length == 3) {
+                    serviceDependencyService.upsert(pidToName.getOrDefault(p[0], p[0]), p[2], p[1]);
+                }
             }
 
             int alertCount = 0;
@@ -228,5 +238,17 @@ public class DependencyErrorRateAlertService {
         } catch (Exception e) {
             log.warn("依赖服务错误率告警钉钉推送失败: {}", e.getMessage());
         }
+
+        // AI 事故调查（阈值触发即视为 ERROR 级）
+        alertInvestigationService.submit(com.ykc.hubble.service.investigation.InvestigationContext.builder()
+                .alertSource("DEP_ERR")
+                .alertType("依赖服务调用错误率过高")
+                .alertName("依赖服务错误率告警")
+                .serviceName(appName)
+                .severity("ERROR")
+                .alertValue(String.format("错误率 %.2f%%（5分钟 %d 次调用）", errorRate, (long) count))
+                .message(String.format("依赖服务 %s 调用错误率过高", rpc))
+                .alertTimeMs(now)
+                .build());
     }
 }

@@ -59,7 +59,7 @@ public class AlertDataService {
         }, queryExecutor);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 30 * 1000) // 每 30 秒刷新
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30 * 1000) // 每 30 秒刷新（fixedDelay 防止任务重叠）
     public void refreshTimelineCache() {
         log.debug("后台刷新异常大盘时间线缓存...");
         for (String range : java.util.Arrays.asList("15m", "1h", "6h", "24h")) {
@@ -422,9 +422,26 @@ public class AlertDataService {
         return "level: ERROR";
     }
 
+    /**
+     * 验证并转义 SLS 查询参数，防止注入攻击
+     * 只允许字母、数字、连字符、下划线
+     */
+    private String escapeSlsQueryParam(String param) {
+        if (param == null || param.isEmpty()) {
+            return "";
+        }
+        // 检查是否只包含合法字符
+        if (!param.matches("^[a-zA-Z0-9_-]+$")) {
+            log.warn("SLS 查询参数包含非法字符: {}", param);
+            throw new IllegalArgumentException("查询参数包含非法字符");
+        }
+        return param;
+    }
+
     private long queryServiceErrorCount(String logstore, String serviceName, long from, long to) {
         try {
-            String query = "__tag__:_container_name_: " + serviceName + " AND level: ERROR | SELECT count(*) as cnt";
+            String safeServiceName = escapeSlsQueryParam(serviceName);
+            String query = "__tag__:_container_name_: " + safeServiceName + " AND level: ERROR | SELECT count(*) as cnt";
             var rows = slsQueryClient.queryAnalytics(logstore, query, from, to, 1);
             if (!rows.isEmpty()) {
                 try {
@@ -433,6 +450,8 @@ public class AlertDataService {
                     return 0;
                 }
             }
+        } catch (IllegalArgumentException e) {
+            log.warn("查询服务错误数失败: 参数非法, service={}", serviceName);
         } catch (Exception e) {
             log.warn("查询服务错误数失败: service={}, error={}", serviceName, e.getMessage());
         }
@@ -650,11 +669,14 @@ public class AlertDataService {
 
     private long queryWarnCount(String logstore, String serviceName, long from, long to) {
         try {
-            String query = "__tag__:_container_name_: " + serviceName + " AND level: WARN | SELECT count(*) as cnt";
+            String safeServiceName = escapeSlsQueryParam(serviceName);
+            String query = "__tag__:_container_name_: " + safeServiceName + " AND level: WARN | SELECT count(*) as cnt";
             var rows = slsQueryClient.queryAnalytics(logstore, query, from, to, 1);
             if (!rows.isEmpty()) {
                 try { return Long.parseLong(rows.get(0).getOrDefault("cnt", "0")); } catch (NumberFormatException e) { return 0; }
             }
+        } catch (IllegalArgumentException e) {
+            log.warn("查询WARN数失败: 参数非法, service={}", serviceName);
         } catch (Exception e) {
             log.warn("查询WARN数失败: service={}, error={}", serviceName, e.getMessage());
         }
@@ -669,7 +691,9 @@ public class AlertDataService {
 
     private long queryServiceTypeCount(String logstore, String serviceName, String keyword, long from, long to) {
         try {
-            String query = "__tag__:_container_name_: " + serviceName + " AND level: ERROR AND " + keyword + " | SELECT count(*) as cnt";
+            String safeServiceName = escapeSlsQueryParam(serviceName);
+            // keyword 是硬编码的，不需要转义
+            String query = "__tag__:_container_name_: " + safeServiceName + " AND level: ERROR AND " + keyword + " | SELECT count(*) as cnt";
             var rows = slsQueryClient.queryAnalytics(logstore, query, from, to, 1);
             if (!rows.isEmpty()) {
                 try {
@@ -678,6 +702,8 @@ public class AlertDataService {
                     return 0;
                 }
             }
+        } catch (IllegalArgumentException e) {
+            log.warn("查询服务错误类型数失败: 参数非法, service={}", serviceName);
         } catch (Exception e) {
             log.warn("查询服务错误类型数失败: service={}, keyword={}, error={}", serviceName, keyword, e.getMessage());
         }

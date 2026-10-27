@@ -1,0 +1,1 @@
+{"pass": true, "reason": "未登录访问 /abnormal 正确跳转钉钉 OAuth 授权页（login.dingtalk.com），redirect_uri 参数为 http://172.16.149.95:18081/login 指向部署地址，页面渲染扫码授权界面（YKC通用授权），非白屏无报错"}

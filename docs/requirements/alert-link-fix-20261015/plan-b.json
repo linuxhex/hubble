@@ -1,0 +1,246 @@
+{
+  "baseUrl": "http://172.16.149.95:18081",
+  "taskName": "cwork-test-alert-link-b",
+  "stepTimeoutMs": 20000,
+  "totalBudgetMs": 900000,
+  "scenarios": [
+    {
+      "name": "网关大盘直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/gateway"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".gateway-dashboard",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/gateway/",
+          "expectStatus": 200,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "网关大盘页面正常渲染：有统计卡片/图表/表格内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "异常大盘直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/abnormal"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".abnormal-dashboard",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/alert-data/",
+          "expectStatus": 200,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "异常大盘页面正常渲染：时间筛选与时间线/统计内容可见，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "中间件页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/middleware"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".middleware-page",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/middleware/",
+          "expectStatus": 200,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "中间件页面正常渲染：有中间件列表或检查项内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "服务负载页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/service-load"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".service-load-page",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/service-load/",
+          "expectStatus": 200,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "服务负载页面正常渲染：有服务列表/水位表格内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "接口劣化页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/degradation-ranking"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".page-container",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "接口劣化页面正常渲染：有搜索区/排行表格内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "接口劣化页带api参数直连",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/degradation-ranking?api=%2Fgateway-api%2FpayScore%2FqueryOrder"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".page-container",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "带 api 参数访问接口劣化页面：页面正常渲染不白屏，无 JS 崩溃或报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "流量暴涨页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/traffic-surge"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".traffic-surge-page",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "流量暴涨页面正常渲染：有监测列表或统计内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "告警配置页直连渲染",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/alert-config"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".alert-config-management",
+          "desc": "根容器可见"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/alert-config/",
+          "expectStatus": 200,
+          "desc": "主接口200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "告警配置页面正常渲染：有配置标签页或规则列表内容，不是白屏、无报错弹窗",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    }
+  ]
+}

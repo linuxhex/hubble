@@ -26,6 +26,7 @@ public class ArmsWebhookService {
     private final DingTalkClient dingTalkClient;
     private final AlertPushService alertPushService;
     private final DingtalkRobotService dingtalkRobotService;
+    private final AlertInvestigationService alertInvestigationService;
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter
             .ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -115,8 +116,28 @@ public class ArmsWebhookService {
         pushSse(alert, labels, annotations, alertStatus, severity);
         sendDingTalk(title, dingContent, externalURL, isResolved);
 
+        // AI 事故调查：仅非恢复的 ERROR/CRITICAL 级触发（调查是增强不是依赖，失败不影响上面推送）
+        if (!isResolved && isInvestigatableSeverity(severity)) {
+            alertInvestigationService.submit(com.ykc.hubble.service.investigation.InvestigationContext.builder()
+                    .alertSource("ARMS")
+                    .alertType(alertName)
+                    .alertName(alertName)
+                    .serviceName(labels.getOrDefault("application",
+                            "-".equals(instance) ? clusterName : instance))
+                    .severity(severity)
+                    .alertValue(alertValue)
+                    .message(message)
+                    .fingerprint(fingerprint)
+                    .alertTimeMs(System.currentTimeMillis())
+                    .build());
+        }
+
         log.info("ARMS 告警处理完成: name={}, status={}, severity={}, fingerprint={}",
                 alertName, alertStatus, severity, fingerprint);
+    }
+
+    private boolean isInvestigatableSeverity(String severity) {
+        return "ERROR".equalsIgnoreCase(severity) || "CRITICAL".equalsIgnoreCase(severity);
     }
 
     private void pushSse(ArmsWebhookPayload.Alert alert, Map<String, String> labels,

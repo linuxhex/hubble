@@ -124,20 +124,14 @@ public class AuthFilter extends OncePerRequestFilter {
 
     /**
      * 从请求中获取Token
+     * 仅从Authorization头获取，避免通过URL参数传递导致Token泄露到日志和浏览器历史
      */
     private String getTokenFromRequest(HttpServletRequest request) {
-        // 1. 从Authorization头获取
         String authHeader = request.getHeader("Authorization");
         if (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer ")) {
             return authHeader.substring(7);
         }
-        
-        // 2. 从URL参数获取
-        String tokenParam = request.getParameter("token");
-        if (StringUtils.hasText(tokenParam)) {
-            return tokenParam;
-        }
-        
+
         return null;
     }
 

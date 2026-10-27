@@ -19,6 +19,7 @@ import TrafficSurgeDashboard from '../components/TrafficSurgeDashboard.vue'
 import MiddlewareDashboard from '../components/MiddlewareDashboard.vue'
 import BizAnalysisDashboard from '../components/BizAnalysisDashboard.vue'
 import ServiceLoadDashboard from '../components/ServiceLoadDashboard.vue'
+import IncidentInvestigation from '../components/IncidentInvestigation.vue'
 
 const PUBLIC_PATHS = ['/login', '/unauthorized']
 
@@ -124,6 +125,11 @@ const routes = [
     path: '/service-load',
     name: 'ServiceLoadDashboard',
     component: ServiceLoadDashboard
+  },
+  {
+    path: '/incident-investigation',
+    name: 'IncidentInvestigation',
+    component: IncidentInvestigation
   }
 ]
 
@@ -145,7 +151,12 @@ router.beforeEach((to, from, next) => {
   }
 
   if (to.path === '/biz-analysis' || to.path === '/abnormal') {
-    const user = JSON.parse(localStorage.getItem('auth_user') || '{}')
+    let user = {}
+    try {
+      user = JSON.parse(localStorage.getItem('auth_user') || '{}')
+    } catch (e) {
+      console.warn('解析用户信息失败', e)
+    }
     if (user.nickname !== 'lianzi') {
       next('/unauthorized')
       return

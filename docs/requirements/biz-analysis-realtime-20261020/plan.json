@@ -1,0 +1,120 @@
+{
+  "baseUrl": "http://172.16.149.95:18081",
+  "taskSpaceName": "cwork-test-biz-analysis-realtime",
+  "totalBudgetMs": 480000,
+  "setupJsDoc": "if (location.origin === \"http://172.16.149.95:18081\") { localStorage.setItem(\"auth_token\", \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxIiwidXNlcm5hbWUiOiJsaWFuemkiLCJpYXQiOjE3OTI0OTcxMjcsImV4cCI6MTc5MjUwNDMyN30.3nd5cRyXwAU36_fnknxrOzHxDmyH-sBHNGO-jq0sp-o\"); localStorage.setItem(\"auth_user\", JSON.stringify({id:1, nickname:\"lianzi\", username:\"lianzi\"})); }",
+  "scenarios": [
+    {
+      "name": "业务监控页面加载与认证",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "/biz-analysis",
+          "desc": "进入业务监控页（新文档加载前自动注入登录态）"
+        },
+        {
+          "action": "waitForNetworkIdle",
+          "desc": "等待接口返回"
+        },
+        {
+          "action": "assertUrl",
+          "contains": "/biz-analysis",
+          "desc": "未被踢回登录页（路由守卫通过）"
+        },
+        {
+          "action": "assertVisible",
+          "selector": ".summary-cards",
+          "desc": "概览卡片区可见"
+        },
+        {
+          "action": "assertCount",
+          "selector": ".summary-card",
+          "min": 5,
+          "desc": "至少 5 张数据卡片渲染"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/biz-analysis/overview",
+          "expectStatus": 200,
+          "desc": "概览接口 200（实时查询数仓）"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "判据：业务监控页渲染正常——概览卡片显示数字（非 NaN/空白/0 异常）、页面无白屏、无错误 alert 弹窗。若满足则 pass。",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "核心接口全量实时查询",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "/biz-analysis"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/biz-analysis/hourly-order-comparison",
+          "expectStatus": 200,
+          "desc": "小时订单对比接口 200"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/biz-analysis/monthly-trend",
+          "expectStatus": 200,
+          "desc": "月度趋势接口 200"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/biz-analysis/yearly-comparison",
+          "expectStatus": 200,
+          "desc": "年度对比接口 200"
+        },
+        {
+          "action": "assertApi",
+          "urlPattern": "/api/biz-analysis/revenue-trend",
+          "expectStatus": 200,
+          "desc": "收入趋势接口 200"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "判据：页面有\"数据截至\"日期标注，接口响应包含业务数据字段，页面无 error alert。若满足则 pass。",
+          "capture": [
+            "screenshot",
+            "dom",
+            "apiResponses"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "图表区块完整渲染",
+      "priority": "P1",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "/biz-analysis"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "判据：DOM 证据中 echarts canvas 数量 >= 2，或图表容器已渲染；页面无 JS 错误。若满足则 pass。",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    }
+  ]
+}

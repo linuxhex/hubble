@@ -1,0 +1,29 @@
+{
+  "baseUrl": "http://172.16.149.95:18081",
+  "taskName": "cwork-test-alert-link-a",
+  "stepTimeoutMs": 15000,
+  "totalBudgetMs": 300000,
+  "scenarios": [
+    {
+      "name": "未登录访问告警链接跳转钉钉OAuth",
+      "priority": "P0",
+      "steps": [
+        {
+          "action": "navigate",
+          "url": "http://172.16.149.95:18081/abnormal"
+        },
+        {
+          "action": "waitForNetworkIdle"
+        },
+        {
+          "action": "aiAssert",
+          "prompt": "页面已跳转到钉钉 OAuth 授权页（login.dingtalk.com 域，显示企业账号欢迎/登录界面），说明未登录用户点击告警链接会被引导至钉钉免登流程，而不是白屏或报错",
+          "capture": [
+            "screenshot",
+            "dom"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -163,3 +163,44 @@ CREATE TABLE IF NOT EXISTS alert_monitor_state (
 );
 ALTER TABLE alert_monitor_state ADD COLUMN IF NOT EXISTS alert_start_time BIGINT COMMENT '告警开始时间(epoch ms，首次触发告警的时间)';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_alert_monitor_state ON alert_monitor_state(config_id);
+
+-- AI 事故调查记录（告警驱动的根因分析报告 + 历史事故记忆，借鉴 OpenSRE episodic memory）
+CREATE TABLE IF NOT EXISTS incident_memory (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  alert_source VARCHAR(20) NOT NULL COMMENT '告警来源：ARMS/DEP_RT/DEP_ERR/MW',
+  alert_type VARCHAR(100) NOT NULL COMMENT '告警类型（alertname 或规则名）',
+  alert_name VARCHAR(200) COMMENT '告警名称',
+  service_name VARCHAR(100) COMMENT '涉及服务/实例',
+  fingerprint VARCHAR(128) COMMENT '告警指纹（自有告警为空）',
+  dedup_key VARCHAR(200) NOT NULL COMMENT '去重键（fingerprint 或 来源|名称|服务|30min桶）',
+  severity VARCHAR(20) COMMENT '告警级别',
+  alert_value VARCHAR(200) COMMENT '告警当前值',
+  status VARCHAR(20) NOT NULL DEFAULT 'INVESTIGATING' COMMENT 'INVESTIGATING/DONE/FAILED',
+  root_cause TEXT COMMENT '根因结论',
+  analysis_summary TEXT COMMENT '分析过程摘要',
+  recommendation TEXT COMMENT '处置建议',
+  confidence DECIMAL(4,3) COMMENT 'AI 置信度 0-1',
+  evidence_json TEXT COMMENT '四路取证证据（脱敏后 JSON）',
+  error_message VARCHAR(500) COMMENT '调查失败原因',
+  resolved TINYINT DEFAULT 0 COMMENT '告警是否已恢复',
+  retry_count INT DEFAULT 0 COMMENT '重试次数',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_incident_memory_dedup ON incident_memory(dedup_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_incident_memory_type_service ON incident_memory(alert_type, service_name);
+
+-- 服务依赖邻接表（依赖巡检扫描时沉淀，告警时反查上游调用方算爆炸半径）
+CREATE TABLE IF NOT EXISTS service_dependency (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  app_name VARCHAR(100) NOT NULL COMMENT '调用方应用',
+  depends_on VARCHAR(200) NOT NULL COMMENT '被依赖服务',
+  rpc_type VARCHAR(50) COMMENT '调用类型（HTTP/Dubbo/HSF 等）',
+  last_seen_at BIGINT COMMENT '最近一次巡检见到该依赖的时间(epoch ms)',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_service_dependency ON service_dependency(app_name, depends_on, rpc_type);
+CREATE INDEX IF NOT EXISTS idx_service_dependency_depends ON service_dependency(depends_on);

@@ -26,6 +26,9 @@ public class MiddlewareAlertService {
     private final MonitorProperties monitorProperties;
     private final MiddlewareMonitorService monitorService;
     private final AlertThresholdService thresholdService;
+    private final AlertInvestigationService alertInvestigationService;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final java.util.concurrent.Executor queryExecutor;
 
     private List<MiddlewareAlertConfig> configCache = null;
     private long configCacheTime = 0;
@@ -180,6 +183,13 @@ public class MiddlewareAlertService {
         String timeStr = java.time.Instant.ofEpochMilli(now)
                 .atZone(java.time.ZoneId.of("Asia/Shanghai"))
                 .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+        StringBuilder redDetails = new StringBuilder();
+        for (var d : details) {
+            if ("red".equals(d.get("level"))) {
+                if (redDetails.length() > 0) redDetails.append("; ");
+                redDetails.append(String.format("%s=%s（阈值 %s）", d.get("metricName"), d.get("currentValue"), d.get("redThreshold")));
+            }
+        }
 
         StringBuilder md = new StringBuilder();
         md.append("### 🔴 中间件告警\n\n");
@@ -214,6 +224,17 @@ public class MiddlewareAlertService {
         } catch (Exception e) {
             log.warn("中间件告警钉钉推送失败: {}", e.getMessage());
         }
+
+        // AI 事故调查（红盘即视为 ERROR 级；service_name 用 实例标识）
+        alertInvestigationService.submit(com.ykc.hubble.service.investigation.InvestigationContext.builder()
+                .alertSource("MW")
+                .alertType(type + "红盘告警")
+                .alertName("中间件告警")
+                .serviceName(type + "/" + instName)
+                .severity("ERROR")
+                .alertValue(redDetails.toString())
+                .alertTimeMs(now)
+                .build());
     }
 
     public Map<String, Object> alertSummary(List<Map<String, Object>> instances) {
@@ -341,7 +362,7 @@ public class MiddlewareAlertService {
     /**
      * 定时巡检：每 1 分钟检查所有中间件的告警状态，确保问题能在 1-2 分钟内被发现
      */
-    @Scheduled(fixedRate = 60 * 1000)
+    @Scheduled(fixedDelay = 60 * 1000, initialDelay = 60 * 1000)
     public void scheduledAlertCheck() {
         try {
             String[] types = {"redis", "mysql", "db", "rocketmq", "kafka", "lindorm", "elasticsearch", "oss"};
@@ -354,7 +375,7 @@ public class MiddlewareAlertService {
                     if (instances == null || instances.isEmpty()) return 0L;
                     List<Map<String, Object>> checked = checkAlerts(type, instances);
                     return checked.stream().filter(inst -> "red".equals(inst.get("alertLevel"))).count();
-                });
+                }, queryExecutor);
             }
 
             try {

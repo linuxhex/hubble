@@ -1,0 +1,85 @@
+{
+  "baseUrl": "http://localhost:82",
+  "taskSpaceName": "cwork-test-data-accuracy-check",
+  "stepTimeoutMs": 15000,
+  "totalBudgetMs": 600000,
+
+  "apiTests": [],
+
+  "uiTests": {
+    "scenarios": [
+      {
+        "name": "网关概览页数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/gateway" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查网关概览页数据准确性：1) QPS 数值是否合理（不应是日志速率而非API请求速率）；2) 总请求量、错误率、平均响应时间是否有数据且数值合理；3) 请求趋势图是否有数据点；4) 热门接口列表是否有数据。重点检查 QPS 指标是否显示为真实的 API 请求速率而非日志条目速率。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "异常大盘数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/abnormal" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查异常大盘数据准确性：1) 异常统计卡片（当前值、今日最大、今日平均）是否有数据且数值合理；2) 趋势图是否有数据点且时间粒度正确（15分钟范围应显示分钟级数据）；3) 数据是否实时更新（非陈旧数据）。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "接口劣化数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/degradation-ranking" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查接口劣化数据准确性：1) 劣化接口列表是否有数据（应有10条以上记录）；2) P60 耗时数据是否合理（不应全为'-'）；3) 对比模式（今天vs昨天）是否有数据；4) 劣化幅度计算是否正确。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "流量暴涨数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/traffic-surge" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查流量暴涨数据准确性：1) 流量异常接口列表是否有数据；2) 流量涨幅百分比是否合理；3) 当前流量和历史对比数据是否都有值；4) 数据是否反映真实的流量变化。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "中间件监控数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/middleware" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查中间件监控数据准确性：1) Redis 实例列表是否有数据；2) 内存使用量、Big Keys 数量是否合理；3) 慢查询 Top10 是否有数据且耗时合理；4) 版本号是否正确显示。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "服务负载数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/service-load" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查服务负载数据准确性：1) CPU/内存使用率是否在合理范围（0-100%）；2) 峰值和平均值是否都有数据；3) 水位条颜色是否与阈值一致（CPU≥80%红色，内存≥85%红色）；4) 扩容建议是否基于真实数据。", "screenshot": true }
+        ]
+      },
+      {
+        "name": "业务监控数据检查",
+        "priority": "P0",
+        "steps": [
+          { "action": "navigate", "url": "/biz-analysis" },
+          { "action": "waitForNetworkIdle" },
+          { "action": "wait", "seconds": 3 },
+          { "action": "aiAssert", "criteria": "检查业务监控数据准确性：1) 6大指标卡（累计订单量、累计电量、枪总量、充电中枪数、小程序DAU、广告点击数）是否有数据且数值合理；2) 图表数据是否渲染正常；3) 日期语义是否正确（今日vs昨日应显示真实日期）；4) '数据截至'提示是否显示。", "screenshot": true }
+        ]
+      }
+    ]
+  },
+
+  "e2eTests": []
+}

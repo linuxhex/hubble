@@ -96,6 +96,11 @@ public class TraceChainService {
         final String serviceName = serviceNameTemp;
 
         try {
+            // 验证 serviceName 格式，防止 SLS 查询注入
+            if (!serviceName.matches("^[a-zA-Z0-9_-]+$")) {
+                log.warn("serviceName 格式非法，拒绝查询: {}", serviceName);
+                return Collections.emptyList();
+            }
             log.info("搜索链路: apiPath={}, serviceName={}, timeRange={}", apiPath, serviceName, timeRange);
             String query = "__tag__:_container_name_: " + serviceName;
             List<LogEntry> logs = slsQueryClient.queryLogstore(logstore, query, from, now, 0, 2000);

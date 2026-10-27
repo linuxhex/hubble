@@ -121,9 +121,13 @@ const renderChart = () => {
 
   chart.setOption(option)
 
-  chartRef.value?.addEventListener('wheel', (e) => {
+  const handleWheel = (e) => {
     e.preventDefault()
-  }, { passive: false })
+  }
+  chartRef.value?.addEventListener('wheel', handleWheel, { passive: false })
+
+  // 保存引用以便清理
+  chartRef.value._wheelHandler = handleWheel
 }
 
 const handleResize = () => {
@@ -141,6 +145,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  if (chartRef.value?._wheelHandler) {
+    chartRef.value.removeEventListener('wheel', chartRef.value._wheelHandler)
+  }
   chart?.dispose()
 })
 </script>

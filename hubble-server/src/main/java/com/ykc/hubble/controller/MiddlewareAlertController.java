@@ -21,6 +21,8 @@ public class MiddlewareAlertController {
 
     private final MiddlewareAlertService alertService;
     private final MiddlewareMonitorService monitorService;
+    @org.springframework.beans.factory.annotation.Qualifier("queryExecutor")
+    private final java.util.concurrent.Executor queryExecutor;
 
     @GetMapping("/config/list")
     @Operation(summary = "查询告警配置列表")
@@ -88,7 +90,7 @@ public class MiddlewareAlertController {
                 if (instances == null) return null;
                 List<Map<String, Object>> checked = alertService.checkAlerts(type, instances);
                 return Map.entry(type, alertService.alertSummary(checked));
-            });
+            }, queryExecutor);
         }
 
         try {

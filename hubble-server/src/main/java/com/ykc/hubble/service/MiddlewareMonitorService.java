@@ -36,61 +36,61 @@ public class MiddlewareMonitorService {
     private static final java.util.concurrent.Semaphore EXTERNAL_CALL_SEM = new java.util.concurrent.Semaphore(3);
 
     // Grafana 查询缓存（避免频繁查询，2 分钟过期）
-    private List<Map<String, Object>> podCpuCache = null;
-    private long podCpuCacheTime = 0;
-    private List<Map<String, Object>> podMemCache = null;
-    private long podMemCacheTime = 0;
-    private List<Map<String, Object>> nodeCache = null;
-    private long nodeCacheTime = 0;
+    private volatile List<Map<String, Object>> podCpuCache = null;
+    private volatile long podCpuCacheTime = 0;
+    private volatile List<Map<String, Object>> podMemCache = null;
+    private volatile long podMemCacheTime = 0;
+    private volatile List<Map<String, Object>> nodeCache = null;
+    private volatile long nodeCacheTime = 0;
     private static final long CACHE_TTL_MS = 2 * 60 * 1000; // 2 分钟
 
     // Redis/MySQL 监控缓存（5 分钟过期，避免频繁调用 CloudMonitor）
-    private List<Map<String, Object>> redisInstancesCache = null;
-    private long redisInstancesCacheTime = 0;
-    private List<Map<String, Object>> mysqlInstancesCache = null;
-    private long mysqlInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> redisInstancesCache = null;
+    private volatile long redisInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> mysqlInstancesCache = null;
+    private volatile long mysqlInstancesCacheTime = 0;
     private static final long MONITOR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
     private static final long TRACE_DETAIL_TIMEOUT_MS = 10 * 1000; // 首查 trace 详情总超时，超时返回已完成部分
     private static final long METRIC_BATCH_TIMEOUT_MS = 60 * 1000; // 实例指标批量查询总超时（EXTERNAL_CALL_SEM 限流排队给足余量，降级时快速失败）
 
-    private List<Map<String, Object>> rocketmqInstancesCache = null;
-    private long rocketmqInstancesCacheTime = 0;
-    private List<Map<String, Object>> kafkaInstancesCache = null;
-    private long kafkaInstancesCacheTime = 0;
-    private List<Map<String, Object>> lindormInstancesCache = null;
-    private long lindormInstancesCacheTime = 0;
-    private List<Map<String, Object>> elasticsearchInstancesCache = null;
-    private long elasticsearchInstancesCacheTime = 0;
-    private List<Map<String, Object>> ossBucketsCache = null;
-    private long ossBucketsCacheTime = 0;
+    private volatile List<Map<String, Object>> rocketmqInstancesCache = null;
+    private volatile long rocketmqInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> kafkaInstancesCache = null;
+    private volatile long kafkaInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> lindormInstancesCache = null;
+    private volatile long lindormInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> elasticsearchInstancesCache = null;
+    private volatile long elasticsearchInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> ossBucketsCache = null;
+    private volatile long ossBucketsCacheTime = 0;
 
     // Top 指标缓存
-    private List<Map<String, Object>> rocketmqTopTopicsCache = null;
-    private long rocketmqTopTopicsCacheTime = 0;
-    private List<Map<String, Object>> kafkaTopPartitionsCache = null;
-    private long kafkaTopPartitionsCacheTime = 0;
-    private List<Map<String, Object>> redisBigKeysCache = null;
-    private long redisBigKeysCacheTime = 0;
-    private List<Map<String, Object>> redisSlowQueriesCache = null;
-    private long redisSlowQueriesCacheTime = 0;
-    private List<Map<String, Object>> mysqlSlowQueriesCache = null;
-    private long mysqlSlowQueriesCacheTime = 0;
-    private List<Map<String, Object>> mysqlTopTablesCache = null;
-    private long mysqlTopTablesCacheTime = 0;
-    private List<Map<String, Object>> lindormTopTablesCache = null;
-    private long lindormTopTablesCacheTime = 0;
-    private List<Map<String, Object>> elasticsearchTopIndicesCache = null;
-    private long elasticsearchTopIndicesCacheTime = 0;
+    private volatile List<Map<String, Object>> rocketmqTopTopicsCache = null;
+    private volatile long rocketmqTopTopicsCacheTime = 0;
+    private volatile List<Map<String, Object>> kafkaTopPartitionsCache = null;
+    private volatile long kafkaTopPartitionsCacheTime = 0;
+    private volatile List<Map<String, Object>> redisBigKeysCache = null;
+    private volatile long redisBigKeysCacheTime = 0;
+    private volatile List<Map<String, Object>> redisSlowQueriesCache = null;
+    private volatile long redisSlowQueriesCacheTime = 0;
+    private volatile List<Map<String, Object>> mysqlSlowQueriesCache = null;
+    private volatile long mysqlSlowQueriesCacheTime = 0;
+    private volatile List<Map<String, Object>> mysqlTopTablesCache = null;
+    private volatile long mysqlTopTablesCacheTime = 0;
+    private volatile List<Map<String, Object>> lindormTopTablesCache = null;
+    private volatile long lindormTopTablesCacheTime = 0;
+    private volatile List<Map<String, Object>> elasticsearchTopIndicesCache = null;
+    private volatile long elasticsearchTopIndicesCacheTime = 0;
 
     // DB 分库 / Druid 连接池 / JVM / 线程池 监控缓存（5 分钟）
-    private List<Map<String, Object>> dbInstancesCache = null;
-    private long dbInstancesCacheTime = 0;
-    private List<Map<String, Object>> druidInstancesCache = null;
-    private long druidInstancesCacheTime = 0;
-    private List<Map<String, Object>> jvmInstancesCache = null;
-    private long jvmInstancesCacheTime = 0;
-    private List<Map<String, Object>> threadPoolCache = null;
-    private long threadPoolCacheTime = 0;
+    private volatile List<Map<String, Object>> dbInstancesCache = null;
+    private volatile long dbInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> druidInstancesCache = null;
+    private volatile long druidInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> jvmInstancesCache = null;
+    private volatile long jvmInstancesCacheTime = 0;
+    private volatile List<Map<String, Object>> threadPoolCache = null;
+    private volatile long threadPoolCacheTime = 0;
 
     /**
      * 查询 Redis 监控概览
@@ -947,7 +947,7 @@ public class MiddlewareMonitorService {
                         item.put("errorRate5xx", 0.0);
                     }
                     return item;
-                }))
+                }, queryExecutor))
                 .toArray(java.util.concurrent.CompletableFuture[]::new);
 
             awaitAll(futures, METRIC_BATCH_TIMEOUT_MS, "OSS Bucket");
