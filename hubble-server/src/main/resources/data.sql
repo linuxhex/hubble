@@ -47,6 +47,7 @@ SELECT t.a, t.b, t.c, t.d, t.e, t.f, t.g FROM (
   SELECT 'rocketmq', NULL, 'messageAccumulation', 100000.00, 50000.00, '>', 1 UNION ALL
   SELECT 'rocketmq', NULL, 'consumeLatency', 60.00, 30.00, '>', 1 UNION ALL
   SELECT 'kafka', NULL, 'lag', 100000.00, 50000.00, '>', 1 UNION ALL
+  SELECT 'kafka', NULL, 'consumerGroupLag', 1000000.00, 100000.00, '>', 1 UNION ALL
   SELECT 'lindorm', NULL, 'cpuUsage', 80.00, 60.00, '>', 1 UNION ALL
   SELECT 'lindorm', NULL, 'diskUsage', 85.00, 70.00, '>', 1 UNION ALL
   SELECT 'elasticsearch', NULL, 'cpuUsage', 80.00, 60.00, '>', 1 UNION ALL

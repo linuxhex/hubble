@@ -298,6 +298,23 @@
       </el-table>
 
       <div class="sub-section">
+        <div class="sub-title">消费组堆积（按 Lag 排序）</div>
+        <el-table :data="kafkaConsumerGroupsData" stripe border size="small" style="width: 100%" max-height="420">
+          <el-table-column label="告警" width="70" align="center">
+            <template #default="{ row }">
+              <span :class="'alert-dot-' + (row.alertLevel || 'normal')"></span>
+            </template>
+          </el-table-column>
+          <el-table-column label="消费组" min-width="220" show-overflow-tooltip prop="consumerGroup" />
+          <el-table-column label="实例" width="160" show-overflow-tooltip prop="instanceName" />
+          <el-table-column label="Lag" width="140" align="right">
+            <template #default="{ row }">{{ Math.round(num(row.lag)).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="环境" width="90" align="center" prop="tagEnv" />
+        </el-table>
+      </div>
+
+      <div class="sub-section">
         <div class="sub-title">Top Partitions（按 Lag 排序）</div>
         <el-table :data="kafkaTopPartitionsData" stripe border size="small" style="width: 100%">
           <el-table-column label="#" width="50" prop="rank" align="center" />
@@ -579,7 +596,7 @@ import {
   getRedisInstances, getMysqlInstances, getRocketmqInstances, getKafkaInstances,
   getLindormInstances, getElasticsearchInstances, getOssBuckets,
   getPodCpuTop, getPodMemoryTop, getNodeOverview,
-  getRocketmqTopTopics, getKafkaTopPartitions,
+  getRocketmqTopTopics, getKafkaTopPartitions, getKafkaConsumerGroups,
   getRedisBigKeys, getRedisSlowQueries,
   getMysqlSlowQueries,
   getLindormTopTables, getElasticsearchTopIndices,
@@ -610,6 +627,7 @@ const threadPoolData = ref([])
 
 const rocketmqTopTopicsData = ref([])
 const kafkaTopPartitionsData = ref([])
+const kafkaConsumerGroupsData = ref([])
 const redisBigKeysData = ref([])
 const redisSlowQueriesData = ref([])
 const mysqlSlowQueriesData = ref([])
@@ -710,6 +728,8 @@ const fetchData = async (silent = false) => {
       await fetchAlerts('kafka', kafkaData)
       const topRes = await getKafkaTopPartitions()
       kafkaTopPartitionsData.value = topRes.data || []
+      const cgRes = await getKafkaConsumerGroups()
+      kafkaConsumerGroupsData.value = cgRes.data || []
     } else if (activeTab.value === 'lindorm') {
       const res = await getLindormInstances()
       lindormData.value = res.data || []

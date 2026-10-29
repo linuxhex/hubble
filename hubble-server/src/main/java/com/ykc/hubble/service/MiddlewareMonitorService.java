@@ -69,6 +69,8 @@ public class MiddlewareMonitorService {
     private volatile long rocketmqTopTopicsCacheTime = 0;
     private volatile List<Map<String, Object>> kafkaTopPartitionsCache = null;
     private volatile long kafkaTopPartitionsCacheTime = 0;
+    private volatile List<Map<String, Object>> kafkaConsumerGroupsCache = null;
+    private volatile long kafkaConsumerGroupsCacheTime = 0;
     private volatile List<Map<String, Object>> redisBigKeysCache = null;
     private volatile long redisBigKeysCacheTime = 0;
     private volatile List<Map<String, Object>> redisSlowQueriesCache = null;
@@ -1659,6 +1661,55 @@ public class MiddlewareMonitorService {
         } catch (Exception e) {
             log.error("查询 Kafka Top Partitions 失败: {}", e.getMessage());
             list = generateDemoKafkaTopPartitions();
+        }
+        return list;
+    }
+
+    /**
+     * Kafka 消费组级消息堆积（按 consumerGroup 维度，修复实例级聚合抹平消费组的盲区）。
+     * 数据源：阿里云 Prometheus AliyunKafka_message_accumulation（带 consumerGroup label）。
+     * 返回全部消费组（含 dev/uat），告警侧再按生产环境过滤。5 分钟缓存。
+     */
+    public List<Map<String, Object>> kafkaConsumerGroups() {
+        long now = System.currentTimeMillis();
+        if (kafkaConsumerGroupsCache != null && now - kafkaConsumerGroupsCacheTime < MONITOR_CACHE_TTL_MS) {
+            return kafkaConsumerGroupsCache;
+        }
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        try {
+            String aliyunDs = grafanaClient.getAliyunDsUid();
+            // 按 (instanceId, consumerGroup, ins_name, tag_env) 聚合，保留消费组维度
+            var rows = grafanaClient.queryInstant(
+                    "sum by (instanceId, consumerGroup, ins_name, tag_env) (AliyunKafka_message_accumulation)",
+                    aliyunDs);
+
+            for (var item : rows) {
+                String instanceId = String.valueOf(item.getOrDefault("instanceId", ""));
+                String consumerGroup = String.valueOf(item.getOrDefault("consumerGroup", ""));
+                if (consumerGroup.isEmpty() || "null".equals(consumerGroup)) continue;
+                String insName = String.valueOf(item.getOrDefault("ins_name", ""));
+                String tagEnv = String.valueOf(item.getOrDefault("tag_env", ""));
+                double lag = toDouble(item.get("value"));
+
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("instanceId", instanceId);
+                row.put("instanceName", "null".equals(insName) ? instanceId : insName);
+                row.put("consumerGroup", consumerGroup);
+                row.put("lag", lag);
+                row.put("tagEnv", "null".equals(tagEnv) ? "" : tagEnv);
+                list.add(row);
+            }
+
+            list.sort((a, b) -> Double.compare(
+                    toDouble(b.getOrDefault("lag", 0)),
+                    toDouble(a.getOrDefault("lag", 0))));
+
+            kafkaConsumerGroupsCache = list;
+            kafkaConsumerGroupsCacheTime = now;
+            log.info("Kafka 消费组堆积(from Prometheus): {} 个（已缓存）", list.size());
+        } catch (Exception e) {
+            log.error("查询 Kafka 消费组堆积失败: {}", e.getMessage());
         }
         return list;
     }

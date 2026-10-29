@@ -56,6 +56,10 @@ export function getKafkaTopPartitions() {
   return request.get('/middleware/kafka/top-partitions')
 }
 
+export function getKafkaConsumerGroups() {
+  return request.get('/middleware/kafka/consumer-groups')
+}
+
 export function getRedisBigKeys() {
   return request.get('/middleware/redis/big-keys')
 }

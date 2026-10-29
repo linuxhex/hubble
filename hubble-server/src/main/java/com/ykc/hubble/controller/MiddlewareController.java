@@ -88,6 +88,11 @@ public class MiddlewareController {
         return Result.success(middlewareMonitorService.kafkaTopPartitions());
     }
 
+    @GetMapping("/kafka/consumer-groups")
+    public Result<List<Map<String, Object>>> kafkaConsumerGroups() {
+        return Result.success(middlewareMonitorService.kafkaConsumerGroups());
+    }
+
     @GetMapping("/redis/big-keys")
     public Result<List<Map<String, Object>>> redisBigKeys() {
         return Result.success(middlewareMonitorService.redisBigKeys());

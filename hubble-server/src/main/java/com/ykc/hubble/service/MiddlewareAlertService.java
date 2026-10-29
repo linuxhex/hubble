@@ -394,12 +394,164 @@ public class MiddlewareAlertService {
                 try { totalRed += (long) f.getNow(0L); } catch (Exception ignored) {}
             }
 
+            // Kafka 消费组级堆积告警（独立于实例级，修复实例聚合抹平消费组的盲区）
+            try {
+                totalRed += checkKafkaConsumerGroupAlerts();
+            } catch (Exception e) {
+                log.warn("Kafka 消费组告警巡检异常: {}", e.getMessage());
+            }
+
             if (totalRed > 0) {
                 log.info("定时告警巡检完成：发现 {} 个红盘告警", totalRed);
             }
         } catch (Exception e) {
             log.error("定时告警巡检异常: {}", e.getMessage(), e);
         }
+    }
+
+    /**
+     * Kafka 消费组级堆积告警：按 consumerGroup 维度评估 consumerGroupLag 阈值。
+     * 只告警生产环境（tag_env=prod 或 ins_name 以 prod- 开头），排除 spark-kafka-source-* 临时组。
+     * 返回红盘消费组数量。
+     */
+    private long checkKafkaConsumerGroupAlerts() {
+        List<Map<String, Object>> groups = monitorService.kafkaConsumerGroups();
+        if (groups == null || groups.isEmpty()) return 0;
+
+        // 只取 consumerGroupLag 配置（与实例级 lag 解耦）
+        List<MiddlewareAlertConfig> configs = loadEnabledConfigs("kafka").stream()
+                .filter(c -> "consumerGroupLag".equals(c.getMetricName()))
+                .toList();
+        if (configs.isEmpty()) {
+            log.debug("Kafka 消费组告警：未配置 consumerGroupLag 阈值，跳过");
+            return 0;
+        }
+
+        long redCount = 0;
+        for (var group : groups) {
+            String consumerGroup = String.valueOf(group.getOrDefault("consumerGroup", ""));
+            String insName = String.valueOf(group.getOrDefault("instanceName", ""));
+            String tagEnv = String.valueOf(group.getOrDefault("tagEnv", ""));
+            String instanceId = String.valueOf(group.getOrDefault("instanceId", ""));
+
+            // 告警范围过滤：只生产 + 排除 spark 临时组
+            boolean isProd = "prod".equals(tagEnv) || insName.startsWith("prod-");
+            boolean isSparkTemp = consumerGroup.startsWith("spark-kafka-source");
+            if (!isProd || isSparkTemp) {
+                group.put("alertLevel", "normal");
+                group.put("alertDetails", List.of());
+                continue;
+            }
+
+            double value;
+            Object rawValue = group.get("lag");
+            if (rawValue instanceof Number n) {
+                value = n.doubleValue();
+            } else {
+                try { value = Double.parseDouble(String.valueOf(rawValue)); }
+                catch (NumberFormatException e) { continue; }
+            }
+
+            List<Map<String, Object>> alertDetails = new ArrayList<>();
+            String maxLevel = "normal";
+            for (var config : configs) {
+                if (!isTriggered(value, config)) continue;
+                boolean isRed = isRedLevel(value, config);
+
+                // 消费组无昨天值（resolveYesterdayValue 不支持消费组维度），按现有规则
+                // "昨天值不可得跳过过滤防漏报"，粉盘直接告警
+                Map<String, Object> detail = new LinkedHashMap<>();
+                detail.put("metricName", "consumerGroupLag");
+                detail.put("currentValue", Math.round(value));
+                detail.put("redThreshold", config.getRedThreshold());
+                detail.put("yellowThreshold", config.getYellowThreshold());
+                detail.put("compareType", config.getCompareType());
+                detail.put("level", isRed ? "red" : "yellow");
+
+                if ("red".equals(detail.get("level"))) {
+                    maxLevel = "red";
+                } else if (!"red".equals(maxLevel)) {
+                    maxLevel = "yellow";
+                }
+                alertDetails.add(detail);
+            }
+
+            group.put("alertLevel", maxLevel);
+            group.put("alertDetails", alertDetails);
+
+            if ("red".equals(maxLevel)) {
+                redCount++;
+                String alertKey = "mw:kafka:cg:" + instanceId + ":" + consumerGroup;
+                Long lastSent = alertLastSent.get(alertKey);
+                long nowMs = System.currentTimeMillis();
+                if (lastSent == null || nowMs - lastSent > ALERT_COOLDOWN_MS) {
+                    alertLastSent.put(alertKey, nowMs);
+                    pushKafkaConsumerGroupAlert(group, alertDetails);
+                }
+            }
+        }
+        return redCount;
+    }
+
+    /**
+     * 推送 Kafka 消费组堆积红盘告警：钉钉 + SSE + AI 事故调查。
+     */
+    private void pushKafkaConsumerGroupAlert(Map<String, Object> group, List<Map<String, Object>> details) {
+        String consumerGroup = String.valueOf(group.getOrDefault("consumerGroup", ""));
+        String instName = String.valueOf(group.getOrDefault("instanceName", ""));
+        long now = System.currentTimeMillis();
+        String timeStr = java.time.Instant.ofEpochMilli(now)
+                .atZone(java.time.ZoneId.of("Asia/Shanghai"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm"));
+
+        StringBuilder redDetails = new StringBuilder();
+        for (var d : details) {
+            if ("red".equals(d.get("level"))) {
+                if (redDetails.length() > 0) redDetails.append("; ");
+                redDetails.append(String.format("%s=%s（阈值 %s）", d.get("metricName"), d.get("currentValue"), d.get("redThreshold")));
+            }
+        }
+
+        StringBuilder md = new StringBuilder();
+        md.append("### 🔴 Kafka 消费组堆积告警\n\n");
+        md.append(String.format("> 消费组：**%s**\n\n", consumerGroup));
+        md.append(String.format("> 实例：**%s**\n\n", instName));
+        for (var d : details) {
+            if ("red".equals(d.get("level"))) {
+                md.append(String.format("> 堆积量: **%s**（红盘阈值 %s）\n\n",
+                        d.get("currentValue"), d.get("redThreshold")));
+            }
+        }
+        md.append(String.format("> 时间：%s\n\n", timeStr));
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("type", "middleware_alert");
+            payload.put("middlewareType", "kafka");
+            payload.put("instanceName", consumerGroup);
+            payload.put("time", now);
+            alertPushService.pushAlert(payload);
+        } catch (Exception e) {
+            log.warn("Kafka 消费组告警SSE推送失败: {}", e.getMessage());
+        }
+
+        try {
+            String dashboardUrl = monitorProperties.getDashboardUrl() + "/middleware";
+            dingTalkClient.sendRobotActionCard("Kafka 消费组堆积告警", md.toString(), "查看详情", dashboardUrl, true);
+        } catch (Exception e) {
+            log.warn("Kafka 消费组告警钉钉推送失败: {}", e.getMessage());
+        }
+
+        // AI 事故调查（红盘视为 ERROR 级；service_name 用 kafka/{consumerGroup}）
+        alertInvestigationService.submit(com.ykc.hubble.service.investigation.InvestigationContext.builder()
+                .alertSource("MW")
+                .alertType("kafka消费组堆积")
+                .alertName("Kafka 消费组堆积告警")
+                .serviceName("kafka/" + consumerGroup)
+                .severity("ERROR")
+                .alertValue(redDetails.toString())
+                .alertTimeMs(now)
+                .build());
     }
 
     private List<Map<String, Object>> fetchInstances(String middlewareType) {
